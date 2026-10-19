@@ -1,0 +1,1069 @@
+package service
+
+import (
+	"bufio"
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"math"
+	"net/http"
+	"sort"
+	"strings"
+	"sync"
+	"time"
+	"unicode"
+
+	"go.uber.org/zap"
+)
+
+// Blog retrieval-augmented Q&A.
+//
+// Pipeline: tokenize the question → score every published note against those tokens → pull in
+// one hop of wiki-link neighbours for the best hits → cut the winning notes into excerpts →
+// ask an upstream chat model to answer using only those excerpts, citing them by index.
+//
+// Everything runs against the *published* corpus only. The blog is a public surface, so the
+// answer must never quote an unpublished note; that restriction is enforced at corpus build
+// time rather than in the prompt, so a prompt injection cannot widen the scope.
+//
+// 博客检索增强问答。
+//
+// 流程：对问题分词 → 用这些词给每篇已发布笔记打分 → 把最佳命中笔记的一跳 wiki 链接邻居拉进来
+// → 将入选笔记切成片段 → 交给上游对话模型，要求它仅依据这些片段作答并按下标引用。
+//
+// 全程只针对「已发布」语料。博客是公开界面，回答绝不能引用未发布的笔记；该限制在语料构建阶段
+// 强制执行，而不是写进提示词，因此提示词注入无法扩大检索范围。
+
+// ── Public types ─────────────────────────────────────────────────────────────
+
+// AskRoute one upstream endpoint the service may call.
+// AskRoute 服务可调用的一条上游线路。
+type AskRoute struct {
+	Name        string
+	BaseURL     string
+	APIKey      string
+	Model       string
+	MinInterval time.Duration
+	Timeout     time.Duration
+
+	// Decoding parameters; nil means "leave it to the upstream".
+	// 解码参数；nil 表示交由上游默认。
+	Temperature      *float64
+	TopP             *float64
+	TopK             *int
+	PresencePenalty  *float64
+	FrequencyPenalty *float64
+	MinP             *float64
+
+	MaxTokens      int
+	EnableThinking bool
+	Retries        int
+}
+
+// AskOptions everything a single question needs. Assembled by the router layer from config, so
+// the service stays free of a config-package dependency.
+// AskOptions 单个问题所需的全部输入。由路由层从配置组装，使服务层不依赖 config 包。
+type AskOptions struct {
+	UID              int64
+	SiteName         string
+	Question         string
+	Routes           []AskRoute
+	TopK             int
+	MaxContextChars  int
+	CacheTTL         time.Duration
+	SystemPrompt     string
+	MaxQuestionChars int
+}
+
+// AskEvent is one Server-Sent Event frame. Type drives how the browser renders it.
+// AskEvent 一帧 Server-Sent Event，Type 决定浏览器如何渲染。
+type AskEvent struct {
+	Type      string         `json:"type"`                // retrieval | delta | citations | done | error
+	Query     string         `json:"query,omitempty"`     // echoed question
+	Terms     []string       `json:"terms,omitempty"`     // tokens actually used
+	Stage     string         `json:"stage,omitempty"`     // human-readable progress line
+	Sources   []*AskSource   `json:"sources,omitempty"`   // retrieved notes
+	Text      string         `json:"text,omitempty"`      // streamed answer fragment
+	// ThoughtChars is the running count of reasoning characters seen so far; it lets the
+	// browser show progress during a long thinking phase without the server forwarding every
+	// reasoning token twice.
+	// ThoughtChars 是累计到目前收到的推理字符数；它让浏览器在漫长思考阶段显示进度，
+	// 而服务端无需把每个推理 token 再转一遍。
+	ThoughtChars int            `json:"thoughtChars,omitempty"`
+	Citations    []*AskCitation `json:"citations,omitempty"` // cited notes, in display order
+	Model     string         `json:"model,omitempty"`     // upstream model that answered
+	Route     string         `json:"route,omitempty"`     // upstream route name
+	ElapsedMS int64          `json:"elapsedMs,omitempty"`
+	Message   string         `json:"message,omitempty"` // error text
+}
+
+// AskSource one retrieved note, shown while the answer streams.
+// AskSource 一篇被检索到的笔记，在回答流式输出期间展示。
+type AskSource struct {
+	ID      int64   `json:"id"`
+	Title   string  `json:"title"`
+	Slug    string  `json:"slug"`
+	URL     string  `json:"url"`
+	Score   float64 `json:"score"`
+	Via     string  `json:"via"`     // why it was retrieved
+	Excerpt string  `json:"excerpt"` // snippet sent to the model
+}
+
+// AskCitation one note referenced by the answer.
+// AskCitation 被回答引用的一篇笔记。
+type AskCitation struct {
+	Index   int    `json:"index"` // 1-based, matches [n] in the answer text
+	ID      int64  `json:"id"`
+	Title   string `json:"title"`
+	Slug    string `json:"slug"`
+	URL     string `json:"url"`
+	Excerpt string `json:"excerpt"`
+}
+
+// ── Corpus ───────────────────────────────────────────────────────────────────
+
+// askNote is one published note in the retrieval corpus.
+// askNote 检索语料中的一篇已发布笔记。
+type askNote struct {
+	ID      int64
+	VaultID int64
+	Path    string
+	Hash    string
+	Title   string
+	Slug    string
+	Plain   string // markdown-stripped body, used for matching and excerpting
+	Sort    float64
+}
+
+type askCorpus struct {
+	notes  []*askNote
+	byHash map[string]*askNote
+	byID   map[int64]*askNote
+	built  time.Time
+}
+
+// askRuntime holds per-service caches and pacing state.
+// askRuntime 持有服务级的缓存与节流状态。
+type askRuntime struct {
+	mu       sync.Mutex
+	corpus   map[int64]*askCorpus
+	lastRun  map[string]time.Time // route key -> last call start
+	cooldown map[string]time.Time // route key -> not before
+}
+
+// askRouteCooldown is how long a route is skipped after a failure.
+//
+// Without it, a route that is permanently broken (wrong key, exhausted quota, model not
+// provisioned) is retried on every single question, and because the preferred route is tried
+// first, every question pays its full round-trip before falling through. Measured against a
+// 403-ing endpoint that was 1–6 s of dead time per question.
+//
+// askRouteCooldown 是线路失败后被跳过的时长。
+//
+// 没有它，一条永久故障的线路（密钥错误、额度耗尽、模型未开通）会在每次提问时被重试，
+// 而首选线路又总是先试，于是每个问题都要先付掉它的整个往返。实测对一个持续返回 403 的
+// 端点，这是每次提问 1–6 秒的纯浪费。
+const askRouteCooldown = 120 * time.Second
+
+func (s *shareService) askRT() *askRuntime {
+	s.askMu.Lock()
+	defer s.askMu.Unlock()
+	if s.askRuntime == nil {
+		s.askRuntime = &askRuntime{
+			corpus:   make(map[int64]*askCorpus),
+			lastRun:  make(map[string]time.Time),
+			cooldown: make(map[string]time.Time),
+		}
+	}
+	return s.askRuntime
+}
+
+// askRouteKey identifies a route for pacing and cooldown bookkeeping.
+// askRouteKey 为节流与冷却记账标识一条线路。
+func askRouteKey(r AskRoute) string {
+	if r.Name != "" {
+		return r.Name
+	}
+	return r.BaseURL + "|" + r.Model
+}
+
+func (s *shareService) askRouteCooling(key string) bool {
+	rt := s.askRT()
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+	until, ok := rt.cooldown[key]
+	return ok && time.Now().Before(until)
+}
+
+func (s *shareService) askCoolRoute(key string) {
+	rt := s.askRT()
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+	rt.cooldown[key] = time.Now().Add(askRouteCooldown)
+}
+
+func (s *shareService) askClearCooling(key string) {
+	rt := s.askRT()
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+	delete(rt.cooldown, key)
+}
+
+// publishedCorpus builds (or reuses) the searchable set of published notes.
+//
+// Only shares that are still usable and point at a live note are included — the same rule the
+// blog index applies, so the Q&A entry and the article list can never disagree about what is
+// public.
+//
+// publishedCorpus 构建（或复用）可检索的已发布笔记集合。
+//
+// 只纳入仍然有效、且指向存活笔记的分享——与博客首页使用同一套规则，
+// 因此问答入口与文章列表对「什么算公开」的判断永远一致。
+func (s *shareService) publishedCorpus(ctx context.Context, uid int64, ttl time.Duration) (*askCorpus, error) {
+	rt := s.askRT()
+
+	if ttl > 0 {
+		rt.mu.Lock()
+		if c, ok := rt.corpus[uid]; ok && time.Since(c.built) < ttl {
+			rt.mu.Unlock()
+			return c, nil
+		}
+		rt.mu.Unlock()
+	}
+
+	shares, err := s.repo.ListByUID(ctx, uid, "created_at", "desc", 0, 2000)
+	if err != nil {
+		return nil, err
+	}
+
+	c := &askCorpus{
+		notes:  make([]*askNote, 0, len(shares)),
+		byHash: make(map[string]*askNote),
+		byID:   make(map[int64]*askNote),
+		built:  time.Now(),
+	}
+	seen := make(map[string]struct{})
+
+	for _, sh := range shares {
+		if !s.isShareUsable(sh) || sh.ResType != "note" {
+			continue
+		}
+		note, err := s.noteRepo.GetByID(ctx, sh.ResID, uid)
+		if err != nil || note == nil || note.Action == "delete" {
+			continue
+		}
+		if _, dup := seen[note.Path]; dup {
+			continue
+		}
+		seen[note.Path] = struct{}{}
+
+		n := &askNote{
+			ID:      note.ID,
+			VaultID: note.VaultID,
+			Path:    note.Path,
+			Hash:    note.PathHash,
+			Title:   strings.TrimSuffix(pathBase(note.Path), ".md"),
+			Slug:    s.BuildLocalShortLink(uid, sh.ID),
+			Plain:   blogPlainText(note.Content, 0),
+			Sort:    float64(firstNonZero(note.UpdatedTimestamp, note.Mtime, note.Ctime)),
+		}
+		c.notes = append(c.notes, n)
+		if n.Hash != "" {
+			c.byHash[n.Hash] = n
+		}
+		c.byID[n.ID] = n
+	}
+
+	if ttl > 0 {
+		rt.mu.Lock()
+		rt.corpus[uid] = c
+		rt.mu.Unlock()
+	}
+	return c, nil
+}
+
+// pathBase is filepath.Base without importing filepath just for one call site.
+// pathBase 等价于 filepath.Base，避免为一个调用点引入 filepath。
+func pathBase(p string) string {
+	p = strings.ReplaceAll(p, "\\", "/")
+	if i := strings.LastIndex(p, "/"); i >= 0 {
+		return p[i+1:]
+	}
+	return p
+}
+
+// ── Tokenizing ───────────────────────────────────────────────────────────────
+
+// askStopwords are dropped from the query. They are grammatical particles plus the words that
+// appear in almost every Chinese question, and keeping them would make every note look relevant.
+// askStopwords 会从查询中剔除。它们是虚词以及几乎出现在每个中文问句里的词，
+// 保留它们会让所有笔记看起来都相关。
+var askStopwords = map[string]struct{}{
+	"的": {}, "了": {}, "在": {}, "是": {}, "我": {}, "有": {}, "和": {}, "就": {}, "不": {},
+	"人": {}, "都": {}, "一": {}, "上": {}, "也": {}, "很": {}, "到": {}, "说": {}, "要": {},
+	"去": {}, "你": {}, "会": {}, "着": {}, "看": {}, "好": {}, "这": {}, "那": {}, "与": {},
+	"及": {}, "或": {}, "被": {}, "把": {}, "让": {}, "从": {}, "对": {}, "为": {}, "以": {},
+	"什么": {}, "怎么": {}, "怎样": {}, "如何": {}, "为什么": {}, "为何": {}, "哪里": {}, "哪些": {},
+	"哪个": {}, "多少": {}, "吗": {}, "呢": {}, "吧": {}, "啊": {}, "请": {}, "告诉": {}, "一下": {},
+	"介绍": {}, "解释": {}, "说明": {}, "关于": {}, "以及": {}, "还有": {}, "可以": {}, "能否": {},
+	"是否": {}, "区别": {}, "关系": {}, "意思": {}, "内容": {}, "笔记": {}, "the": {}, "a": {},
+	"an": {}, "is": {}, "are": {}, "of": {}, "to": {}, "and": {}, "what": {}, "how": {},
+	"why": {}, "where": {}, "which": {}, "please": {}, "tell": {}, "me": {}, "about": {},
+}
+
+// askTokenize splits a question into search tokens.
+//
+// Chinese has no spaces, so every CJK run of length >= 2 is expanded into overlapping
+// bigrams ("牙体解剖" -> 牙体/体解/解剖). Bigrams are the sweet spot here: single characters
+// match far too much, while whole runs demand an exact phrase and miss paraphrases.
+//
+// askTokenize 把问题切成检索词。
+//
+// 中文没有空格，因此长度 >= 2 的连续汉字串会展开成重叠二元组（"牙体解剖" → 牙体/体解/解剖）。
+// 二元组是这里的平衡点：单字命中过泛，而整串要求精确短语、会漏掉同义改写。
+func askTokenize(q string) []string {
+	var tokens []string
+	seen := make(map[string]struct{})
+	add := func(t string) {
+		t = strings.ToLower(strings.TrimSpace(t))
+		if t == "" {
+			return
+		}
+		if _, bad := askStopwords[t]; bad {
+			return
+		}
+		if _, dup := seen[t]; dup {
+			return
+		}
+		seen[t] = struct{}{}
+		tokens = append(tokens, t)
+	}
+
+	var cjk []rune
+	var latin []rune
+	flushCJK := func() {
+		if len(cjk) == 1 {
+			add(string(cjk))
+		} else if len(cjk) >= 2 {
+			for i := 0; i+2 <= len(cjk); i++ {
+				add(string(cjk[i : i+2]))
+			}
+			// The full run carries more signal than any single bigram, so keep it too.
+			if len(cjk) <= 8 {
+				add(string(cjk))
+			}
+		}
+		cjk = cjk[:0]
+	}
+	flushLatin := func() {
+		if len(latin) >= 2 {
+			add(string(latin))
+		}
+		latin = latin[:0]
+	}
+
+	for _, r := range q {
+		switch {
+		case unicode.Is(unicode.Han, r):
+			flushLatin()
+			cjk = append(cjk, r)
+		case unicode.IsLetter(r) || unicode.IsDigit(r):
+			flushCJK()
+			latin = append(latin, unicode.ToLower(r))
+		default:
+			flushCJK()
+			flushLatin()
+		}
+	}
+	flushCJK()
+	flushLatin()
+	return tokens
+}
+
+// ── Retrieval ────────────────────────────────────────────────────────────────
+
+type askHit struct {
+	note    *askNote
+	score   float64
+	matched []string
+	via     string
+}
+
+// askRetrieve scores every published note against the tokens.
+//
+// Title and path hits outweigh body hits because they describe what the note is *about*;
+// the body count is damped by length so a long note cannot win on raw volume alone.
+//
+// askRetrieve 用这些检索词给每篇已发布笔记打分。
+//
+// 标题与路径命中比正文命中权重更高，因为它们描述笔记「是关于什么的」；
+// 正文词频按长度衰减，避免长笔记仅凭体量取胜。
+func askRetrieve(c *askCorpus, tokens []string, topK int) []*askHit {
+	if len(tokens) == 0 || len(c.notes) == 0 {
+		return nil
+	}
+
+	hits := make([]*askHit, 0, len(c.notes))
+	for _, n := range c.notes {
+		title := strings.ToLower(n.Title)
+		path := strings.ToLower(n.Path)
+		body := strings.ToLower(n.Plain)
+
+		var score float64
+		var matched []string
+		for _, t := range tokens {
+			tc := strings.Count(title, t)
+			pc := strings.Count(path, t)
+			bc := strings.Count(body, t)
+			if tc == 0 && pc == 0 && bc == 0 {
+				continue
+			}
+			matched = append(matched, t)
+			score += float64(tc)*8 + float64(pc)*3 + float64(bc)
+		}
+		if score <= 0 {
+			continue
+		}
+		// Damp by length: log keeps a very long note from dominating purely on volume.
+		score = score / (1 + math.Log1p(float64(len([]rune(n.Plain)))/200))
+		hits = append(hits, &askHit{note: n, score: score, matched: matched, via: "直接命中"})
+	}
+
+	sort.SliceStable(hits, func(i, j int) bool { return hits[i].score > hits[j].score })
+	if topK > 0 && len(hits) > topK {
+		hits = hits[:topK]
+	}
+	return hits
+}
+
+// askExpandLinks pulls in one hop of wiki-link neighbours around the top hits.
+//
+// This is what makes a question land on a note that never repeats the question's wording:
+// the neighbour is admitted because the note actually links to it, an editorial signal the
+// text match alone cannot see. Neighbours enter at a fraction of the parent's score so they
+// never outrank a direct hit.
+//
+// askExpandLinks 为最佳命中笔记拉入一跳 wiki 链接邻居。
+//
+// 这正是让问题能落到「从未复述问题措辞」的笔记上的原因：邻居之所以入选，是因为笔记确实链接到它，
+// 这是纯文本匹配看不到的编辑信号。邻居以父节点得分的若干分之一进入，因此永远不会盖过直接命中。
+func askExpandLinks(ctx context.Context, s *shareService, uid int64, c *askCorpus, hits []*askHit, limit int) []*askHit {
+	if s.noteLinkRepo == nil || len(hits) == 0 {
+		return hits
+	}
+	present := make(map[int64]int, len(hits))
+	for i, h := range hits {
+		present[h.note.ID] = i
+	}
+	var extra []*askHit
+
+	for _, h := range hits {
+		base := h.note
+
+		if out, err := s.noteLinkRepo.GetOutlinks(ctx, base.ID, uid); err == nil {
+			for _, l := range out {
+				nb, ok := c.byHash[l.TargetPathHash]
+				if !ok || nb.ID == base.ID {
+					continue
+				}
+				if _, dup := present[nb.ID]; dup {
+					continue
+				}
+				present[nb.ID] = -1
+				extra = append(extra, &askHit{
+					note:  nb,
+					score: h.score * 0.45,
+					via:   "出链自《" + base.Title + "》",
+				})
+			}
+		}
+
+		if base.Hash != "" {
+			if in, err := s.noteLinkRepo.GetBacklinks(ctx, base.Hash, base.VaultID, uid); err == nil {
+				for _, l := range in {
+					nb, ok := c.byID[l.SourceNoteID]
+					if !ok || nb.ID == base.ID {
+						continue
+					}
+					if _, dup := present[nb.ID]; dup {
+						continue
+					}
+					present[nb.ID] = -1
+					extra = append(extra, &askHit{
+						note:  nb,
+						score: h.score * 0.4,
+						via:   "入链指向《" + base.Title + "》",
+					})
+				}
+			}
+		}
+	}
+
+	sort.SliceStable(extra, func(i, j int) bool { return extra[i].score > extra[j].score })
+	if len(extra) > limit {
+		extra = extra[:limit]
+	}
+	return append(hits, extra...)
+}
+
+// askExcerpt cuts a readable window around the first token hit.
+//
+// The first 200 characters of a note are frequently frontmatter, a title repeat or a table of
+// contents, so anchoring the window on the matched term is what makes the excerpt actually
+// answer the question.
+//
+// askExcerpt 在首个检索词命中处切出一段可读窗口。
+//
+// 笔记开头 200 字往往是 frontmatter、标题重复或目录，因此把窗口锚定在命中词上，
+// 摘录内容才真的与问题相关。
+func askExcerpt(plain string, tokens []string, budget int) string {
+	if plain == "" {
+		return ""
+	}
+	runes := []rune(plain)
+	if len(runes) <= budget {
+		return plain
+	}
+
+	lower := []rune(strings.ToLower(plain))
+	best := -1
+	for _, t := range tokens {
+		tr := []rune(t)
+		if len(tr) == 0 {
+			continue
+		}
+		if idx := runeIndex(lower, tr); idx >= 0 {
+			if best < 0 || idx < best {
+				best = idx
+			}
+		}
+	}
+	if best < 0 {
+		return string(runes[:budget]) + "…"
+	}
+
+	start := best - budget/3
+	if start < 0 {
+		start = 0
+	}
+	end := start + budget
+	if end > len(runes) {
+		end = len(runes)
+		start = end - budget
+		if start < 0 {
+			start = 0
+		}
+	}
+	out := string(runes[start:end])
+	if start > 0 {
+		out = "…" + out
+	}
+	if end < len(runes) {
+		out += "…"
+	}
+	return out
+}
+
+func runeIndex(haystack, needle []rune) int {
+	if len(needle) == 0 || len(haystack) < len(needle) {
+		return -1
+	}
+	for i := 0; i+len(needle) <= len(haystack); i++ {
+		ok := true
+		for j := range needle {
+			if haystack[i+j] != needle[j] {
+				ok = false
+				break
+			}
+		}
+		if ok {
+			return i
+		}
+	}
+	return -1
+}
+
+// ── Prompt assembly ──────────────────────────────────────────────────────────
+
+type upstreamMessage struct {
+	Role    string `json:"role"`
+	Content string `json:"content"`
+}
+
+const defaultAskSystemPrompt = `你是这个博客的知识库助手。你只能依据「资料片段」中的内容作答。
+
+规则：
+1. 用简体中文回答，条理清晰；能用要点就用要点，不要寒暄、不要复述问题。
+2. 每个来自资料的结论后面必须标注来源编号，例如 [1] 或 [2][3]，编号对应资料片段的编号。
+3. 资料里没有提到的内容，直接回答「已发布的笔记里没有相关内容」，不要凭常识补全或编造。
+4. 不要输出资料片段以外的链接或文件名。
+5. 如果资料之间说法不一致，指出分歧并分别标注来源。`
+
+// askBuildMessages assembles the system + user turns.
+// askBuildMessages 组装 system 与 user 两条消息。
+func askBuildMessages(opts AskOptions, hits []*askHit, excerpts map[int64]string) []upstreamMessage {
+	sys := strings.TrimSpace(opts.SystemPrompt)
+	if sys == "" {
+		sys = defaultAskSystemPrompt
+	}
+
+	var b strings.Builder
+	fmt.Fprintf(&b, "【资料片段】共 %d 条\n\n", len(hits))
+	for i, h := range hits {
+		fmt.Fprintf(&b, "[%d] 《%s》\n%s\n\n", i+1, h.note.Title, excerpts[h.note.ID])
+	}
+	fmt.Fprintf(&b, "【问题】\n%s\n\n请依据上述资料回答，并按规则标注来源编号。", opts.Question)
+
+	return []upstreamMessage{
+		{Role: "system", Content: sys},
+		{Role: "user", Content: b.String()},
+	}
+}
+
+// ── Upstream streaming ───────────────────────────────────────────────────────
+
+type upstreamChunk struct {
+	Choices []struct {
+		Delta struct {
+			Content string `json:"content"`
+			// Reasoning models stream their reasoning phase here, before any answer token.
+			// 推理模型在首个回答 token 之前，把推理阶段的内容流在这里。
+			ReasoningContent string `json:"reasoning_content"`
+		} `json:"delta"`
+		FinishReason *string `json:"finish_reason"`
+	} `json:"choices"`
+	Error *struct {
+		Message string `json:"message"`
+		Type    string `json:"type"`
+	} `json:"error"`
+}
+
+// askCallRoute streams one completion, invoking onDelta for every answer fragment and
+// onReasoning for every reasoning fragment.
+//
+// onDelta returns false to stop early (e.g. the client hung up). A route that fails before the
+// first fragment is reported with started=false so the caller may fall back to the next route;
+// once any text has been emitted the failure can no longer be papered over.
+//
+// askCallRoute 流式请求一次补全，每收到一个回答片段调用 onDelta，每收到一个推理片段调用
+// onReasoning。
+//
+// onDelta 返回 false 可提前终止（例如客户端断开）。在收到首个片段之前失败的线路会以
+// started=false 报回，调用方可以改用下一条线路；一旦已经输出过文本，这次失败就无法再掩盖。
+func (s *shareService) askCallRoute(ctx context.Context, r AskRoute, msgs []upstreamMessage,
+	onDelta func(string) bool, onReasoning func(string) bool) (started bool, err error) {
+
+	if r.Timeout <= 0 {
+		r.Timeout = 300 * time.Second
+	}
+	maxTokens := r.MaxTokens
+	if maxTokens <= 0 {
+		maxTokens = 3000
+	}
+
+	payload := map[string]any{
+		"model":       r.Model,
+		"messages":    msgs,
+		"stream":      true,
+		"max_tokens":  maxTokens,
+		"temperature": 0.1,
+	}
+	// Only send what the route actually specifies. Sending every knob on every route is how a
+	// wrong default silently overrides a provider's tuned baseline.
+	//
+	// 只发送线路真正指定的参数。把每个旋钮都发出去，正是错误的默认值静默覆盖供应商调优基线的方式。
+	set := func(k string, v any) { payload[k] = v }
+	if r.Temperature != nil {
+		set("temperature", *r.Temperature)
+	}
+	if r.TopP != nil {
+		set("top_p", *r.TopP)
+	}
+	if r.TopK != nil {
+		set("top_k", *r.TopK)
+	}
+	if r.PresencePenalty != nil {
+		set("presence_penalty", *r.PresencePenalty)
+	}
+	if r.FrequencyPenalty != nil {
+		set("frequency_penalty", *r.FrequencyPenalty)
+	}
+	if r.MinP != nil {
+		set("min_p", *r.MinP)
+	}
+	// enable_thinking is sent as an explicit true/false, never omitted.
+	//
+	// Omitting it looks harmless but is not: SiliconFlow's Qwen3.5 family ships with reasoning
+	// ON by default, so "leave the field out" means "let the model think" — the opposite of what
+	// a false setting is asking for. Measured with the field omitted, a 4096-token budget went
+	// entirely into 5131 characters of reasoning and the answer came back empty every time.
+	// Providers that do not know the field ignore it.
+	//
+	// enable_thinking 一律显式发送 true/false，绝不省略。
+	//
+	// 省略看似无害，其实不然：SiliconFlow 的 Qwen3.5 系列默认开启推理，
+	// 因此「不带这个字段」等于「让模型去思考」——与 false 想要的正好相反。
+	// 实测省略该字段时，4096 token 的预算被 5131 字推理全部吃掉，回答每次都是空的。
+	// 不认识该字段的供应商会忽略它。
+	set("enable_thinking", r.EnableThinking)
+
+	body, _ := json.Marshal(payload)
+	url := strings.TrimRight(r.BaseURL, "/") + "/chat/completions"
+
+	callCtx, cancel := context.WithTimeout(ctx, r.Timeout)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(callCtx, http.MethodPost, url, bytes.NewReader(body))
+	if err != nil {
+		return false, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "text/event-stream")
+	req.Header.Set("Authorization", "Bearer "+r.APIKey)
+
+	resp, err := askHTTPClient.Do(req)
+	if err != nil {
+		return false, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
+		return false, fmt.Errorf("upstream %s HTTP %d: %s", r.Name, resp.StatusCode,
+			strings.TrimSpace(string(raw)))
+	}
+
+	reader := bufio.NewReaderSize(resp.Body, 64*1024)
+	for {
+		line, readErr := reader.ReadString('\n')
+		if len(line) > 0 {
+			trimmed := strings.TrimSpace(line)
+			if strings.HasPrefix(trimmed, "data:") {
+				payload := strings.TrimSpace(strings.TrimPrefix(trimmed, "data:"))
+				if payload != "" && payload != "[DONE]" {
+					var chunk upstreamChunk
+					if json.Unmarshal([]byte(payload), &chunk) == nil {
+						if chunk.Error != nil && chunk.Error.Message != "" {
+							if !started {
+								return false, fmt.Errorf("upstream %s: %s", r.Name, chunk.Error.Message)
+							}
+							return true, fmt.Errorf("upstream %s: %s", r.Name, chunk.Error.Message)
+						}
+						for _, ch := range chunk.Choices {
+							if ch.Delta.ReasoningContent != "" && onReasoning != nil {
+								if !onReasoning(ch.Delta.ReasoningContent) {
+									return started, nil
+								}
+							}
+							if ch.Delta.Content == "" {
+								continue
+							}
+							started = true
+							if !onDelta(ch.Delta.Content) {
+								return true, nil
+							}
+						}
+					}
+				}
+			}
+		}
+		if readErr != nil {
+			if readErr == io.EOF {
+				return started, nil
+			}
+			return started, readErr
+		}
+	}
+}
+
+// askHTTPClient is shared so keep-alive connections are reused across questions.
+// askHTTPClient 共享使用，使连接在多次提问之间得以复用。
+var askHTTPClient = &http.Client{
+	Timeout: 0, // per-route context deadline governs
+	Transport: &http.Transport{
+		MaxIdleConns:        16,
+		MaxIdleConnsPerHost: 4,
+		IdleConnTimeout:     90 * time.Second,
+	},
+}
+
+// askWaitPacing blocks until the route's minimum interval has elapsed.
+// askWaitPacing 阻塞到该线路的最小间隔已过。
+func (s *shareService) askWaitPacing(ctx context.Context, r AskRoute) error {
+	if r.MinInterval <= 0 {
+		return nil
+	}
+	rt := s.askRT()
+	key := r.Name
+	if key == "" {
+		key = r.BaseURL + "|" + r.Model
+	}
+
+	rt.mu.Lock()
+	last, ok := rt.lastRun[key]
+	now := time.Now()
+	var wait time.Duration
+	if ok {
+		if elapsed := now.Sub(last); elapsed < r.MinInterval {
+			wait = r.MinInterval - elapsed
+		}
+	}
+	rt.lastRun[key] = now.Add(wait)
+	rt.mu.Unlock()
+
+	if wait <= 0 {
+		return nil
+	}
+	timer := time.NewTimer(wait)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// ── Orchestration ────────────────────────────────────────────────────────────
+
+// Ask answers a question against the published corpus, emitting events as it goes.
+//
+// emit is called synchronously from this goroutine; returning an error from it aborts the run
+// (the SSE writer uses that to stop when the browser disconnects).
+//
+// Ask 针对已发布语料回答问题，并在过程中发出事件。
+//
+// emit 在本 goroutine 中同步调用；它返回错误会中止整个流程（SSE 写入器借此在浏览器断开时停止）。
+func (s *shareService) Ask(ctx context.Context, opts AskOptions, emit func(AskEvent) error) error {
+	start := time.Now()
+
+	question := strings.TrimSpace(opts.Question)
+	if question == "" {
+		return emit(AskEvent{Type: "error", Message: "问题不能为空"})
+	}
+	if opts.MaxQuestionChars > 0 && len([]rune(question)) > opts.MaxQuestionChars {
+		return emit(AskEvent{Type: "error",
+			Message: fmt.Sprintf("问题过长（上限 %d 字）", opts.MaxQuestionChars)})
+	}
+	if len(opts.Routes) == 0 {
+		return emit(AskEvent{Type: "error", Message: "服务端未配置可用的模型线路"})
+	}
+
+	topK := opts.TopK
+	if topK <= 0 {
+		topK = 6
+	}
+	budget := opts.MaxContextChars
+	if budget <= 0 {
+		budget = 14000
+	}
+
+	if err := emit(AskEvent{Type: "stage", Stage: "正在解析问题…"}); err != nil {
+		return err
+	}
+	tokens := askTokenize(question)
+	if len(tokens) == 0 {
+		return emit(AskEvent{Type: "error", Message: "没能在问题里识别出可用于检索的关键词"})
+	}
+
+	// The corpus size is not known until it is built, so the first line stays count-free rather
+	// than printing a placeholder that would immediately be contradicted.
+	// 语料规模要等到构建完成才知道，因此第一行不带数字，避免先印一个随后立刻被推翻的占位值。
+	if err := emit(AskEvent{Type: "stage",
+		Stage: "正在检索已发布笔记…", Query: question, Terms: tokens}); err != nil {
+		return err
+	}
+
+	corpus, err := s.publishedCorpus(ctx, opts.UID, opts.CacheTTL)
+	if err != nil {
+		return emit(AskEvent{Type: "error", Message: "读取已发布笔记失败：" + err.Error()})
+	}
+	if len(corpus.notes) == 0 {
+		return emit(AskEvent{Type: "error", Message: "还没有已发布的笔记可供检索"})
+	}
+
+	hits := askRetrieve(corpus, tokens, topK)
+	if err := emit(AskEvent{Type: "stage",
+		Stage: fmt.Sprintf("在 %d 篇笔记中命中 %d 篇，正在扩展关联笔记…", len(corpus.notes), len(hits))}); err != nil {
+		return err
+	}
+
+	hits = askExpandLinks(ctx, s, opts.UID, corpus, hits, topK)
+	if len(hits) == 0 {
+		if err := emit(AskEvent{Type: "delta",
+			Text: "已发布的笔记里没有检索到与该问题相关的内容。"}); err != nil {
+			return err
+		}
+		return emit(AskEvent{Type: "done", ElapsedMS: time.Since(start).Milliseconds()})
+	}
+
+	// Excerpt budget is split evenly, with a floor so a many-hit question still gets substance.
+	per := budget / len(hits)
+	if per < 400 {
+		per = 400
+	}
+	if per > 2600 {
+		per = 2600
+	}
+
+	excerpts := make(map[int64]string, len(hits))
+	sources := make([]*AskSource, 0, len(hits))
+	for _, h := range hits {
+		ex := askExcerpt(h.note.Plain, tokens, per)
+		excerpts[h.note.ID] = ex
+		title := h.note.Title
+		if title == "" {
+			title = pathBase(h.note.Path)
+		}
+		sources = append(sources, &AskSource{
+			ID:      h.note.ID,
+			Title:   title,
+			Slug:    h.note.Slug,
+			URL:     "/blog/" + h.note.Slug,
+			Score:   math.Round(h.score*100) / 100,
+			Via:     h.via,
+			Excerpt: blogPlainText(ex, 160),
+		})
+	}
+
+	if err := emit(AskEvent{Type: "retrieval", Sources: sources, Terms: tokens}); err != nil {
+		return err
+	}
+
+	if err := emit(AskEvent{Type: "stage", Stage: "正在生成回答…"}); err != nil {
+		return err
+	}
+
+	msgs := askBuildMessages(opts, hits, excerpts)
+
+	var lastErr error
+	skipped := 0
+	for i, route := range opts.Routes {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		key := askRouteKey(route)
+		if s.askRouteCooling(key) {
+			skipped++
+			continue
+		}
+		if err := s.askWaitPacing(ctx, route); err != nil {
+			return err
+		}
+		if err := emit(AskEvent{Type: "route", Route: route.Name, Model: route.Model}); err != nil {
+			return err
+		}
+
+		// Reasoning models emit their thinking phase before any answer token. It is streamed
+		// out as its own event type so the browser can show the model actually working,
+		// separately from the answer text.
+		//
+		// 推理模型在首个回答 token 之前先输出思考阶段。它以自己的事件类型流出，
+		// 使浏览器能把「模型正在推理」与正式回答分开呈现。
+		reasonLen := 0
+		onReasoning := func(text string) bool {
+			reasonLen += len([]rune(text))
+			return emit(AskEvent{Type: "thinking", Text: text, ThoughtChars: reasonLen}) == nil
+		}
+
+		var started bool
+		var callErr error
+		attempts := 1 + route.Retries
+		if attempts < 1 {
+			attempts = 1
+		}
+		for attempt := 0; attempt < attempts; attempt++ {
+			if attempt > 0 {
+				// A transport-level failure (TLS reset, dropped stream) is worth one clean
+				// retry on a fresh connection: the first attempt proves nothing about the second.
+				if err := emit(AskEvent{Type: "stage",
+					Stage: fmt.Sprintf("连接中断，重试第 %d 次…", attempt)}); err != nil {
+					return err
+				}
+				time.Sleep(500 * time.Millisecond)
+			}
+			started, callErr = s.askCallRoute(ctx, route, msgs, func(text string) bool {
+				return emit(AskEvent{Type: "delta", Text: text}) == nil
+			}, onReasoning)
+			if callErr == nil || started {
+				break
+			}
+		}
+
+		if callErr == nil {
+			s.askClearCooling(key)
+			cites := askBuildCitations(hits, sources)
+			if err := emit(AskEvent{Type: "citations", Citations: cites,
+				Route: route.Name, Model: route.Model,
+				ElapsedMS: time.Since(start).Milliseconds()}); err != nil {
+				return err
+			}
+			return emit(AskEvent{Type: "done", Route: route.Name, Model: route.Model,
+				ElapsedMS: time.Since(start).Milliseconds()})
+		}
+
+		lastErr = callErr
+		s.logger.Warn("blog ask route failed",
+			zap.String("route", route.Name), zap.String("model", route.Model),
+			zap.String("error", callErr.Error()), zap.Int("routeIndex", i))
+
+		if started {
+			// Text already reached the browser; a silent switch would splice two answers.
+			return emit(AskEvent{Type: "error",
+				Message: "上游在输出中途中断：" + callErr.Error()})
+		}
+
+		// The caller left. Do not cool the route down and do not try the next one either —
+		// there is nobody left to answer.
+		// 调用方已离开：不冷却该线路，也不必再试下一条——已经没有人等着这个回答了。
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		s.askCoolRoute(key)
+
+		if i < len(opts.Routes)-1 {
+			if err := emit(AskEvent{Type: "stage",
+				Stage: "当前线路不可用，正在切换备用线路…"}); err != nil {
+				return err
+			}
+		}
+	}
+
+	// Every route was either cooling down from a recent failure or failed just now. Say which,
+	// because "all routes unavailable" reads like a config problem while "cooling down" is
+	// simply "try again shortly".
+	var msg string
+	switch {
+	case skipped == len(opts.Routes):
+		msg = fmt.Sprintf("所有模型线路都在冷却中（最近均失败过），约 %d 秒后再试即可",
+			int(askRouteCooldown.Seconds()))
+	case lastErr != nil:
+		msg = "所有模型线路都不可用：" + lastErr.Error()
+	default:
+		msg = "所有模型线路都不可用"
+	}
+	return emit(AskEvent{Type: "error", Message: msg})
+}
+
+// askBuildCitations maps the retrieved notes to 1-based indexes so the browser can resolve the
+// [n] markers the model emitted.
+// askBuildCitations 把检索到的笔记映射为 1 起始的下标，供浏览器解析模型输出的 [n] 标记。
+func askBuildCitations(hits []*askHit, sources []*AskSource) []*AskCitation {
+	out := make([]*AskCitation, 0, len(hits))
+	for i, h := range hits {
+		var src *AskSource
+		if i < len(sources) {
+			src = sources[i]
+		}
+		c := &AskCitation{Index: i + 1, ID: h.note.ID, Slug: h.note.Slug, URL: "/blog/" + h.note.Slug}
+		c.Title = h.note.Title
+		if src != nil {
+			c.Title = src.Title
+			c.Excerpt = src.Excerpt
+		}
+		out = append(out, c)
+	}
+	return out
+}
