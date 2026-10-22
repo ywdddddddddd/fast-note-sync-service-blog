@@ -8,6 +8,7 @@ import (
 	"github.com/haierkeys/fast-note-sync-service/internal/domain"
 	"github.com/haierkeys/fast-note-sync-service/internal/dto"
 	"github.com/haierkeys/fast-note-sync-service/pkg/code"
+	"github.com/haierkeys/fast-note-sync-service/pkg/util"
 )
 
 // Local knowledge graph: the sub-graph around one article.
@@ -327,6 +328,33 @@ func (s *shareService) loadLocalGraphIndex(ctx context.Context, uid int64) (*loc
 		idx.byNoteID[node.NoteID] = node
 		if node.PathHash != "" {
 			idx.byPathHash[node.PathHash] = node
+		}
+		// Obsidian's wiki syntax rarely spells out the whole path: `[[note]]` and
+		// `[[folder/note]]` are both more common than the full vault path, and none of them
+		// carry the .md extension. The link table stores the raw text the author typed, so
+		// indexing note.Path alone misses almost every real link — measured on this vault,
+		// 13 of 4666 link rows resolved to a published note, which is why the graph showed
+		// 144 nodes joined by 10 edges.
+		//
+		// Registering every suffix variation makes a link resolve no matter how much of the
+		// path its author wrote. Existing entries win, so a fully qualified link still takes
+		// precedence over a bare name that happens to collide.
+		//
+		// Obsidian 的 wiki 语法很少写全路径：`[[笔记]]` 与 `[[文件夹/笔记]]` 都比完整仓库
+		// 路径更常见，而且它们都不带 .md。链接表存的是作者原样敲下的文本，所以只对
+		// note.Path 取哈希会漏掉几乎全部真实链接——实测本仓库 4666 条链接里只有 13 条
+		// 能解析到已发布笔记，这正是图谱显示 144 个节点却只有 10 条连线的原因。
+		//
+		// 把每个后缀变体都注册进去，作者写了多少层路径都能解析到同一节点。已存在的条目
+		// 优先，因此完整路径仍然胜过恰好重名的裸文件名。
+		for _, variation := range util.GeneratePathVariations(node.Path) {
+			h := util.EncodeHash32(variation)
+			if h == "" {
+				continue
+			}
+			if _, exists := idx.byPathHash[h]; !exists {
+				idx.byPathHash[h] = node
+			}
 		}
 	}
 	return idx, nil
