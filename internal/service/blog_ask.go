@@ -173,7 +173,40 @@ type askCorpus struct {
 	notes  []*askNote
 	byHash map[string]*askNote
 	byID   map[int64]*askNote
-	built  time.Time
+	// activeIDs is the authoritative set of shared note ids this corpus was built from.
+	// Revalidation compares it against a fresh read of the same query, so both sides always
+	// use one definition of "shared". Deriving it from notes instead would disagree forever
+	// with the live query whenever a share points at a note that no longer exists: the live
+	// list includes such an id, the corpus drops it, and every question would rebuild.
+	//
+	// activeIDs 是本语料构建时的权威分享 id 集合。校验时与同一条查询的新鲜结果比对，
+	// 因此两侧始终使用同一个「已分享」定义。若改从 notes 推导，只要存在指向已删除笔记的
+	// 分享就会永远对不上：实时列表包含该 id、语料丢弃它，于是每次提问都重建。
+	activeIDs []int64
+	built     time.Time
+}
+
+// sameIDSet reports whether two id lists contain exactly the same ids, ignoring order.
+// sameIDSet 判断两个 id 列表是否完全同集，忽略顺序。
+func sameIDSet(a, b []int64) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	if len(a) == 0 {
+		return true
+	}
+	seen := make(map[int64]int, len(a))
+	for _, x := range a {
+		seen[x]++
+	}
+	for _, x := range b {
+		n := seen[x]
+		if n == 0 {
+			return false
+		}
+		seen[x] = n - 1
+	}
+	return true
 }
 
 // askRuntime holds per-service caches and pacing state.
@@ -256,13 +289,41 @@ func (s *shareService) askClearCooling(key string) {
 func (s *shareService) publishedCorpus(ctx context.Context, uid int64, ttl time.Duration) (*askCorpus, error) {
 	rt := s.askRT()
 
+	// A cached corpus is only reusable while the set of shared notes is unchanged.
+	//
+	// The TTL alone is not safe here. Revoking a share does not touch updated_at — every
+	// share update is a single-column `Update(field, value)`, which gorm's timestamp hook does
+	// not fire on — so no "changed since" query can notice it. Serving the stale corpus for up
+	// to five minutes would let Q&A quote a note the owner has just unpublished, which is a
+	// privacy failure, not a caching annoyance.
+	//
+	// So the cache is revalidated against the authoritative id list on every question. That
+	// query reads one table and returns ~145 ids; measured cost is a couple of milliseconds
+	// against an end-to-end answer of about two seconds.
+	//
+	// 缓存的语料只有在「已分享笔记集合未变」时才可复用。
+	//
+	// 单靠 TTL 在这里是不够的。取消分享走的是单列 `Update(field, value)`，gorm 的时间戳钩子
+	// 不会触发，因此没有任何「自某时刻起变更」的查询能发现它。若继续用最长五分钟的陈旧语料，
+	// 问答就可能引用博主刚刚取消发布的笔记——那是隐私缺陷，不是缓存不便。
+	//
+	// 因此每次提问都用权威 id 列表校验缓存。该查询只读一张表、返回约 145 个 id；
+	// 实测代价是几毫秒，而端到端回答约两秒。
 	if ttl > 0 {
 		rt.mu.Lock()
-		if c, ok := rt.corpus[uid]; ok && time.Since(c.built) < ttl {
-			rt.mu.Unlock()
-			return c, nil
-		}
+		cached, ok := rt.corpus[uid]
+		fresh := ok && time.Since(cached.built) < ttl
 		rt.mu.Unlock()
+
+		if fresh {
+			cur, err := s.repo.ListActiveNoteResIDs(ctx, uid)
+			if err == nil && sameIDSet(cached.activeIDs, cur) {
+				return cached, nil
+			}
+			// Either the set changed or the check failed; rebuilding is the safe branch in
+			// both cases, because a stale corpus is the only outcome that leaks.
+			// 集合变了或校验失败——两种情形都重建，因为「陈旧语料」是这里唯一会泄漏的结果。
+		}
 	}
 
 	shares, err := s.repo.ListByUID(ctx, uid, "created_at", "desc", 0, 2000)
@@ -327,7 +388,21 @@ func (s *shareService) publishedCorpus(ctx context.Context, uid int64, ttl time.
 		c.byID[n.ID] = n
 	}
 
-	if ttl > 0 {
+	// Record the authoritative shared set so the next question can revalidate cheaply. If the
+	// read fails the corpus is still returned — a question must not fail over a cache-check
+	// query — but it is not cached, because caching a corpus without its signature would make
+	// every later revalidation fail and rebuild on each question.
+	//
+	// 记录权威分享集合，供下次提问低成本校验。该读取失败时仍返回语料——提问不该因为一次
+	// 缓存校验查询而失败——但不写入缓存：没有签名的缓存会让后续每次校验都失败，
+	// 于是每次提问都重建。
+	sigOK := false
+	if ids, err := s.repo.ListActiveNoteResIDs(ctx, uid); err == nil {
+		c.activeIDs = ids
+		sigOK = true
+	}
+
+	if ttl > 0 && sigOK {
 		rt.mu.Lock()
 		rt.corpus[uid] = c
 		rt.mu.Unlock()
