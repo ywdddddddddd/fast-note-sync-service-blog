@@ -233,6 +233,12 @@ type shareService struct {
 	noteLinkRepo domain.NoteLinkRepository  // Note link repository (knowledge graph) // 笔记链接仓库（知识图谱）
 	fileRepo     domain.FileRepository      // File repository // 文件仓库
 	vaultRepo    domain.VaultRepository     // Vault repository // 仓库仓库
+	// ftsRepo is the Bleve full-text index. Optional: when nil the Q&A keyword channel falls
+	// back to the in-memory BM25 scan, which needs no index at all.
+	//
+	// ftsRepo 是 Bleve 全文索引。可选：为 nil 时问答的关键词通道回退到内存 BM25 扫描，
+	// 后者完全不需要索引。
+	ftsRepo domain.NoteFTSRepository
 	logger       *zap.Logger                // Logger // 日志器
 	// blogAccess is nil when no log directory is configured; every method on it tolerates
 	// that, so the blog keeps working on a read-only or misconfigured host.
@@ -284,7 +290,7 @@ func blogDataDir(config *ServiceConfig) string {
 }
 
 // NewShareService 创建 ShareService 实例
-func NewShareService(repo domain.UserShareRepository, tokenManager pkgapp.TokenManager, noteRepo domain.NoteRepository, noteLinkRepo domain.NoteLinkRepository, fileRepo domain.FileRepository, vaultRepo domain.VaultRepository, logger *zap.Logger, config *ServiceConfig) ShareService {
+func NewShareService(repo domain.UserShareRepository, tokenManager pkgapp.TokenManager, noteRepo domain.NoteRepository, noteLinkRepo domain.NoteLinkRepository, fileRepo domain.FileRepository, vaultRepo domain.VaultRepository, ftsRepo domain.NoteFTSRepository, logger *zap.Logger, config *ServiceConfig) ShareService {
 	s := &shareService{
 		repo:         repo,
 		tokenManager: tokenManager,
@@ -301,6 +307,7 @@ func NewShareService(repo domain.UserShareRepository, tokenManager pkgapp.TokenM
 		noteLinkRepo:  noteLinkRepo,
 		fileRepo:      fileRepo,
 		vaultRepo:     vaultRepo,
+		ftsRepo:       ftsRepo,
 		logger:        logger,
 		config:        config,
 		markdown: goldmark.New(

@@ -4,6 +4,8 @@ import (
 	"context"
 	"sort"
 	"time"
+
+	"go.uber.org/zap"
 )
 
 // Hybrid retrieval: BM25 for exact wording, embeddings for meaning, a cross-encoder to decide.
@@ -228,6 +230,64 @@ func (s *shareService) askHybridRetrieve(
 		}
 	}
 
+	// ── Stage 1.6: Bleve full-text index ──
+	// The Bleve index already holds every note's path and content under the cjk analyzer, and
+	// it is the same index the regular search API reads, so Q&A and search can never disagree
+	// about what matches. It only returns ids, with no score, and its MatchQuery joins terms
+	// with AND — passing the whole question would almost never match, because a question
+	// contains words no note repeats. Probing with a few of the longest tokens instead turns
+	// it into the inverted-index lookup it is good at.
+	//
+	// 阶段 1.6：Bleve 全文索引。
+	// Bleve 索引在 cjk 分析器下已保存每篇笔记的路径与正文，且它正是常规搜索接口读取的
+	// 同一份索引，因此问答与搜索对「什么算命中」永远不会相互矛盾。它只返回 id、没有分数，
+	// 而 MatchQuery 用 AND 连接各词——直接传整个问题几乎必然查不到，因为问题里的词
+	// 没有哪篇笔记会全部复述。改用若干最长的检索词去探测，才是它擅长的倒排查找。
+	if s.ftsRepo != nil {
+		if vaultID, probes := askBleveProbes(corpus, tokens); vaultID != 0 && len(probes) > 0 {
+			added := 0
+			returned := 0
+			for _, probe := range probes {
+				ids, err := s.ftsRepo.Search(ctx, probe, vaultID, opts.UID, 24, 0)
+				if err != nil {
+					continue
+				}
+				returned += len(ids)
+				for _, id := range ids {
+					if _, seen := cands[id]; seen {
+						continue
+					}
+					note, ok := corpus.byID[id]
+					if !ok {
+						// The index can hold ids for notes this corpus excluded, e.g. a note
+						// that was unshared after being indexed. Skipping is the privacy rule.
+						// 索引里可能含有被本语料排除的 id，例如分享取消后仍留在索引中的笔记。
+						// 跳过它就是隐私规则。
+						continue
+					}
+					cands[id] = &askCandidate{
+						noteID: id,
+						text:   askExcerpt(note.Plain, tokens, 1200),
+						via:    "全文索引命中",
+					}
+					order = append(order, id)
+					added++
+				}
+			}
+			// One line per question: enough to tell whether the index channel contributes
+			// anything at all, which is the only question worth asking of a fourth recall path.
+			// 每次提问一行：足以判断索引通道是否有任何贡献，而这是评估第四条召回路径时
+			// 唯一值得问的问题。
+			s.logger.Info("blog ask: bleve channel",
+				zap.Int("probes", len(probes)),
+				zap.Int("returned", returned),
+				zap.Int("added", added))
+			if added > 0 {
+				channels += "+全文索引"
+			}
+		}
+	}
+
 	// ── Stage 2: vectors ──
 	if opts.Embedding != nil {
 		vecHits, err := s.askVectorCandidates(ctx, opts, corpus)
@@ -384,6 +444,49 @@ func (s *shareService) askHybridRetrieve(
 	}
 	return out, channels
 }
+
+// askBleveProbes picks the vault to query and the tokens worth sending.
+//
+// Only the longest tokens are used. A bigram like 颌第 appears in dozens of dental notes and
+// would return most of the vault, which costs a query and tells the reranker nothing; a
+// trigram or a whole-run token is specific enough that a hit means something.
+//
+// askBleveProbes 选出要查询的仓库与值得发送的检索词。
+//
+// 只取最长的检索词。像「颌第」这样的 bigram 出现在几十篇牙科笔记里，查它会返回大半个仓库，
+// 既花掉一次查询又没给重排器任何信息；三元组或整串检索词则足够具体，命中就意味着什么。
+func askBleveProbes(corpus *askCorpus, tokens []string) (int64, []string) {
+	vaultID := int64(0)
+	for _, n := range corpus.notes {
+		if n.VaultID != 0 {
+			vaultID = n.VaultID
+			break
+		}
+	}
+	if vaultID == 0 {
+		return 0, nil
+	}
+
+	// Longest first, capped: each probe is one index query.
+	// 先取最长的，并设上限：每个检索词就是一次索引查询。
+	ordered := make([]string, 0, len(tokens))
+	for _, t := range tokens {
+		if len([]rune(t)) >= 3 {
+			ordered = append(ordered, t)
+		}
+	}
+	sort.SliceStable(ordered, func(i, j int) bool {
+		return len([]rune(ordered[i])) > len([]rune(ordered[j]))
+	})
+	if len(ordered) > askMaxBleveProbes {
+		ordered = ordered[:askMaxBleveProbes]
+	}
+	return vaultID, ordered
+}
+
+// askMaxBleveProbes caps how many index queries one question may issue.
+// askMaxBleveProbes 限制单次提问允许发出的索引查询次数。
+const askMaxBleveProbes = 4
 
 // askRerankMinScore drops candidates the cross-encoder scored as irrelevant.
 //
