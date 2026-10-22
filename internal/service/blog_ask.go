@@ -16,6 +16,8 @@ import (
 	"unicode"
 
 	"go.uber.org/zap"
+
+	"github.com/haierkeys/fast-note-sync-service/pkg/util"
 )
 
 // Blog retrieval-augmented Q&A.
@@ -75,6 +77,36 @@ type AskOptions struct {
 	CacheTTL         time.Duration
 	SystemPrompt     string
 	MaxQuestionChars int
+
+	// Embedding and Rerank are optional. When either is unset the pipeline degrades to the
+	// channel that is available, ending at BM25 alone — a partially configured deployment
+	// must still answer questions, just with weaker recall.
+	// Embedding 与 Rerank 是可选的。任一未配置时管线退化为可用的那条通道，
+	// 最差退到纯 BM25——配置不完整的部署仍须能回答问题，只是召回弱一些。
+	Embedding *AskEmbeddingConfig
+	Rerank    *AskRerankConfig
+}
+
+// AskEmbeddingConfig carries the vector channel's settings.
+// AskEmbeddingConfig 承载向量通道的配置。
+type AskEmbeddingConfig struct {
+	BaseURL        string
+	APIKey         string
+	Model          string
+	BatchSize      int
+	ChunkChars     int
+	ChunkOverlap   int
+	CandidateLimit int
+}
+
+// AskRerankConfig carries the reranker's settings.
+// AskRerankConfig 承载重排器的配置。
+type AskRerankConfig struct {
+	BaseURL  string
+	APIKey   string
+	Model    string
+	TopN     int
+	DocChars int
 }
 
 // AskEvent is one Server-Sent Event frame. Type drives how the browser renders it.
@@ -273,6 +305,25 @@ func (s *shareService) publishedCorpus(ctx context.Context, uid int64, ttl time.
 		if n.Hash != "" {
 			c.byHash[n.Hash] = n
 		}
+		// The link table stores whatever the author typed, and Obsidian's wiki syntax is
+		// usually `[[note]]` or `[[folder/note]]` — neither carries the .md extension, and
+		// neither equals note.Path. Indexing only n.Hash therefore made askExpandLinks a
+		// no-op: every neighbour lookup missed. Measured on this vault, the whole-corpus
+		// variant of the same defect resolved 13 of 4666 link rows.
+		//
+		// 链接表存的是作者原样敲下的文本，而 Obsidian 的 wiki 语法通常是 `[[笔记]]` 或
+		// `[[文件夹/笔记]]`——两者都不带 .md，也不等于 note.Path。只索引 n.Hash 使
+		// askExpandLinks 形同虚设：每次邻居查找都落空。实测同一缺陷在全站图谱上
+		// 只让 4666 条链接中的 13 条命中。
+		for _, variation := range util.GeneratePathVariations(n.Path) {
+			h := util.EncodeHash32(variation)
+			if h == "" {
+				continue
+			}
+			if _, exists := c.byHash[h]; !exists {
+				c.byHash[h] = n
+			}
+		}
 		c.byID[n.ID] = n
 	}
 
@@ -350,6 +401,21 @@ func askTokenize(q string) []string {
 			for i := 0; i+2 <= len(cjk); i++ {
 				add(string(cjk[i : i+2]))
 			}
+			// Trigrams exist to separate near-identical compounds. 上颌 and 下颌 differ in a
+			// single bigram and share every other one, so a bigram-only index cannot tell
+			// 《4、上颌第一磨牙》 from 《5、下颌第一磨牙》 — measured: asking for the former
+			// ranked the latter first. A trigram ("上颌第" vs "下颌第") carries the
+			// distinction, and blog_ask_rank.go weights longer tokens higher.
+			//
+			// 三元组的用途是区分高度相似的词。上颌与下颌只差一个 bigram，其余完全相同，
+			// 因此纯 bigram 索引无法区分《4、上颌第一磨牙》与《5、下颌第一磨牙》——
+			// 实测问前者时后者排到了第一。三元组（「上颌第」对「下颌第」）承载了这个
+			// 差异，blog_ask_rank.go 会给更长的检索词更高权重。
+			if len(cjk) >= 3 {
+				for i := 0; i+3 <= len(cjk); i++ {
+					add(string(cjk[i : i+3]))
+				}
+			}
 			// The full run carries more signal than any single bigram, so keep it too.
 			if len(cjk) <= 8 {
 				add(string(cjk))
@@ -391,52 +457,11 @@ type askHit struct {
 	via     string
 }
 
-// askRetrieve scores every published note against the tokens.
-//
-// Title and path hits outweigh body hits because they describe what the note is *about*;
-// the body count is damped by length so a long note cannot win on raw volume alone.
-//
-// askRetrieve 用这些检索词给每篇已发布笔记打分。
-//
-// 标题与路径命中比正文命中权重更高，因为它们描述笔记「是关于什么的」；
-// 正文词频按长度衰减，避免长笔记仅凭体量取胜。
-func askRetrieve(c *askCorpus, tokens []string, topK int) []*askHit {
-	if len(tokens) == 0 || len(c.notes) == 0 {
-		return nil
-	}
-
-	hits := make([]*askHit, 0, len(c.notes))
-	for _, n := range c.notes {
-		title := strings.ToLower(n.Title)
-		path := strings.ToLower(n.Path)
-		body := strings.ToLower(n.Plain)
-
-		var score float64
-		var matched []string
-		for _, t := range tokens {
-			tc := strings.Count(title, t)
-			pc := strings.Count(path, t)
-			bc := strings.Count(body, t)
-			if tc == 0 && pc == 0 && bc == 0 {
-				continue
-			}
-			matched = append(matched, t)
-			score += float64(tc)*8 + float64(pc)*3 + float64(bc)
-		}
-		if score <= 0 {
-			continue
-		}
-		// Damp by length: log keeps a very long note from dominating purely on volume.
-		score = score / (1 + math.Log1p(float64(len([]rune(n.Plain)))/200))
-		hits = append(hits, &askHit{note: n, score: score, matched: matched, via: "直接命中"})
-	}
-
-	sort.SliceStable(hits, func(i, j int) bool { return hits[i].score > hits[j].score })
-	if topK > 0 && len(hits) > topK {
-		hits = hits[:topK]
-	}
-	return hits
-}
+// askRetrieve now lives in blog_ask_rank.go, which scores with BM25 instead of raw substring
+// counts. See that file for why the previous formula ranked an entire folder above the note
+// that actually matched the question.
+// askRetrieve 现在位于 blog_ask_rank.go，改用 BM25 打分而不是裸子串计数。
+// 旧公式为何会把整个目录排到真正匹配的笔记之前，见该文件的说明。
 
 // askExpandLinks pulls in one hop of wiki-link neighbours around the top hits.
 //
@@ -884,13 +909,19 @@ func (s *shareService) Ask(ctx context.Context, opts AskOptions, emit func(AskEv
 		return emit(AskEvent{Type: "error", Message: "还没有已发布的笔记可供检索"})
 	}
 
-	hits := askRetrieve(corpus, tokens, topK)
+	// Retrieval now runs three stages inside askHybridRetrieve: BM25 recall, an optional
+	// semantic channel, and an optional cross-encoder that decides the final order. The
+	// returned label names the channels that actually contributed, so the progress line
+	// describes what happened instead of always claiming a hybrid search.
+	//
+	// 检索现在由 askHybridRetrieve 内部走三步：BM25 召回、可选的语义通道、可选的交叉编码器
+	// 决定最终顺序。返回的标签指明实际生效的通道，使进度行描述真实发生的事，
+	// 而不是永远声称做了混合检索。
+	hits, channels := s.askHybridRetrieve(ctx, opts, corpus, tokens, topK)
 	if err := emit(AskEvent{Type: "stage",
-		Stage: fmt.Sprintf("在 %d 篇笔记中命中 %d 篇，正在扩展关联笔记…", len(corpus.notes), len(hits))}); err != nil {
+		Stage: fmt.Sprintf("在 %d 篇笔记中按%s检索，命中 %d 篇…", len(corpus.notes), channels, len(hits))}); err != nil {
 		return err
 	}
-
-	hits = askExpandLinks(ctx, s, opts.UID, corpus, hits, topK)
 	if len(hits) == 0 {
 		if err := emit(AskEvent{Type: "delta",
 			Text: "已发布的笔记里没有检索到与该问题相关的内容。"}); err != nil {

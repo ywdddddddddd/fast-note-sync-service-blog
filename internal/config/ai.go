@@ -39,6 +39,88 @@ type AISettings struct {
 	// MaxQuestionChars rejects absurdly long questions before they reach an upstream.
 	// MaxQuestionChars 在问题送达上游之前拦截过长的输入。
 	MaxQuestionChars int `yaml:"max-question-chars" default:"500"`
+
+	// Embedding adds a semantic retrieval channel beside BM25.
+	// Embedding 在 BM25 之外增加一条语义检索通道。
+	Embedding AIEmbeddingSettings `yaml:"embedding"`
+
+	// Rerank reorders the merged candidate set before the answer is generated.
+	// Rerank 在生成回答之前对合并后的候选集重新排序。
+	Rerank AIRerankSettings `yaml:"rerank"`
+}
+
+// AIEmbeddingSettings configures the vector channel.
+//
+// ChunkChars is capped well below the model's context window on purpose: bge-m3 accepts
+// 8192 tokens and rejects 12000 outright (measured: HTTP 400), and Chinese costs roughly one
+// token per character. A 1800-character chunk therefore uses under a quarter of the window,
+// which leaves room for the model's own instruction prefix and keeps a chunk narrow enough
+// that its vector describes one topic rather than a whole chapter.
+//
+// AIEmbeddingSettings 配置向量通道。
+//
+// ChunkChars 刻意远低于模型的上下文窗口：bge-m3 接受 8192 token，而 12000 会直接报错
+// （实测 HTTP 400），中文大致一字一 token。因此 1800 字符的块只占窗口不到四分之一，
+// 既给模型自身的前缀留了余量，也让一个块足够窄，使它的向量描述一个主题而不是一整章。
+type AIEmbeddingSettings struct {
+	// Enabled turns the vector channel on. Nil (unset) means off, and BM25 alone still works.
+	// Enabled 打开向量通道。nil（未配置）表示关闭，此时仅 BM25 仍然可用。
+	Enabled *bool `yaml:"enabled" default:"false"`
+
+	BaseURL string `yaml:"base-url"`
+	APIKey  string `yaml:"api-key"`
+	Model   string `yaml:"model" default:"BAAI/bge-m3"`
+
+	// BatchSize is how many chunks one embedding request carries. Measured on the upstream:
+	// 64 texts complete in ~0.6 s, so a whole vault indexes in a handful of round trips.
+	// BatchSize 单次 embedding 请求携带的块数。实测上游 64 条文本约 0.6 秒完成，
+	// 因此整个仓库只需少数几次往返即可建好索引。
+	BatchSize int `yaml:"batch-size" default:"32"`
+
+	ChunkChars   int `yaml:"chunk-chars" default:"1800"`
+	ChunkOverlap int `yaml:"chunk-overlap" default:"200"`
+
+	// CandidateLimit is how many chunks each channel contributes to the rerank pool.
+	// CandidateLimit 每条通道向重排池贡献的块数。
+	CandidateLimit int `yaml:"candidate-limit" default:"60"`
+}
+
+// AIRerankSettings configures the cross-encoder pass.
+//
+// DocChars truncates each candidate before it reaches the reranker. The reranker scores the
+// question against every candidate in one request, so an untruncated set of long notes would
+// blow the request budget; 1200 characters is enough to carry the passage that actually
+// answers the question.
+//
+// AIRerankSettings 配置交叉编码器环节。
+//
+// DocChars 在候选进入重排器之前截断。重排器在一次请求里对每个候选与问题打分，
+// 因此不截断的长笔记会撑爆请求预算；1200 字符足以承载真正回答该问题的那一段。
+type AIRerankSettings struct {
+	Enabled *bool  `yaml:"enabled" default:"false"`
+	BaseURL string `yaml:"base-url"`
+	APIKey  string `yaml:"api-key"`
+	Model   string `yaml:"model" default:"BAAI/bge-reranker-v2-m3"`
+
+	// TopN is how many reranked candidates survive into the prompt.
+	// TopN 重排后进入提示词的候选数量。
+	TopN int `yaml:"top-n" default:"8"`
+
+	DocChars int `yaml:"doc-chars" default:"1200"`
+}
+
+// AIEmbeddingEnabled reports whether the vector channel is configured well enough to use.
+// AIEmbeddingEnabled 返回向量通道是否已配置到可用状态。
+func (s AISettings) AIEmbeddingEnabled() bool {
+	return s.Embedding.Enabled != nil && *s.Embedding.Enabled &&
+		s.Embedding.BaseURL != "" && s.Embedding.APIKey != "" && s.Embedding.Model != ""
+}
+
+// AIRerankEnabled reports whether the reranker is configured well enough to use.
+// AIRerankEnabled 返回重排器是否已配置到可用状态。
+func (s AISettings) AIRerankEnabled() bool {
+	return s.Rerank.Enabled != nil && *s.Rerank.Enabled &&
+		s.Rerank.BaseURL != "" && s.Rerank.APIKey != "" && s.Rerank.Model != ""
 }
 
 // AIRouteSetting one upstream OpenAI-compatible chat endpoint.

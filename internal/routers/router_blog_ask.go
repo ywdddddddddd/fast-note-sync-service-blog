@@ -81,6 +81,8 @@ func registerBlogAskRoutes(r *gin.Engine, appContainer *app.App) {
 			CacheTTL:         parseDurationOr(aiCfg.CacheTTL, 5*time.Minute),
 			SystemPrompt:     aiCfg.SystemPrompt,
 			MaxQuestionChars: aiCfg.MaxQuestionChars,
+			Embedding:        buildAskEmbedding(aiCfg),
+			Rerank:           buildAskRerank(aiCfg),
 		}
 
 		c.Header("Content-Type", "text/event-stream; charset=utf-8")
@@ -184,4 +186,43 @@ func parseDurationOr(v string, fallback time.Duration) time.Duration {
 		return fallback
 	}
 	return d
+}
+
+// buildAskEmbedding returns the vector channel config, or nil when it is not usable.
+//
+// A nil result is not an error: the retrieval pipeline degrades to BM25, so an operator who
+// has not configured an embedding endpoint still gets a working (if weaker) Q&A entry.
+//
+// buildAskEmbedding 返回向量通道配置，不可用时返回 nil。
+//
+// 返回 nil 不是错误：检索管线会退化到 BM25，因此没有配置嵌入端点的运维者仍然得到
+// 一个可用（虽然更弱）的问答入口。
+func buildAskEmbedding(cfg config.AISettings) *service.AskEmbeddingConfig {
+	if !cfg.AIEmbeddingEnabled() {
+		return nil
+	}
+	return &service.AskEmbeddingConfig{
+		BaseURL:        strings.TrimSpace(cfg.Embedding.BaseURL),
+		APIKey:         strings.TrimSpace(cfg.Embedding.APIKey),
+		Model:          strings.TrimSpace(cfg.Embedding.Model),
+		BatchSize:      cfg.Embedding.BatchSize,
+		ChunkChars:     cfg.Embedding.ChunkChars,
+		ChunkOverlap:   cfg.Embedding.ChunkOverlap,
+		CandidateLimit: cfg.Embedding.CandidateLimit,
+	}
+}
+
+// buildAskRerank returns the reranker config, or nil when it is not usable.
+// buildAskRerank 返回重排器配置，不可用时返回 nil。
+func buildAskRerank(cfg config.AISettings) *service.AskRerankConfig {
+	if !cfg.AIRerankEnabled() {
+		return nil
+	}
+	return &service.AskRerankConfig{
+		BaseURL:  strings.TrimSpace(cfg.Rerank.BaseURL),
+		APIKey:   strings.TrimSpace(cfg.Rerank.APIKey),
+		Model:    strings.TrimSpace(cfg.Rerank.Model),
+		TopN:     cfg.Rerank.TopN,
+		DocChars: cfg.Rerank.DocChars,
+	}
 }

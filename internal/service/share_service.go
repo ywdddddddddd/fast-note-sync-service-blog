@@ -252,6 +252,12 @@ type shareService struct {
 	askMu      sync.Mutex
 	askRuntime *askRuntime
 
+	// askVectors holds the embedded corpus used by the semantic retrieval channel. Nil until
+	// the first question triggers a build; every reader tolerates nil and falls back to BM25.
+	// askVectors 保存语义检索通道所用的已嵌入语料。在首次提问触发构建之前为 nil；
+	// 每个读取方都能容忍 nil，并回退到 BM25。
+	askVectors *askVectorStore
+
 	// Statistics buffer
 	// 统计缓冲区
 	bufferMu    sync.Mutex          // Buffer mutex // 缓冲区互斥锁
