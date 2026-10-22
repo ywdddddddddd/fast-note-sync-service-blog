@@ -166,7 +166,16 @@ type askNote struct {
 	Title   string
 	Slug    string
 	Plain   string // markdown-stripped body, used for matching and excerpting
-	Sort    float64
+	// ContentHash is the note's own content digest. It feeds the vector index fingerprint, so
+	// an edit that changes the wording without changing the length still invalidates the
+	// cached vectors. Length alone would not: a one-character fix and its typo have the same
+	// length and would keep serving vectors of the old text.
+	//
+	// ContentHash 是笔记自身的内容摘要。它参与向量索引的指纹，使「改动了措辞但长度不变」的
+	// 编辑同样能让缓存向量失效。只看长度做不到这一点：修正一个字与它的笔误长度相同，
+	// 于是会继续使用旧文本的向量。
+	ContentHash string
+	Sort        float64
 }
 
 type askCorpus struct {
@@ -353,14 +362,15 @@ func (s *shareService) publishedCorpus(ctx context.Context, uid int64, ttl time.
 		seen[note.Path] = struct{}{}
 
 		n := &askNote{
-			ID:      note.ID,
-			VaultID: note.VaultID,
-			Path:    note.Path,
-			Hash:    note.PathHash,
-			Title:   strings.TrimSuffix(pathBase(note.Path), ".md"),
-			Slug:    s.BuildLocalShortLink(uid, sh.ID),
-			Plain:   blogPlainText(note.Content, 0),
-			Sort:    float64(firstNonZero(note.UpdatedTimestamp, note.Mtime, note.Ctime)),
+			ID:          note.ID,
+			VaultID:     note.VaultID,
+			Path:        note.Path,
+			Hash:        note.PathHash,
+			Title:       strings.TrimSuffix(pathBase(note.Path), ".md"),
+			Slug:        s.BuildLocalShortLink(uid, sh.ID),
+			Plain:       blogPlainText(note.Content, 0),
+			ContentHash: note.ContentHash,
+			Sort:        float64(firstNonZero(note.UpdatedTimestamp, note.Mtime, note.Ctime)),
 		}
 		c.notes = append(c.notes, n)
 		if n.Hash != "" {

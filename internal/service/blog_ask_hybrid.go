@@ -2,10 +2,15 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"sort"
+	"strconv"
+	"strings"
 	"time"
 
 	"go.uber.org/zap"
+
+	"github.com/haierkeys/fast-note-sync-service/pkg/util"
 )
 
 // Hybrid retrieval: BM25 for exact wording, embeddings for meaning, a cross-encoder to decide.
@@ -63,7 +68,21 @@ func (s *shareService) askVectorCandidates(
 	fingerprint := corpus.fingerprint()
 	idx := s.askVectors.get(opts.UID)
 	if idx == nil || idx.fingerprint != fingerprint {
-		if s.askVectors.beginBuild(opts.UID) {
+		if !s.askVectors.beginBuild(opts.UID) {
+			// Another question is already building it. Proceed on BM25 rather than wait.
+			// 另一个提问正在构建它。直接走 BM25，而不是等它。
+			return nil, nil
+		}
+
+		// A persisted copy is tried first: reading ~1.9 MB costs milliseconds, while a rebuild
+		// costs a dozen embedding round trips and ten-odd seconds.
+		//
+		// 先尝试持久化副本：读约 1.9 MB 只要几毫秒，而重建要十来次嵌入往返、十几秒。
+		if loaded := s.loadAskVectorIndex(s.askVectorPath(opts.UID), corpus.notes, cfg, fingerprint); loaded != nil {
+			s.askVectors.put(opts.UID, loaded)
+			s.askVectors.endBuild(opts.UID)
+			idx = loaded
+		} else {
 			notes := corpus.notes
 			go func() {
 				defer s.askVectors.endBuild(opts.UID)
@@ -87,9 +106,15 @@ func (s *shareService) askVectorCandidates(
 					return
 				}
 				s.askVectors.put(opts.UID, built)
+				if err := saveAskVectorIndex(s.askVectorPath(opts.UID), built); err != nil {
+					// Persistence is an optimisation, never a requirement: the index is
+					// already in memory and this question's answer is unaffected.
+					// 持久化只是优化，从来不是必需：索引已在内存中，本次回答不受影响。
+					s.logger.Warn("blog ask: could not persist vector index")
+				}
 			}()
+			return nil, nil
 		}
-		return nil, nil
 	}
 
 	client := newAskEmbedClient(cfg.BaseURL, cfg.APIKey, cfg.Model, 1)
@@ -112,14 +137,8 @@ func (s *shareService) askVectorCandidates(
 func (s *shareService) buildVectorIndex(
 	ctx context.Context, uid int64, notes []*askNote, cfg *AskEmbeddingConfig, fingerprint string,
 ) (*askVectorIndex, error) {
-	size := cfg.ChunkChars
-	if size <= 0 {
-		size = 1800
-	}
-	overlap := cfg.ChunkOverlap
-	if overlap < 0 {
-		overlap = 0
-	}
+	size := askChunkSize(cfg)
+	overlap := askChunkOverlap(cfg)
 
 	chunks := askBuildChunks(notes, size, overlap)
 	if len(chunks) == 0 {
@@ -137,14 +156,41 @@ func (s *shareService) buildVectorIndex(
 		return nil, err
 	}
 
-	norms := make([]float32, len(vectors))
-	for i, v := range vectors {
-		norms[i] = askNorm(v)
+	// Flatten into one contiguous slice. The upstream returns one slice per input, but the
+	// index is stored and searched as a single array; keeping the per-chunk slices would mean
+	// hundreds of allocations and a per-vector copy on every save.
+	// 摊平成一整块连续切片。上游按输入各返回一个切片，而索引的存储与检索都按单个数组进行；
+	// 保留逐块切片意味着数百次分配，以及每次保存时的逐向量拷贝。
+	dim := 0
+	total := 0
+	for _, v := range vectors {
+		if dim == 0 {
+			dim = len(v)
+		}
+		if len(v) != dim {
+			return nil, fmt.Errorf("embedding returned inconsistent dimensions: %d then %d", dim, len(v))
+		}
+		total += len(v)
 	}
+	if dim == 0 {
+		return nil, fmt.Errorf("embedding returned no vectors")
+	}
+
+	flat := make([]float32, 0, total)
+	for _, v := range vectors {
+		flat = append(flat, v...)
+	}
+
+	norms := make([]float32, len(vectors))
+	for i := range vectors {
+		norms[i] = askNorm(flat[i*dim : (i+1)*dim])
+	}
+
 	return &askVectorIndex{
 		chunks:      chunks,
-		vectors:     vectors,
+		vectors:     flat,
 		norms:       norms,
+		dim:         dim,
 		built:       time.Now(),
 		fingerprint: fingerprint,
 	}, nil
@@ -152,21 +198,23 @@ func (s *shareService) buildVectorIndex(
 
 // fingerprint identifies the corpus contents so a note edit invalidates the index.
 //
-// Built from the note ids and their content hashes rather than from a timestamp: a note that
-// is re-saved with identical text must not force a rebuild, and a note whose text changed must
-// force one even if its mtime somehow did not.
+// Built from each note's id and its own content digest. Using the length instead would miss
+// every edit that preserves length — and, once the vectors are persisted, that means serving
+// embeddings of text that no longer exists.
 //
 // fingerprint 标识语料内容，使笔记修改后索引失效。
 //
-// 由笔记 id 与其内容哈希构成，而不是用时间戳：正文未变的重新保存不应触发重建，
-// 而正文已变的笔记即使 mtime 因故没变也必须触发。
+// 由每篇笔记的 id 与其自身内容摘要构成。改用长度会漏掉所有长度不变的编辑——
+// 而在向量被持久化之后，那意味着继续使用已不存在的文本的嵌入。
 func (c *askCorpus) fingerprint() string {
-	h := 0
+	var b strings.Builder
 	for _, n := range c.notes {
-		h = h*31 + int(n.ID)
-		h = h*31 + len(n.Plain)
+		b.WriteString(strconv.FormatInt(n.ID, 10))
+		b.WriteByte(':')
+		b.WriteString(n.ContentHash)
+		b.WriteByte('|')
 	}
-	return itoa(int64(h)) + "-" + itoa(int64(len(c.notes)))
+	return util.EncodeHash32(b.String())
 }
 
 // askHybridRetrieve merges the two recall channels and reranks them.

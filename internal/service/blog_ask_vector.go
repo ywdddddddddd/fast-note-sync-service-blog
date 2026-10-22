@@ -152,17 +152,42 @@ type askVecHit struct {
 }
 
 // askVectorIndex holds the embedded corpus.
+//
+// The vectors are one contiguous slice rather than a slice per chunk. With ~460 chunks that
+// saves the per-slice headers and the allocator's rounding, and — more importantly — it is the
+// only shape that can be written to and read back from disk without a per-vector copy.
+//
 // askVectorIndex 保存已嵌入的语料。
+//
+// 向量是一整块连续切片，而不是每块一个切片。约 460 块时这能省掉每片的切片头与分配器取整，
+// 更重要的是：只有这种形状才能不做逐向量拷贝地写盘与读回。
 type askVectorIndex struct {
-	chunks  []*askChunk
-	vectors [][]float32
+	chunks []*askChunk
+	// vectors is len(chunks)*dim float32 values, chunk i occupying vectors[i*dim:(i+1)*dim].
+	// vectors 是 len(chunks)*dim 个 float32，第 i 块占据 vectors[i*dim:(i+1)*dim]。
+	vectors []float32
 	norms   []float32
+	dim     int
 	built   time.Time
 	// fingerprint identifies the corpus this index was built from, so a note edit invalidates
 	// it instead of serving vectors that no longer describe the text.
 	// fingerprint 标识该索引所依据的语料，使笔记修改后索引失效，而不是继续返回
 	// 与当前文本不再对应的向量。
 	fingerprint string
+}
+
+// vectorAt returns the vector of chunk i, or nil when i is out of range.
+// vectorAt 返回第 i 块的向量，越界时返回 nil。
+func (idx *askVectorIndex) vectorAt(i int) []float32 {
+	if idx == nil || idx.dim <= 0 || i < 0 {
+		return nil
+	}
+	start := i * idx.dim
+	end := start + idx.dim
+	if end > len(idx.vectors) {
+		return nil
+	}
+	return idx.vectors[start:end]
 }
 
 // askCosine returns the cosine similarity of two vectors.
@@ -205,10 +230,11 @@ func (idx *askVectorIndex) search(q []float32, limit int) []*askVecHit {
 
 	hits := make([]*askVecHit, 0, len(idx.chunks))
 	for i, c := range idx.chunks {
-		if i >= len(idx.vectors) {
+		v := idx.vectorAt(i)
+		if v == nil {
 			break
 		}
-		s := askCosine(q, idx.vectors[i], qNorm, idx.norms[i])
+		s := askCosine(q, v, qNorm, idx.norms[i])
 		// Cosine on bge-m3 for unrelated Chinese text sits near 0.35–0.45, so a fixed zero
 		// threshold would admit everything. Keep only meaningfully similar passages and let
 		// the reranker make the final call.
