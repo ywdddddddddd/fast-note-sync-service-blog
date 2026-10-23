@@ -424,6 +424,11 @@ img{max-width:100%;height:auto;border-radius:.5rem}
 }
 .footer a{font-weight:600;color:var(--primary)}
 .footer a:hover{text-decoration:underline}
+/* 备案号:法定必须展示,且要能点进工信部查询页。刻意比正文更淡——它是义务,
+   不是设计元素;但必须可读,所以只用 muted 色而不再降低不透明度。 */
+.footer-legal{margin-top:.5rem;font-size:.7rem;letter-spacing:.01em}
+.footer-legal a{font-weight:500;color:var(--muted-foreground)}
+.footer-legal a:hover{color:var(--primary)}
 
 /* ── 左：可折叠的嵌套目录树 ──────────────────────────────────────────
    用原生 <details>/<summary>，折叠与嵌套都不需要 JavaScript。 */

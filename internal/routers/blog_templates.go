@@ -480,7 +480,8 @@ var blogHomeTmpl = template.Must(template.New("blog-home").Parse(`<!DOCTYPE html
   </div>
 
   <footer class="footer">
-    由 <a href="https://github.com/haierkeys/fast-note-sync-service" target="_blank" rel="noopener noreferrer">Fast Note Sync</a> 提供支持
+    <div>由 <a href="https://github.com/haierkeys/fast-note-sync-service" target="_blank" rel="noopener noreferrer">Fast Note Sync</a> 提供支持</div>
+    <div class="footer-legal"><a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer nofollow">浙ICP备2026089991号-1</a></div>
   </footer>
 </div>
 {{if .ReactionJS}}<script>{{.ReactionJS}}</script>{{end}}
@@ -703,7 +704,8 @@ var blogPostTmpl = template.Must(template.New("blog-post").Parse(`<!DOCTYPE html
   </div>
 
   <footer class="footer">
-    由 <a href="https://github.com/haierkeys/fast-note-sync-service" target="_blank" rel="noopener noreferrer">Fast Note Sync</a> 提供支持
+    <div>由 <a href="https://github.com/haierkeys/fast-note-sync-service" target="_blank" rel="noopener noreferrer">Fast Note Sync</a> 提供支持</div>
+    <div class="footer-legal"><a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer nofollow">浙ICP备2026089991号-1</a></div>
   </footer>
 </div>
 <script>
@@ -947,7 +949,8 @@ var blogPageTmpl = template.Must(template.New("blog-page").Parse(`<!DOCTYPE html
   </div>
 
   <footer class="footer">
-    由 <a href="https://github.com/haierkeys/fast-note-sync-service" target="_blank" rel="noopener noreferrer">Fast Note Sync</a> 提供支持
+    <div>由 <a href="https://github.com/haierkeys/fast-note-sync-service" target="_blank" rel="noopener noreferrer">Fast Note Sync</a> 提供支持</div>
+    <div class="footer-legal"><a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer nofollow">浙ICP备2026089991号-1</a></div>
   </footer>
 </div>
 {{if .WarpJS}}<script>{{.WarpJS}}</script>{{end}}
@@ -1119,7 +1122,8 @@ var blogErrorTmpl = template.Must(template.New("blog-error").Parse(`<!DOCTYPE ht
   </main>
 
   <footer class="footer">
-    由 <a href="https://github.com/haierkeys/fast-note-sync-service" target="_blank" rel="noopener noreferrer">Fast Note Sync</a> 提供支持
+    <div>由 <a href="https://github.com/haierkeys/fast-note-sync-service" target="_blank" rel="noopener noreferrer">Fast Note Sync</a> 提供支持</div>
+    <div class="footer-legal"><a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer nofollow">浙ICP备2026089991号-1</a></div>
   </footer>
 </div>
 </body>
