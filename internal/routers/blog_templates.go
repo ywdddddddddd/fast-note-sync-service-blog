@@ -519,6 +519,7 @@ var blogHomeTmpl = template.Must(template.New("blog-home").Parse(`<!DOCTYPE html
 <div id="ask-root"></div>
 <script src="/blog/ask.js" defer></script>
 {{end}}
+<script src="/blog/lightbox.js" defer></script>
 </body>
 </html>
 {{define "nav"}}` + blogNavPartial + `{{end}}` + blogNavTree + blogTopNav))
@@ -737,6 +738,7 @@ var blogPostTmpl = template.Must(template.New("blog-post").Parse(`<!DOCTYPE html
 <div id="ask-root"></div>
 <script src="/blog/ask.js" defer></script>
 {{end}}
+<script src="/blog/lightbox.js" defer></script>
 
   <!-- Mobile edge tabs and their drawers.
        Only rendered on reading pages: the home page has no in-page outline, and its side columns
@@ -975,6 +977,7 @@ var blogPageTmpl = template.Must(template.New("blog-page").Parse(`<!DOCTYPE html
 <div id="ask-root"></div>
 <script src="/blog/ask.js" defer></script>
 {{end}}
+<script src="/blog/lightbox.js" defer></script>
 
   <!-- Mobile edge tabs and their drawers.
        Only rendered on reading pages: the home page has no in-page outline, and its side columns

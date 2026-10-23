@@ -43,6 +43,26 @@ func registerBlogAskRoutes(r *gin.Engine, appContainer *app.App) {
 		c.String(http.StatusOK, blogAskScript)
 	})
 
+	// The lightbox is gated by the blog switch only. It needs no upstream configuration, so
+	// tying it to the Q&A flag would make the images stop opening whenever the model is off.
+	// 灯箱只受博客总开关约束。它不需要任何上游配置，把它绑在问答开关上会导致
+	// 模型一关、图片就打不开。
+	r.GET("/blog/lightbox.js", func(c *gin.Context) {
+		if _, ok := blogEnabled(c, appContainer); !ok {
+			return
+		}
+		c.Header("Content-Type", "application/javascript; charset=utf-8")
+		// Short cache instead of a versioned URL: the templates are plain string literals, and
+		// splicing a version into them would mean cutting the literal apart at two places for a
+		// benefit max-age already delivers. Five minutes matches ask.js and bounds how long a
+		// stale viewer can survive a deploy.
+		// 用短缓存而不是版本化 URL：模板是纯字符串字面量，为拼版本号得在两处把字面量割开，
+		// 而 max-age 已经给到同样的效果。五分钟与 ask.js 一致，也界定了部署后旧查看器
+		// 最长能存活多久。
+		c.Header("Cache-Control", "public, max-age=300")
+		c.String(http.StatusOK, blogLightboxScript)
+	})
+
 	r.POST("/api/blog/ask", func(c *gin.Context) {
 		_, ok := blogEnabled(c, appContainer)
 		if !ok {

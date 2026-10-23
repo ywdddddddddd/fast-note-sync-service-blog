@@ -1791,4 +1791,113 @@ html.fns-arrived .shell{animation:fns-arrive-fade .62s cubic-bezier(.22,1,.36,1)
 /* 抽屉打开时锁滚动由脚本设置 body.style.overflow,这里不重复。
    但需保证 iOS 上循环滚动不会穿透到 body。 */
 body.drawer-nav,body.drawer-toc{overscroll-behavior:contain}
+
+/* ── 图片灯箱 ────────────────────────────────────────────────────────────────
+   层级取 90：高于问答面板(60)与图谱层，因为看图时它必须是唯一可交互的表面。
+   舞台的 left/top/width/height 由脚本动画(FLIP)，因此过渡只写这几个属性；
+   用 transform 会让圆角随缩放变形，这一点在脚本注释里说明了。
+   ─────────────────────────────────────────────────────────────────────────── */
+html.lb-lock{overflow:hidden}
+
+.lb-root{
+  position:fixed;inset:0;z-index:90;
+  -webkit-tap-highlight-color:transparent;
+}
+.lb-backdrop{
+  position:absolute;inset:0;
+  background:color-mix(in srgb,#0c0d0e 86%,transparent);
+  -webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px);
+  opacity:0;transition:opacity .3s ease;
+}
+.lb-root.lb-in .lb-backdrop{opacity:1}
+
+.lb-stage{
+  position:absolute;overflow:hidden;
+  background:transparent;
+  border-radius:12px;
+  /* contain:paint 让内部缩放不溢出圆角裁切区 */
+  contain:paint;
+  transition:left .34s cubic-bezier(.22,1,.36,1),top .34s cubic-bezier(.22,1,.36,1),
+    width .34s cubic-bezier(.22,1,.36,1),height .34s cubic-bezier(.22,1,.36,1),
+    border-radius .34s ease,opacity .18s ease,transform .2s ease;
+  touch-action:none;
+  cursor:grab;
+}
+.lb-stage:active{cursor:grabbing}
+/* 切图时整体淡出再淡入，关闭才走几何回弹 */
+.lb-stage.lb-swap{opacity:0}
+
+.lb-img{
+  display:block;width:100%;height:100%;object-fit:contain;
+  opacity:0;transition:opacity .26s ease;
+  transform-origin:50% 50%;
+  will-change:transform;
+  -webkit-user-select:none;user-select:none;
+  pointer-events:auto;
+}
+.lb-img.lb-ready{opacity:1}
+
+/* 骨架只在图片尚未解码完成时可见(慢网、点开还在加载的图)；
+   正常路径下缩略图早已缓存，这一层会立即淡出。 */
+.lb-shimmer{
+  position:absolute;inset:0;border-radius:inherit;
+  background:linear-gradient(100deg,
+    color-mix(in srgb,#ffffff 8%,transparent) 20%,
+    color-mix(in srgb,#ffffff 22%,transparent) 40%,
+    color-mix(in srgb,#ffffff 8%,transparent) 60%);
+  background-size:220% 100%;
+  animation:lb-shine 1.15s linear infinite;
+  opacity:1;transition:opacity .3s ease;
+  pointer-events:none;
+}
+.lb-shimmer.lb-off{opacity:0}
+@keyframes lb-shine{from{background-position:120% 0}to{background-position:-120% 0}}
+
+.lb-bar{
+  position:absolute;left:50%;bottom:calc(1.4rem + env(safe-area-inset-bottom,0px));
+  transform:translateX(-50%);
+  display:flex;align-items:center;gap:.55rem;
+  padding:.35rem .5rem;border-radius:999px;
+  background:color-mix(in srgb,#1a1b1c 72%,transparent);
+  -webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px);
+  opacity:0;transition:opacity .3s ease .06s;
+}
+.lb-root.lb-in .lb-bar{opacity:1}
+
+.lb-btn{
+  display:inline-flex;align-items:center;justify-content:center;
+  width:2.1rem;height:2.1rem;padding:0;
+  border:0;border-radius:50%;
+  background:color-mix(in srgb,#ffffff 12%,transparent);
+  color:#f2f2f0;cursor:pointer;
+  transition:background .18s ease,transform .18s ease,opacity .18s ease;
+}
+.lb-btn svg{width:1.15rem;height:1.15rem}
+.lb-btn:hover{background:color-mix(in srgb,#ffffff 22%,transparent)}
+.lb-btn:active{transform:scale(.93)}
+
+.lb-close{
+  position:absolute;right:calc(1rem + env(safe-area-inset-right,0px));
+  top:calc(1rem + env(safe-area-inset-top,0px));
+  width:2.35rem;height:2.35rem;
+  background:color-mix(in srgb,#1a1b1c 66%,transparent);
+  -webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px);
+  opacity:0;transition:opacity .3s ease .06s,background .18s ease,transform .18s ease;
+}
+.lb-root.lb-in .lb-close{opacity:1}
+
+.lb-count{
+  min-width:3.2rem;text-align:center;
+  font-size:.75rem;font-variant-numeric:tabular-nums;
+  color:color-mix(in srgb,#f2f2f0 78%,transparent);
+}
+
+@media (max-width:860px){
+  .lb-bar{bottom:calc(1rem + env(safe-area-inset-bottom,0px))}
+  .lb-close{right:calc(.7rem + env(safe-area-inset-right,0px));top:calc(.7rem + env(safe-area-inset-top,0px))}
+}
+@media (prefers-reduced-motion:reduce){
+  .lb-backdrop,.lb-stage,.lb-img,.lb-shimmer,.lb-bar,.lb-btn,.lb-close{transition:none}
+  .lb-shimmer{animation:none}
+}
 `
