@@ -15,14 +15,25 @@ package routers
 
 const blogCSS = `
 /* ── 自定义字体：与分享页同源 ──────────────────────────────────────
-   分享页通过 /static/fonts/local.css 加载 CustomFont（font.woff2，约 10 MB，
-   是包含完整中文字库的字体文件），并用 !important 全局强制使用。
-   博客页此前只调整系统字体栈，所以字形永远对不上——方向本身就错了。
-   这里直接引用同一份字体文件，与分享页保持完全一致。
+   分享页通过 /static/fonts/local.css 加载 CustomFont，博客页直接引用同一份文件，
+   两边字形完全一致。
+
+   这份文件是**子集**：原字库 10.2 MB / 46786 字形，含完整中文字库；现在只保留
+   博客实际会用到的那批字——全部笔记正文（含未发布笔记，明天发布也不缺字）、
+   模板里的界面文字、ASCII 与常用标点，共 3782 个码位，压到 927 KB。
+   原字体覆盖的 3743 个字一个没少；缺的 39 个是 emoji 与 Symbol 私用区字符，
+   原字体本来就没有，浏览器会按字体栈回退。
+
+   实测动机：读者第一次访问要下 10 MB 字库，期间 font-display:swap 显示的是
+   回退字体，观感就是「字体坏了 + 加载慢」。换域名后浏览器缓存归零，这个问题
+   才暴露出来。
+
+   ?v= 是内容指纹。同一个 URL 换了字节而浏览器按 30 天缓存旧文件，读者会一直
+   用旧字库；改 URL 是最省事且不会失效的破缓存办法。
    font-display:swap 让文字先用回退字体渲染，字体到达后替换，避免首屏空白。 */
 @font-face{
   font-family:"CustomFont";
-  src:url("/static/fonts/font.woff2") format("woff2");
+  src:url("/static/fonts/font.woff2?v=61bbee1cc3") format("woff2");
   font-weight:normal;font-style:normal;font-display:swap;
 }
 :root{
