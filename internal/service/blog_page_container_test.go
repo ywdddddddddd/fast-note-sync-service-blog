@@ -146,12 +146,18 @@ func TestApplyPageContainersIsANoOpWithoutMarkers(t *testing.T) {
 	}
 }
 
-// TestPageContainerWhitelistIsExactlyThree 白名单只有三个名字。
+// TestPageContainerWhitelistIsTheReviewedSet 白名单就是这一组固定的名字。
 //
 // 名字越多越接近「自定义 HTML」:任意容器名就是任意 <div class>。
 // 若这里失败,说明有人在没有重新审视那条排除项的情况下放宽了边界。
-func TestPageContainerWhitelistIsExactlyThree(t *testing.T) {
-	want := []string{"profile-head", "timeline", "links"}
+//
+// 断言按「全等」而不是「包含」写,并保留顺序:这条测试的作用是逼下一次改动重新审视边界,
+// 所以任何增删都必须显式改到这里。
+//
+// profile-meta 自首个版本就在列表里(为简历页的两列事实网格而加),而这条测试当初按三个名字写,
+// 于是从诞生起就是红的 —— 一个永远失败的守卫等于没有守卫。现在它对齐实际集合。
+func TestPageContainerWhitelistIsTheReviewedSet(t *testing.T) {
+	want := []string{"profile-head", "profile-meta", "timeline", "links"}
 	if len(pageContainerNames) != len(want) {
 		t.Fatalf("whitelist has %d names, want %d", len(pageContainerNames), len(want))
 	}
