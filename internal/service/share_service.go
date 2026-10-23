@@ -27,6 +27,7 @@ import (
 	"github.com/haierkeys/fast-note-sync-service/internal/dto"
 	pkgapp "github.com/haierkeys/fast-note-sync-service/pkg/app"
 	"github.com/haierkeys/fast-note-sync-service/pkg/code"
+	"github.com/haierkeys/fast-note-sync-service/pkg/safego"
 	"github.com/haierkeys/fast-note-sync-service/pkg/shortlink"
 	"github.com/haierkeys/fast-note-sync-service/pkg/timex"
 	"github.com/haierkeys/fast-note-sync-service/pkg/util"
@@ -264,6 +265,13 @@ type shareService struct {
 	// askVectors 保存语义检索通道所用的已嵌入语料。在首次提问触发构建之前为 nil；
 	// 每个读取方都能容忍 nil，并回退到 BM25。
 	askVectors *askVectorStore
+
+	// askRetrievalSem caps concurrent retrieval pipelines. Created lazily by retrievalGate so a
+	// width-0 value is never observed; see blog_ask_guard.go for why the cap exists and why it
+	// must not cover generation.
+	// askRetrievalSem 限制并发检索管线数。由 retrievalGate 惰性创建，因此不会观察到零容量；
+	// 上限为何存在、以及为何绝不能覆盖生成阶段，见 blog_ask_guard.go。
+	askRetrievalSem chan struct{}
 
 	// Statistics buffer
 	// 统计缓冲区
@@ -567,14 +575,26 @@ func (s *shareService) VerifyShare(ctx context.Context, token string, rid string
 				if util.EncodeMD5(password) == share.Password {
 					// 3. Verification succeeds, silently upgrade the password hash to bcrypt in a background goroutine
 					// 3. 验证成功，在后台协程中将密码哈希静默升级为 bcrypt
-					go func(uid, shareID int64, plainPwd string) {
-						newHash, err := bcrypt.GenerateFromPassword([]byte(plainPwd), bcrypt.DefaultCost)
+					//
+					// safego.Go, not a bare goroutine: this runs inside a request handler that any
+					// holder of an old share link can reach, and an unrecovered panic here kills
+					// the process rather than failing one request. The work is a bcrypt call plus
+					// one SQL update — small, but it is on a path the public can trigger, and the
+					// cost of being wrong is the whole blog.
+					//
+					// 用 safego.Go 而不是裸协程：这段代码跑在任何持有旧分享链接的人都能到达的请求
+					// 处理器里，此处未被 recover 的 panic 会终止进程，而不是让一个请求失败。
+					// 它的工作只是一次 bcrypt 加一条 SQL 更新——很小，但它位于公众可触发的路径上，
+					// 判断错的代价是整个博客。
+					shareID, shareUID := share.ID, share.UID
+					safego.Go(s.logger, func() {
+						newHash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 						if err == nil {
 							// Update password hash in db, using background context to prevent cancellation
 							// 在 db 中更新密码哈希，使用后台 context 避免因请求结束被取消
-							_ = s.repo.UpdatePassword(context.Background(), uid, shareID, string(newHash))
+							_ = s.repo.UpdatePassword(context.Background(), shareUID, shareID, string(newHash))
 						}
-					}(share.UID, share.ID, password)
+					})
 				} else {
 					return nil, domain.ErrSharePasswordInvalid
 				}

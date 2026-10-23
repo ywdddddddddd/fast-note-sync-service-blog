@@ -999,10 +999,30 @@ func (s *shareService) Ask(ctx context.Context, opts AskOptions, emit func(AskEv
 	// returned label names the channels that actually contributed, so the progress line
 	// describes what happened instead of always claiming a hybrid search.
 	//
+	// It runs behind the retrieval gate: at most askRetrievalConcurrency retrievals at a time,
+	// because those seconds are the ones that cost money per question. The gate is released the
+	// moment retrieval returns — the streaming that follows is long but nearly free, and holding
+	// the gate across it would turn a 2-slot limit into "one visitor at a time, everybody else
+	// gets 503 for 30 seconds".
+	//
 	// 检索现在由 askHybridRetrieve 内部走三步：BM25 召回、可选的语义通道、可选的交叉编码器
 	// 决定最终顺序。返回的标签指明实际生效的通道，使进度行描述真实发生的事，
 	// 而不是永远声称做了混合检索。
-	hits, channels := s.askHybridRetrieve(ctx, opts, corpus, tokens, topK)
+	//
+	// 它在检索闸之后运行：同一时刻最多 askRetrievalConcurrency 次检索，因为这些秒数是每次提问
+	// 真金白银的那部分。闸在检索返回的瞬间就归还——随后的流式输出很长但几乎免费，
+	// 若跨过它继续持闸，一个 2 名额的限制就会退化成「一次只服务一个人，其余人 30 秒内都收 503」。
+	hits, channels, gateErr := s.askRetrieveGuarded(func() ([]*askHit, string) {
+		return s.askHybridRetrieve(ctx, opts, corpus, tokens, topK)
+	})
+	if gateErr != nil {
+		// Capacity, not failure. Said in the answer area because the SSE headers were already
+		// committed by the progress stages above, so an HTTP status is no longer available.
+		//
+		// 这是容量问题，不是故障。写在回答区里说，是因为上面的进度事件已经把 SSE 响应头提交了，
+		// 已经无法再改 HTTP 状态码。
+		return emit(AskEvent{Type: "error", Message: "检索繁忙，请稍候再试"})
+	}
 	if err := emit(AskEvent{Type: "stage",
 		Stage: fmt.Sprintf("在 %d 篇笔记中按%s检索，命中 %d 篇…", len(corpus.notes), channels, len(hits))}); err != nil {
 		return err

@@ -10,6 +10,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/haierkeys/fast-note-sync-service/pkg/safego"
 	"github.com/haierkeys/fast-note-sync-service/pkg/util"
 )
 
@@ -84,22 +85,31 @@ func (s *shareService) askVectorCandidates(
 			idx = loaded
 		} else {
 			notes := corpus.notes
-			go func() {
+			// A panic in a background goroutine terminates the whole process — it is not
+			// scoped to the request that spawned it. The vector build touches text slicing
+			// and third-party JSON, which is exactly where a boundary bug hides, so it must
+			// not be able to take the blog down: recovering here degrades the feature to BM25
+			// instead.
+			//
+			// safego.Go rather than a bare `go func()` with an inline recover, because the
+			// inline form threw away the one piece of evidence that matters. An earlier
+			// boundary bug (byte offset used as a rune offset) crashed the service every
+			// 15–60 seconds and the log recorded only the sentence, never the frame: the
+			// recover caught the panic and the stack was lost with it. safego.Go logs
+			// debug.Stack() alongside the value, so the next occurrence is diagnosable
+			// without a rebuild.
+			//
+			// 后台 goroutine 里的 panic 会终止整个进程——它并不局限于发起它的那个请求。
+			// 向量构建涉及文本切片与第三方 JSON，而这正是边界缺陷的藏身处，
+			// 因此不能让它把博客带下去：在这里 recover，功能退化为 BM25 即可。
+			//
+			// 用 safego.Go 而不是带内联 recover 的裸 go func()，是因为内联那种写法丢掉了
+			// 唯一要紧的证据。此前的一个边界缺陷（把字节偏移当 rune 偏移用）每 15–60 秒
+			// 让服务崩一次，日志里只留下那句话、没有一帧调用栈：recover 接住了 panic，
+			// 堆栈也随之消失。safego.Go 会把 debug.Stack() 和 panic 值一起记下，
+			// 使下一次发生时不必重新编译就能定位。
+			safego.Go(s.logger, func() {
 				defer s.askVectors.endBuild(opts.UID)
-				// A panic in a background goroutine terminates the whole process — it is not
-				// scoped to the request that spawned it. The vector build touches text
-				// slicing and third-party JSON, which is exactly where a boundary bug hides,
-				// so it must not be able to take the blog down: recovering here degrades the
-				// feature to BM25 instead.
-				//
-				// 后台 goroutine 里的 panic 会终止整个进程——它并不局限于发起它的那个请求。
-				// 向量构建涉及文本切片与第三方 JSON，而这正是边界缺陷的藏身处，
-				// 因此不能让它把博客带下去：在这里 recover，功能退化为 BM25 即可。
-				defer func() {
-					if r := recover(); r != nil {
-						s.logger.Error("blog ask: vector index build panicked, staying on BM25")
-					}
-				}()
 				built, err := s.buildVectorIndex(context.Background(), opts.UID, notes, cfg, fingerprint)
 				if err != nil {
 					s.logger.Warn("blog ask: vector index build failed, staying on BM25")
@@ -112,7 +122,7 @@ func (s *shareService) askVectorCandidates(
 					// 持久化只是优化，从来不是必需：索引已在内存中，本次回答不受影响。
 					s.logger.Warn("blog ask: could not persist vector index")
 				}
-			}()
+			})
 			return nil, nil
 		}
 	}

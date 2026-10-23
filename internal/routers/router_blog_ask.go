@@ -75,6 +75,39 @@ func registerBlogAskRoutes(r *gin.Engine, appContainer *app.App) {
 			return
 		}
 
+		// Abuse gates, cheapest first, both keyed on the real client address rather than on a
+		// header the client can rewrite (see blogClientIdentity).
+		//
+		// Frequency before concurrency: a visitor hammering the endpoint should be told to slow
+		// down even when the service is idle, and a visitor with one answer in flight should be
+		// told that specifically rather than being counted as a flood.
+		//
+		// 两道滥用闸，从便宜的开始，两者都以真实客户端地址为键，而不是以客户端能改写的头为键
+		// （见 blogClientIdentity）。
+		//
+		// 先频次、后并发：一个在猛刷端点的访客，即使服务空闲也该被告知放慢；
+		// 而一个已有回答在途的访客应该被告知这一具体事实，而不是被当成洪水。
+		clientKey := blogClientIdentity(c)
+		if !blogGuardInstance.allowAsk(clientKey) {
+			c.JSON(http.StatusTooManyRequests, gin.H{
+				"code": 429, "message": "提问太频繁，请稍等一会儿再问"})
+			return
+		}
+		releaseGen := blogGuardInstance.tryLockGeneration(clientKey)
+		if releaseGen == nil {
+			c.JSON(http.StatusTooManyRequests, gin.H{
+				"code": 429, "message": "您上一个问题还在回答，请等它结束"})
+			return
+		}
+		// Released when the handler returns, which is exactly when the answer finishes
+		// streaming — shareSvc.Ask below is synchronous and returns only after the last SSE
+		// frame. Holding it any longer would be impossible; holding it shorter would let the
+		// same visitor open two paid generations at once.
+		//
+		// 在处理器返回时释放，而那正是回答流式输出结束的时刻——下面的 shareSvc.Ask 是同步的，
+		// 直到最后一帧 SSE 才返回。持有更久做不到；持有更短则会让同一位访客同时开两个付费生成。
+		defer releaseGen()
+
 		var req struct {
 			Question string `json:"question"`
 			History  []struct {

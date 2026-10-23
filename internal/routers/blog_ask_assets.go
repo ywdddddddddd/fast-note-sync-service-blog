@@ -363,7 +363,16 @@ const blogAskScript = `
     }).then(function (res) {
       if (!res.ok) {
         return res.text().then(function (t) {
-          throw new Error('HTTP ' + res.status + (t ? '：' + t.slice(0, 160) : ''));
+          // Prefer the server's own sentence over the status line. The endpoint answers
+          // 400/404/429 with {"code":..,"message":".."} so the reason ("提问太频繁…") can reach
+          // the reader; printing the raw body next to "HTTP 429" would bury it in punctuation.
+          //
+          // 优先用服务端自己的那句话，而不是状态行。该端点用 {"code":..,"message":".."} 回答
+          // 400/404/429，好让原因（「提问太频繁…」）能被读者看到；
+          // 把原始响应体印在 "HTTP 429" 旁边只会把它埋进标点里。
+          var msg = '';
+          try { msg = (JSON.parse(t) || {}).message || ''; } catch (e) {}
+          throw new Error(msg || ('HTTP ' + res.status + (t ? '：' + t.slice(0, 160) : '')));
         });
       }
       var reader = res.body.getReader();

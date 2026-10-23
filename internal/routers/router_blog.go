@@ -119,6 +119,22 @@ func registerBlogRoutes(r *gin.Engine, appContainer *app.App) {
 			return
 		}
 		_ = cfg
+
+		// Rate limiting only, applied after the body is parsed because the vote key needs the
+		// slug and kind. The limits themselves are generous enough that a reader who misclicks
+		// and corrects themselves never notices them; they exist to stop a loop, not a person.
+		//
+		// 只做限流，放在解析请求体之后，因为去重键需要 slug 与 kind。
+		// 限制本身足够宽松，点错又改回来的读者不会察觉；它们是为了挡住循环，不是挡人。
+		switch blogGuardInstance.allowReact(blogClientIdentity(c), in.Slug, in.Kind, in.Delta) {
+		case reactTooFrequent:
+			c.JSON(http.StatusTooManyRequests, gin.H{"error": "操作太频繁，请稍后再试"})
+			return
+		case reactAlreadyVoted:
+			c.JSON(http.StatusTooManyRequests, gin.H{"error": "今天已经对这篇笔记表过态了"})
+			return
+		}
+
 		tally, err := shareSvc.ReactBlogNote(in.Slug, in.Kind, in.Delta)
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
