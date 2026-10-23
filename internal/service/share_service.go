@@ -9,6 +9,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	stdhtml "html"
 	"mime"
 	"net/http"
 	"net/url"
@@ -1072,6 +1073,22 @@ func (s *shareService) rewriteWikiLinks(ctx context.Context, uid int64, content 
 		return target
 	}
 
+	return rewriteWikiLinkSyntax(content, byPath, byName, label)
+}
+
+// rewriteWikiLinkSyntax performs the actual substitution, given the slug lookup tables.
+//
+// Split out from rewriteWikiLinks so the behaviour can be tested without a repository: the
+// lookup tables are the only thing the service contributes, and the substitution rules —
+// which syntax becomes an anchor and which degrades to text — are the part worth pinning down.
+//
+// rewriteWikiLinkSyntax 在给定 slug 查找表的前提下执行实际替换。
+//
+// 从 rewriteWikiLinks 中拆出，以便脱离仓库测试：服务只贡献那两张查找表，
+// 而真正值得钉住的是替换规则本身——哪种语法变成锚点、哪种降级为纯文本。
+func rewriteWikiLinkSyntax(
+	content string, byPath, byName map[string]string, label func(target, alias string) string,
+) string {
 	// 1) Residual embeds: drop the embed syntax, keep the readable name.
 	// 1) 残留的嵌入语法：去掉嵌入符号，保留可读名称。
 	content = wikiEmbedRegex.ReplaceAllStringFunc(content, func(m string) string {
@@ -1083,14 +1100,28 @@ func (s *shareService) rewriteWikiLinks(ctx context.Context, uid int64, content 
 	})
 
 	// 2) Note-to-note links: point at the target's blog page when it is shared.
+	//
+	// The output is an HTML anchor, not a Markdown link. Notes pasted from WPS/Word carry raw
+	// <table> blocks, and CommonMark does not parse Markdown inside an HTML block — so
+	// "[前磨牙](/blog/1.135-…)" placed in a table cell was emitted verbatim and the reader saw
+	// the markup instead of a link. Emitting <a> works in both contexts, because inline HTML
+	// is passed through everywhere. It also removes the need to detect HTML-block ranges,
+	// which is unreliable on pasted markup whose tags are frequently left unclosed.
+	//
 	// 2) 笔记间链接：目标已分享时指向其博客页面。
+	//
+	// 输出的是 HTML 锚点而不是 Markdown 链接。从 WPS/Word 粘贴的笔记带有原始 <table> 块，
+	// 而 CommonMark 在 HTML 块内部不解析 Markdown——于是放在表格单元格里的
+	// 「[前磨牙](/blog/1.135-…)」被原样输出，读者看到的是标记而不是链接。
+	// 输出 <a> 在两种上下文里都成立，因为行内 HTML 到处都会被透传；
+	// 这也免去了检测 HTML 块区间的必要——那段逻辑在标签经常不闭合的粘贴内容上并不可靠。
 	return wikiLinkRegex.ReplaceAllStringFunc(content, func(m string) string {
 		sub := wikiLinkRegex.FindStringSubmatch(m)
 		if len(sub) < 2 {
 			return m
 		}
 		target := strings.TrimSpace(sub[1])
-		text := label(target, sub[2])
+		text := stdhtml.EscapeString(label(target, sub[2]))
 
 		clean := target
 		if i := strings.IndexAny(clean, "#^"); i >= 0 {
@@ -1102,11 +1133,11 @@ func (s *shareService) rewriteWikiLinks(ctx context.Context, uid int64, content 
 		}
 
 		if slug, ok := byPath[strings.ToLower(clean)]; ok {
-			return fmt.Sprintf("[%s](/blog/%s)", text, slug)
+			return `<a href="/blog/` + slug + `">` + text + `</a>`
 		}
 		if !strings.Contains(clean, "/") {
 			if slug, ok := byName[strings.ToLower(clean)]; ok {
-				return fmt.Sprintf("[%s](/blog/%s)", text, slug)
+				return `<a href="/blog/` + slug + `">` + text + `</a>`
 			}
 		}
 		return text
