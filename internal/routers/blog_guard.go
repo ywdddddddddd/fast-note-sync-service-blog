@@ -141,48 +141,118 @@ func newBlogGuard() *blogGuard {
 // 限流器去改 mock。
 var blogGuardInstance = newBlogGuard()
 
-// blogClientIdentity returns the address the rate limits are keyed on.
+// clientIdentityResolver turns a request into the address the rate limits are keyed on.
 //
-// Not c.ClientIP(): gin trusts every proxy unless SetTrustedProxies is configured (it is
-// not), so ClientIP takes the left-most X-Forwarded-For entry — a header the client writes.
-// Any visitor could therefore rotate their own bucket key by sending a different XFF value,
-// which would make every limit below decorative.
+// Not c.ClientIP(): gin trusts every proxy unless SetTrustedProxies is configured (it is not),
+// so ClientIP takes the left-most X-Forwarded-For entry — a header the client writes. Any
+// visitor could rotate their own bucket key by sending a different XFF value, which would make
+// every limit below decorative.
 //
-// What is trustworthy here: nginx overwrites X-Real-IP with $remote_addr (it does not append,
-// so the last writer wins and the last writer is nginx), and it appends the true peer to
-// X-Forwarded-For. So when the TCP peer is loopback — i.e. the request came through nginx —
-// X-Real-IP is authoritative. When the peer is anything else, the connection is direct and the
-// peer address is the only fact available; headers are ignored entirely.
+// What is trustworthy: a header written by a proxy we operate, on a connection that provably
+// came from that proxy. nginx overwrites X-Real-IP with $remote_addr (it sets, it does not
+// append, so the last writer wins and the last writer is nginx). So the rule is: if and only if
+// the TCP peer is in the configured trusted-proxy set, X-Real-IP is authoritative; on every
+// other connection the peer address is the only fact available and headers are ignored outright.
 //
-// blogClientIdentity 返回限流所使用的地址键。
+// The trusted set is why this is a type and not a helper: it used to be hard-coded to loopback,
+// which was right for "nginx on the same host" and wrong for the deployment this blog is moving
+// to — a reverse proxy on the ICP-filing host, one hop away. In that topology every request
+// would arrive from the proxy's public address, so a loopback-only rule would key *all visitors*
+// on one address: six questions per minute for the whole internet, and one generation lock held
+// by whoever asked first. The failure would look like a limit working too well, which is exactly
+// the kind of defect that survives a smoke test.
 //
-// 不用 c.ClientIP()：除非配置了 SetTrustedProxies（本项目没有），否则 gin 信任所有代理，
-// 因此 ClientIP 取的是 X-Forwarded-For 最左边那一项——那是客户端自己写的头。
-// 于是任何访客只要换一个 XFF 值就能换掉自己的桶键，下面每一条限制都会变成装饰。
+// 把请求解析成限流所键的地址。
 //
-// 这里可信的东西是：nginx 用 $remote_addr 覆盖 X-Real-IP（是覆盖不是追加，因此最后写入者
-// 即是 nginx），并把真实对端追加到 X-Forwarded-For。所以当 TCP 对端是回环地址时——
-// 也就是请求来自 nginx——X-Real-IP 是权威的。对端不是回环时，连接是直连，
-// 对端地址是唯一可用的事实，此时完全忽略这些头。
-func blogClientIdentity(c *gin.Context) string {
-	peer := c.Request.RemoteAddr
-	if host, _, err := net.SplitHostPort(peer); err == nil {
-		peer = host
+// 不用 c.ClientIP()：未配置 SetTrustedProxies 时 gin 信任所有代理，于是取 X-Forwarded-For
+// 最左项——那是客户端自己写的头；换一个值就换掉桶键，下面每条限制都变成装饰。
+//
+// 可信的东西是「我们自己运维的代理写的头，且连接确实来自那个代理」。nginx 用 $remote_addr
+// 覆盖写 X-Real-IP（是写，不是追加，所以最后写入者即 nginx）。规则因此是：当且仅当 TCP 对端
+// 落在配置的可信代理集合里，X-Real-IP 才是权威的；其余连接只看对端地址，完全忽略这些头。
+//
+// 可信集合之所以做成类型而不是一个函数：它原本硬编码为回环，这对「同机 nginx」是对的，
+// 对即将迁移到的部署是错的——反代在备案接入机上，隔了一跳。那种拓扑下所有请求都来自代理的
+// 公网地址，只信回环的规则会把**全体访客**键到同一个地址上：全站每分钟 6 次提问，
+// 一把生成锁被最先提问的人占住。这个缺陷的表现是「限制生效得过于彻底」，
+// 恰恰是冒烟测试抓不到的那一类。
+type clientIdentityResolver struct {
+	ips  []net.IP
+	nets []*net.IPNet
+}
+
+// newClientIdentityResolver compiles the trusted-proxy list once, at route registration.
+//
+// An empty list means loopback only — the same default middleware.Proxy applies, so both layers
+// of the process agree about who is a proxy. Disagreement here is worse than either choice: the
+// middleware would rewrite RemoteAddr from a proxy that this type then refuses to trust.
+//
+// newClientIdentityResolver 在注册路由时把可信代理列表编译一次。
+//
+// 空列表表示只信回环——与 middleware.Proxy 的默认值一致，使进程内两层对「谁是代理」判断一致。
+// 两层不一致比任选其一都糟：中间件会采纳某个代理重写的 RemoteAddr，而这个类型随后拒绝信任它。
+func newClientIdentityResolver(trusted []string) *clientIdentityResolver {
+	if len(trusted) == 0 {
+		trusted = []string{"127.0.0.1", "::1"}
 	}
-	if !isLoopbackAddr(peer) {
+	r := &clientIdentityResolver{}
+	for _, entry := range trusted {
+		entry = strings.TrimSpace(entry)
+		if entry == "" {
+			continue
+		}
+		if ip := net.ParseIP(entry); ip != nil {
+			r.ips = append(r.ips, ip)
+			continue
+		}
+		if _, subnet, err := net.ParseCIDR(entry); err == nil {
+			r.nets = append(r.nets, subnet)
+		}
+	}
+	return r
+}
+
+// trustsPeer reports whether a TCP peer is one of the configured proxies.
+// trustsPeer 判断某个 TCP 对端是否属于配置中的代理。
+func (r *clientIdentityResolver) trustsPeer(host string) bool {
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return false
+	}
+	for _, t := range r.ips {
+		if t.Equal(ip) {
+			return true
+		}
+	}
+	for _, n := range r.nets {
+		if n.Contains(ip) {
+			return true
+		}
+	}
+	return false
+}
+
+// identity returns the rate-limit key for a request.
+// identity 返回该请求的限流键。
+func (r *clientIdentityResolver) identity(c *gin.Context) string {
+	peer := peerHost(c.Request.RemoteAddr)
+
+	// Not a proxy we run: this is a direct connection, and its address is the only fact.
+	// 不是我们运维的代理：这是直连，对端地址是唯一的事实。
+	if r == nil || !r.trustsPeer(peer) {
 		return peer
 	}
 
-	// Reached only through a local proxy. Prefer the header nginx overwrites.
-	// 只有经过本地代理才会到这里。优先用 nginx 覆盖写的那个头。
+	// A proxy we run. Prefer the header nginx sets (overwrites, so it cannot be pre-seeded).
+	// 是我们运维的代理。优先用 nginx 设置的那个头（覆盖写，因此无法被预先塞值）。
 	if real := strings.TrimSpace(c.GetHeader("X-Real-IP")); real != "" {
 		if net.ParseIP(real) != nil {
 			return real
 		}
 	}
-	// Fall back to the last XFF entry, which is what the nearest proxy appended. Anything
-	// further left was supplied by the client.
-	// 回退到 XFF 的最后一项，那是最近一跳代理追加的；更靠左的都由客户端自己提供。
+	// Fall back to the last XFF entry — the one the nearest proxy appended. Anything further
+	// left was supplied by the client and is not evidence.
+	// 回退到 XFF 最后一项——最近一跳代理追加的那一项。更靠左的由客户端提供，不是证据。
 	if xff := c.GetHeader("X-Forwarded-For"); xff != "" {
 		parts := strings.Split(xff, ",")
 		last := strings.TrimSpace(parts[len(parts)-1])
@@ -191,6 +261,15 @@ func blogClientIdentity(c *gin.Context) string {
 		}
 	}
 	return peer
+}
+
+// peerHost strips the port from RemoteAddr, tolerating a bare address.
+// peerHost 去掉 RemoteAddr 的端口，兼容不带端口的写法。
+func peerHost(remoteAddr string) string {
+	if host, _, err := net.SplitHostPort(remoteAddr); err == nil {
+		return host
+	}
+	return remoteAddr
 }
 
 // isLoopbackAddr reports whether an address is the local machine.

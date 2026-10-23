@@ -28,6 +28,11 @@ func registerBlogAskRoutes(r *gin.Engine, appContainer *app.App) {
 		return
 	}
 
+	// Compiled once here rather than per request: the trusted-proxy list is startup
+	// configuration, and parsing CIDRs on every question would be work done for no benefit.
+	// 在这里编译一次而不是每个请求编译：可信代理列表是启动期配置，每个问题都去解析 CIDR 是无谓开销。
+	ident := newClientIdentityResolver(appContainer.Config().Server.TrustedProxies)
+
 	r.GET("/blog/ask.js", func(c *gin.Context) {
 		cfg, ok := blogEnabled(c, appContainer)
 		if !ok {
@@ -76,18 +81,18 @@ func registerBlogAskRoutes(r *gin.Engine, appContainer *app.App) {
 		}
 
 		// Abuse gates, cheapest first, both keyed on the real client address rather than on a
-		// header the client can rewrite (see blogClientIdentity).
+		// header the client can rewrite (see clientIdentityResolver).
 		//
 		// Frequency before concurrency: a visitor hammering the endpoint should be told to slow
 		// down even when the service is idle, and a visitor with one answer in flight should be
 		// told that specifically rather than being counted as a flood.
 		//
 		// 两道滥用闸，从便宜的开始，两者都以真实客户端地址为键，而不是以客户端能改写的头为键
-		// （见 blogClientIdentity）。
+		// （见 clientIdentityResolver）。
 		//
 		// 先频次、后并发：一个在猛刷端点的访客，即使服务空闲也该被告知放慢；
 		// 而一个已有回答在途的访客应该被告知这一具体事实，而不是被当成洪水。
-		clientKey := blogClientIdentity(c)
+		clientKey := ident.identity(c)
 		if !blogGuardInstance.allowAsk(clientKey) {
 			c.JSON(http.StatusTooManyRequests, gin.H{
 				"code": 429, "message": "提问太频繁，请稍等一会儿再问"})

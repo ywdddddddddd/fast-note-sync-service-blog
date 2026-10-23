@@ -24,57 +24,95 @@ func newGuardTestContext(remoteAddr string, headers map[string]string) *gin.Cont
 	return c
 }
 
-// TestBlogClientIdentity covers the trust decision the rate limits rest on.
+// TestClientIdentity covers the trust decision the rate limits rest on.
 //
 // A wrong answer here is not cosmetic: if the identity could be chosen by the client, every
-// limit below would be bypassable by rotating one header value. So the cases that matter are
-// the adversarial ones — a foreign X-Forwarded-For sent through nginx must be ignored, and a
-// direct connection must not be able to impersonate anyone by header at all.
+// limit below would be bypassable by rotating one header value, and if the identity collapsed
+// onto the proxy, every visitor would share one bucket. So the cases that matter are the
+// adversarial ones — a foreign X-Forwarded-For sent through a proxy must be ignored, a direct
+// connection must not be able to impersonate anyone by header at all — plus the one topology
+// this blog is moving to: a reverse proxy on a different host.
 //
-// TestBlogClientIdentity 覆盖限流所依赖的信任判断。
+// TestClientIdentity 覆盖限流所依赖的信任判断。
 //
-// 这里答错不是外观问题：如果身份可以由客户端选择，下面每一条限制都能靠变换一个头的值绕过。
-// 因此真正要紧的是那些对抗性用例——经 nginx 传来的伪造 X-Forwarded-For 必须被忽略，
-// 直连也必须完全无法靠请求头冒充任何人。
-func TestBlogClientIdentity(t *testing.T) {
+// 这里答错不是外观问题：如果身份可以由客户端选择，下面每一条限制都能靠变换一个头的值绕过；
+// 如果身份塌到代理身上，全体访客会共享一个桶。因此真正要紧的是对抗性用例——经代理传来的
+// 伪造 X-Forwarded-For 必须被忽略、直连必须完全无法靠请求头冒充任何人——外加这套博客即将
+// 迁移到的那种拓扑：反代在另一台机器上。
+func TestClientIdentity(t *testing.T) {
+	// Loopback-only, i.e. the default when trusted-proxies is unset.
+	// 只信回环，即未配置 trusted-proxies 时的默认值。
+	loopbackOnly := newClientIdentityResolver(nil)
+	// The deployment this blog is moving to: the ICP-filing host proxies for us.
+	// 博客即将迁移到的部署：备案接入机替我们做反代。
+	withFilingHost := newClientIdentityResolver([]string{"127.0.0.1", "::1", "39.105.27.90"})
+
 	cases := []struct {
 		name       string
+		resolver   *clientIdentityResolver
 		remoteAddr string
 		headers    map[string]string
 		want       string
 	}{
 		{
 			name:       "直连：只看对端，忽略伪造头",
+			resolver:   withFilingHost,
 			remoteAddr: "203.0.113.9:44321",
 			headers:    map[string]string{"X-Real-IP": "1.2.3.4", "X-Forwarded-For": "5.6.7.8"},
 			want:       "203.0.113.9",
 		},
 		{
-			name:       "经 nginx：用 X-Real-IP（被覆盖写）",
+			name:       "同机 nginx：用 X-Real-IP（被覆盖写）",
+			resolver:   loopbackOnly,
 			remoteAddr: "127.0.0.1:51000",
 			headers:    map[string]string{"X-Real-IP": "111.47.84.40", "X-Forwarded-For": "1.1.1.1, 111.47.84.40"},
 			want:       "111.47.84.40",
 		},
 		{
-			name:       "经 nginx 但只有 XFF：取最后一项（代理追加的）",
+			name:       "跨机反代且已列入可信：仍取真实访客",
+			resolver:   withFilingHost,
+			remoteAddr: "39.105.27.90:41234",
+			headers:    map[string]string{"X-Real-IP": "111.47.84.40"},
+			want:       "111.47.84.40",
+		},
+		{
+			name:       "跨机反代但未列入可信：退回代理地址，绝不信头",
+			resolver:   loopbackOnly,
+			remoteAddr: "39.105.27.90:41234",
+			headers:    map[string]string{"X-Real-IP": "111.47.84.40", "X-Forwarded-For": "9.9.9.9"},
+			want:       "39.105.27.90",
+		},
+		{
+			name:       "CIDR 可信：整段网段内的代理被采信",
+			resolver:   newClientIdentityResolver([]string{"10.0.0.0/8"}),
+			remoteAddr: "10.4.5.6:999",
+			headers:    map[string]string{"X-Real-IP": "203.0.113.77"},
+			want:       "203.0.113.77",
+		},
+		{
+			name:       "可信代理但只有 XFF：取最后一项（代理追加的）",
+			resolver:   loopbackOnly,
 			remoteAddr: "127.0.0.1:51001",
 			headers:    map[string]string{"X-Forwarded-For": "9.9.9.9, 111.47.84.40"},
 			want:       "111.47.84.40",
 		},
 		{
 			name:       "本机直连、无任何头：就是回环（诊断脚本豁免的依据）",
+			resolver:   loopbackOnly,
 			remoteAddr: "127.0.0.1:51002",
 			headers:    nil,
 			want:       "127.0.0.1",
 		},
 		{
 			name:       "IPv6 回环经代理",
+			resolver:   loopbackOnly,
 			remoteAddr: "[::1]:51003",
 			headers:    map[string]string{"X-Real-IP": "111.47.84.40"},
 			want:       "111.47.84.40",
 		},
 		{
 			name:       "X-Real-IP 不是 IP：退回 XFF 最后一项",
+			resolver:   loopbackOnly,
 			remoteAddr: "127.0.0.1:51004",
 			headers:    map[string]string{"X-Real-IP": "not-an-ip", "X-Forwarded-For": "111.47.84.40"},
 			want:       "111.47.84.40",
@@ -84,8 +122,8 @@ func TestBlogClientIdentity(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			c := newGuardTestContext(tc.remoteAddr, tc.headers)
-			if got := blogClientIdentity(c); got != tc.want {
-				t.Fatalf("blogClientIdentity = %q, 期望 %q", got, tc.want)
+			if got := tc.resolver.identity(c); got != tc.want {
+				t.Fatalf("identity = %q, 期望 %q", got, tc.want)
 			}
 		})
 	}

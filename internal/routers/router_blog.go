@@ -79,6 +79,10 @@ func registerBlogRoutes(r *gin.Engine, appContainer *app.App) {
 		return
 	}
 
+	// Same resolver the Q&A endpoints use, built from the same startup configuration.
+	// 与问答端点同一套解析器，取自同一份启动期配置。
+	ident := newClientIdentityResolver(appContainer.Config().Server.TrustedProxies)
+
 	// Sites values are re-read per request, so toggling blog.enabled from the plugin's
 	// settings tab takes effect immediately without restarting the service.
 	// 站点配置按请求读取，因此从插件设置页切换 blog.enabled 会立即生效，无需重启服务。
@@ -126,7 +130,7 @@ func registerBlogRoutes(r *gin.Engine, appContainer *app.App) {
 		//
 		// 只做限流，放在解析请求体之后，因为去重键需要 slug 与 kind。
 		// 限制本身足够宽松，点错又改回来的读者不会察觉；它们是为了挡住循环，不是挡人。
-		switch blogGuardInstance.allowReact(blogClientIdentity(c), in.Slug, in.Kind, in.Delta) {
+		switch blogGuardInstance.allowReact(ident.identity(c), in.Slug, in.Kind, in.Delta) {
 		case reactTooFrequent:
 			c.JSON(http.StatusTooManyRequests, gin.H{"error": "操作太频繁，请稍后再试"})
 			return
