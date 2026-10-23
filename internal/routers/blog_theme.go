@@ -1207,6 +1207,11 @@ mjx-container[display="true"]{margin:.9rem 0}
     width:100%;height:min(88vh,100%);
     border-radius:1.25rem 1.25rem 0 0;transform-origin:50% 100%;
     transform:translateY(24px);
+    /* 键盘弹起时脚本会内联改写 height/bottom（见 ask 脚本的 Soft-keyboard avoidance）。
+       把这两个属性也纳入过渡，面板才会随键盘平滑升降，而不是瞬间跳位。
+       用较短时长：键盘动画本身约 200ms，跟随得比它慢会显得拖沓。 */
+    transition:opacity .34s ease,transform .44s cubic-bezier(.22,1,.36,1),
+      height .2s ease,bottom .2s ease;
   }
   .ask-body{padding:.85rem}
   .ask-form{padding-bottom:calc(.55rem + env(safe-area-inset-bottom,0px))}

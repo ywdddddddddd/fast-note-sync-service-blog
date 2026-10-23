@@ -90,6 +90,8 @@ const blogAskScript = `
     panel.hidden = false;
     fab.setAttribute('aria-expanded', 'true');
     host.classList.add('ask-on');
+    bindViewport();
+    syncViewport();
     // Two frames so the element is laid out before the transition starts.
     requestAnimationFrame(function () { requestAnimationFrame(function () {
       host.classList.add('ask-in');
@@ -110,6 +112,7 @@ const blogAskScript = `
       if (settled) return;
       settled = true;
       clearTimeout(guard);
+      unbindViewport();
       panel.hidden = true; backdrop.hidden = true; host.classList.remove('ask-on');
       panel.removeEventListener('transitionend', done);
     };
@@ -123,6 +126,69 @@ const blogAskScript = `
   document.addEventListener('keydown', function (e) {
     if (e.key === 'Escape' && OPEN) close();
   });
+
+  // ── Soft-keyboard avoidance ────────────────────────────────────────────────
+  //
+  // On mobile the panel is bottom-anchored at 88vh. A soft keyboard shrinks the *visual*
+  // viewport while leaving the layout viewport — and therefore vh units and fixed positioning —
+  // untouched, so the panel's lower half ends up behind the keyboard and the input field is
+  // half hidden.
+  //
+  // The panel is therefore pinned to the visual viewport while it is open: height follows the
+  // visible area, and bottom is pushed up by however much the keyboard occludes. Desktop keeps
+  // the untouched CSS layout because the media query gate below never lets the inline styles
+  // apply.
+  //
+  // 移动端软键盘弹出时收缩的是视觉视口，而布局视口——以及依赖它的 vh 单位与固定定位——不动，
+  // 于是面板下半部分落到键盘后面，输入框被盖掉一半。
+  //
+  // 因此面板打开期间钉在视觉视口上：高度跟随可见区域，底边按键盘遮挡量顶起。
+  // 桌面端由下面的媒体查询守卫拦住，内联样式不会生效，仍走原 CSS 布局。
+  var viewport = window.visualViewport;
+  var viewportRaf = 0;
+  var narrowQuery = window.matchMedia ? window.matchMedia('(max-width:860px)') : null;
+
+  function syncViewport() {
+    if (!OPEN || !viewport) return;
+    if (viewportRaf) return;
+    viewportRaf = requestAnimationFrame(function () {
+      viewportRaf = 0;
+      if (!OPEN) return;
+      if (narrowQuery && !narrowQuery.matches) {
+        panel.style.height = '';
+        panel.style.bottom = '';
+        return;
+      }
+      // innerHeight covers the whole layout viewport; whatever the visual viewport does not
+      // cover — below it or scrolled above it — is what the keyboard occupies.
+      // innerHeight 是整个布局视口；视觉视口没有覆盖到的部分（其下方或已在其上方卷走的）
+      // 就是键盘占据的高度。
+      var occluded = Math.max(0, window.innerHeight - viewport.height - viewport.offsetTop);
+      panel.style.height = Math.round(viewport.height * 0.88) + 'px';
+      panel.style.bottom = Math.round(occluded) + 'px';
+      // Follow the newest turn only while the keyboard is actually up: scrolling to the bottom
+      // on every resize would yank the reader away from the history they were re-reading.
+      // 只在键盘真的弹起时跟到最新一轮：每次 resize 都滚到底会把正在回看历史的读者拽走。
+      if (occluded > 0 && body) body.scrollTop = body.scrollHeight;
+    });
+  }
+
+  function bindViewport() {
+    if (!viewport) return;
+    viewport.addEventListener('resize', syncViewport);
+    viewport.addEventListener('scroll', syncViewport);
+    window.addEventListener('orientationchange', syncViewport);
+  }
+  function unbindViewport() {
+    if (viewport) {
+      viewport.removeEventListener('resize', syncViewport);
+      viewport.removeEventListener('scroll', syncViewport);
+    }
+    window.removeEventListener('orientationchange', syncViewport);
+    if (viewportRaf) { cancelAnimationFrame(viewportRaf); viewportRaf = 0; }
+    panel.style.height = '';
+    panel.style.bottom = '';
+  }
 
   // ── Auto-grow textarea ─────────────────────────────────────────────────────
   function grow() {
