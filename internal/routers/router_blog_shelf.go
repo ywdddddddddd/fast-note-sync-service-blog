@@ -55,9 +55,30 @@ func registerBlogShelfRoutes(blog *gin.RouterGroup, appContainer *app.App) {
 				Note:     b.Note,
 				Tags:     b.Tags,
 				Added:    b.Added,
-				Pages:    n,
-				CoverURL: "/blog/shelfcover/" + b.ID + "?v=" + shelfCoverVersion(b),
+				Pages:      n,
+				CoverURL:   "/blog/shelfcover/" + b.ID + "?v=" + shelfCoverVersion(b),
+				Collection: b.Collection,
 			})
+		}
+
+		// 按栏目分组，保持书目里首次出现的顺序——分组顺序应当由 shelf.json 决定，
+		// 而不是由 map 的迭代顺序决定。
+		//
+		// Group into rails, preserving first-appearance order: the section order should come
+		// from shelf.json, not from map iteration order.
+		cols := make([]shelfCollection, 0, 4)
+		index := map[string]int{}
+		for _, c := range cards {
+			name := c.Collection
+			if name == "" {
+				name = "其它资料"
+			}
+			if i, ok := index[name]; ok {
+				cols[i].Cards = append(cols[i].Cards, c)
+				continue
+			}
+			index[name] = len(cols)
+			cols = append(cols, shelfCollection{Name: name, Cards: []shelfCard{c}})
 		}
 
 		shelfURL := base + "/blog/shelf"
@@ -70,6 +91,7 @@ func registerBlogShelfRoutes(blog *gin.RouterGroup, appContainer *app.App) {
 			Indexable:   blogIndexable(cfg.Indexable),
 			CSS:         template.CSS(blogCSS),
 			Cards:       cards,
+			Collections: cols,
 			Count:       len(cards),
 			Canonical:   shelfURL,
 			Description: desc,

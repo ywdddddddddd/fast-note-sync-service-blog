@@ -16,23 +16,32 @@ import (
 //
 // shelfCard 是墙上的一张封面。这里的一切都是显示数据；书的 id 是唯一会进入 URL 的东西。
 type shelfCard struct {
-	ID       string
-	Title    string
-	Author   string
-	Note     string
-	Tags     []string
-	Added    string
-	Pages    int
-	CoverURL string
+	ID         string
+	Title      string
+	Author     string
+	Note       string
+	Tags       []string
+	Added      string
+	Pages      int
+	CoverURL   string
+	Collection string
+}
+
+// shelfCollection is one horizontal rail on the shelf page.
+// 一条横向轨道；书架页可能有多条。
+type shelfCollection struct {
+	Name  string
+	Cards []shelfCard
 }
 
 type shelfView struct {
 	Title     string
 	SiteName  string
 	Indexable bool
-	CSS       template.CSS
-	Cards     []shelfCard
-	Count     int
+	CSS         template.CSS
+	Cards       []shelfCard
+	Collections []shelfCollection
+	Count       int
 
 	Canonical   string
 	Description string
@@ -106,23 +115,33 @@ const blogShelfPage = `<!DOCTYPE html>
     </div>
 
     {{if .Cards}}
-    <div class="shelf-grid">
-      {{range .Cards}}
-      <a class="shelf-card" href="/blog/shelf/{{.ID}}">
-        <div class="shelf-cover">
-          <div class="shelf-jacket"><span>{{.Title}}</span></div>
-          <img src="{{.CoverURL}}" alt="{{.Title}} 封面" loading="lazy" decoding="async" onerror="this.remove()">
-          <div class="shelf-sheen"></div>
-        </div>
-        <div class="shelf-info">
-          <h2 class="shelf-title">{{.Title}}</h2>
-          {{if .Author}}<p class="shelf-author">{{.Author}}</p>{{end}}
-          {{if .Note}}<p class="shelf-note">{{.Note}}</p>{{end}}
-          <div class="shelf-foot"><span>{{.Pages}} 页</span>{{if .Added}}<span>{{.Added}}</span>{{end}}</div>
-        </div>
-      </a>
+    {{range .Collections}}
+    <section class="shelf-col">
+      {{if .Name}}
+      <div class="shelf-col-head">
+        <h2 class="shelf-col-t">{{.Name}}</h2>
+        <span class="shelf-col-n">{{len .Cards}} 册</span>
+      </div>
       {{end}}
-    </div>
+      <div class="shelf-rail">
+        {{range .Cards}}
+        <a class="shelf-card" href="/blog/shelf/{{.ID}}">
+          <div class="shelf-cover">
+            <div class="shelf-jacket"><span>{{.Title}}</span></div>
+            <img src="{{.CoverURL}}" alt="{{.Title}} 封面" loading="lazy" decoding="async" onerror="this.remove()">
+            <div class="shelf-sheen"></div>
+          </div>
+          <div class="shelf-info">
+            <h2 class="shelf-title">{{.Title}}</h2>
+            {{if .Author}}<p class="shelf-author">{{.Author}}</p>{{end}}
+            {{if .Note}}<p class="shelf-note">{{.Note}}</p>{{end}}
+            <div class="shelf-foot"><span>{{.Pages}} 页</span>{{if .Added}}<span>{{.Added}}</span>{{end}}</div>
+          </div>
+        </a>
+        {{end}}
+      </div>
+    </section>
+    {{end}}
     {{else}}
     <div class="shelf-empty">
       <p>书架还是空的。</p>

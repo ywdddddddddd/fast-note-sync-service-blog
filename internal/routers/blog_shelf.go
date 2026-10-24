@@ -112,6 +112,10 @@ type shelfBook struct {
 	// Cover 是可选的封面文件名（在 covers/ 下）。没有它就用第一页兜底，
 	// 而扫描教材的第一页通常本来就是了。
 	Cover string `json:"cover"`
+	// Collection groups books into a rail on the shelf page. Empty books fall into a
+	// catch-all group so an ungrouped book never disappears from the page.
+	// Collection 把书归入书架页上的一条横向轨道；留空的书会落进兜底分组，不会消失。
+	Collection string `json:"collection"`
 	// PagesHint is required in pages mode: there is no PDF to count.
 	// PagesHint 在 pages 模式下必须给：没有 PDF 可数。
 	PagesHint int `json:"pages"`

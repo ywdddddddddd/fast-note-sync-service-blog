@@ -37,7 +37,7 @@ const blogCSS = `
   font-weight:normal;font-style:normal;font-display:swap;
 }
 :root{
-  --font-sans:"CustomFont",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+  --font-sans:"CustomFont","PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans CJK SC",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
   --background:#fff;
   --foreground:#34322d;
   --card:#fff;
@@ -1953,6 +1953,33 @@ html.lb-lock{overflow:hidden}
 .shelf-h1{font-size:1.5rem;font-weight:700;letter-spacing:-.02em;margin:0 0 .3rem}
 .shelf-sub{font-size:.8125rem;color:var(--muted-foreground);margin:0}
 
+/* 一条栏目一条轨道，横向滑动。13 本排成网格要占四行，纵向太长；
+   横向轨道一屏能扫到四五本，其余滑一下就到。 */
+.shelf-col{margin:0 0 1.5rem}
+.shelf-col-head{display:flex;align-items:baseline;gap:.55rem;margin:0 0 .7rem}
+.shelf-col-t{font-size:.95rem;font-weight:600;letter-spacing:.01em;color:var(--foreground);margin:0}
+.shelf-col-n{font-size:.75rem;color:var(--muted-foreground);font-variant-numeric:tabular-nums}
+.shelf-rail{
+  display:flex;gap:1.05rem;
+  overflow-x:auto;overflow-y:hidden;
+  scroll-snap-type:x proximity;
+  scroll-padding-inline-start:.15rem;
+  padding:.2rem .15rem 1rem;
+  -webkit-overflow-scrolling:touch;
+  overscroll-behavior-x:contain;
+}
+.shelf-rail .shelf-card{flex:0 0 12.5rem;width:12.5rem;scroll-snap-align:start}
+.shelf-rail::-webkit-scrollbar{height:6px}
+.shelf-rail::-webkit-scrollbar-track{background:transparent}
+.shelf-rail::-webkit-scrollbar-thumb{
+  background:color-mix(in srgb,var(--muted-foreground) 26%,transparent);border-radius:3px}
+.shelf-rail::-webkit-scrollbar-thumb:hover{
+  background:color-mix(in srgb,var(--muted-foreground) 42%,transparent)}
+@media (max-width:860px){
+  .shelf-rail .shelf-card{flex:0 0 10.2rem;width:10.2rem}
+  .shelf-rail{gap:.8rem}
+}
+/* 旧的网格容器已不再渲染，保留选择器只为兼容缓存中的旧页面结构。 */
 .shelf-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(15rem,1fr));gap:1.7rem 1.4rem}
 .shelf-card{display:block;text-decoration:none;color:inherit;animation:shelf-in .5s cubic-bezier(.22,1,.36,1) both}
 @keyframes shelf-in{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
