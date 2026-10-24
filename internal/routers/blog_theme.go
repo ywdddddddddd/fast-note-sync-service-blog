@@ -1465,7 +1465,8 @@ html.fns-arrived .shell{animation:fns-arrive-fade .62s cubic-bezier(.22,1,.36,1)
   border-radius:50%;border:1px solid var(--border);
   background:color-mix(in srgb,var(--muted) 40%,transparent);
 }
-.page-meta{margin:-.2rem 0 1.6rem;font-size:.8125rem;color:var(--muted)}
+/* 页面笔记的「最后更新」。同样不能用 --muted：那是背景色，白底上不可见。 */
+.page-meta{margin:-.2rem 0 1.6rem;font-size:.8125rem;color:var(--muted-foreground)}
 
 /* ── 三个排版容器 ──────────────────────────────────────────────────── */
 /* 容器是增强，不是前提：样式整体失效时，里面的 Markdown 仍会以普通段落与列表呈现，
@@ -1521,7 +1522,9 @@ html.fns-arrived .shell{animation:fns-arrive-fade .62s cubic-bezier(.22,1,.36,1)
   letter-spacing:-.01em;color:var(--foreground);
 }
 .pc-profile-head strong+br{display:none}
-.pc-profile-head>p{color:var(--muted);font-size:1rem;margin-top:.35rem}
+/* 一句话介绍用 --muted-foreground。这里原本写的是 --muted（#f3f3f3，背景令牌），
+   白底上 1.11:1，整行字等于没写——与顶栏入口那个是同一个错。 */
+.pc-profile-head>p{color:var(--muted-foreground);font-size:1rem;margin-top:.35rem}
 
 /* timeline —— 经历 */
 .pc-timeline{margin:1.5rem 0 1.8rem}
