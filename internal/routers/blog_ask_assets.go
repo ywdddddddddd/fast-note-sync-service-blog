@@ -24,6 +24,20 @@ const blogAskScript = `
   if (!host || !window.fetch) return;
 
   var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  // 微信内置浏览器（iOS 用 WKWebView、Android 用 X5）键盘弹出时不改变布局视口，
+  // 也不给 visualViewport 有效高度，而 position:fixed 又不跟随键盘——
+  // 所以那套「钉在视觉视口上」的办法在微信里必然失败。
+  //
+  // 微信里改成：面板回到文档流，让原生「把聚焦元素滚进视野」的行为接管，
+  // 并在聚焦后主动滚到底，保证输入框一定在键盘上方。
+  //
+  // WeChat's in-app browser keeps the layout viewport unchanged when the keyboard opens and
+  // gives no usable visualViewport height, while position:fixed does not follow the keyboard.
+  // Pinning to the visual viewport therefore cannot work there. Fall back to the document flow
+  // and let the native "scroll focused element into view" behaviour do the job.
+  var inWeChat = /MicroMessenger/i.test(navigator.userAgent);
+  if (inWeChat) document.documentElement.classList.add('is-wx');
   var OPEN = false, BUSY = false, CTRL = null;
 
 
@@ -159,35 +173,68 @@ const blogAskScript = `
         panel.style.bottom = '';
         return;
       }
-      // innerHeight covers the whole layout viewport; whatever the visual viewport does not
-      // cover — below it or scrolled above it — is what the keyboard occupies.
-      // innerHeight 是整个布局视口；视觉视口没有覆盖到的部分（其下方或已在其上方卷走的）
-      // 就是键盘占据的高度。
-      var occluded = Math.max(0, window.innerHeight - viewport.height - viewport.offsetTop);
-      panel.style.height = Math.round(viewport.height * 0.88) + 'px';
-      panel.style.bottom = Math.round(occluded) + 'px';
-      // Follow the newest turn only while the keyboard is actually up: scrolling to the bottom
-      // on every resize would yank the reader away from the history they were re-reading.
-      // 只在键盘真的弹起时跟到最新一轮：每次 resize 都滚到底会把正在回看历史的读者拽走。
-      if (occluded > 0 && body) body.scrollTop = body.scrollHeight;
+      // Pin the panel to the visual viewport: top = how far the page was pushed up,
+      // height = what is actually visible. The earlier version set only height and bottom,
+      // then scrolled the transcript to the end — with the keyboard up those three add up and
+      // hand the panel a negative top, which is why the input box vanished past the edge.
+      //
+      // 面板直接钉在视觉视口上：top 取页面被顶起的量，height 取真正可见的高度。
+      // 旧写法只设 height 与 bottom、再把对话滚到底——键盘弹起时三者相加会算出负的 top，
+      // 输入框就是这么被挤出屏幕的。
+      // 取两者较小值：键盘升降过程中 visualViewport 与 innerHeight 会短暂不同步，
+      // 用较大的那个就会把面板底部撑到键盘下面去。
+      //
+      // Take the smaller of the two: during the keyboard animation visualViewport and
+      // innerHeight disagree for a frame or two, and trusting the larger one leaves the
+      // panel's bottom edge sitting behind the keyboard.
+      var visH = viewport ? viewport.height : window.innerHeight;
+      var visT = viewport ? viewport.offsetTop : 0;
+      var h = Math.min(visH, window.innerHeight);
+      panel.style.top = Math.max(0, Math.round(visT)) + 'px';
+      panel.style.height = Math.round(h) + 'px';
+      panel.style.bottom = 'auto';
     });
+  }
+
+  // iOS 只在键盘动画结束后补发一次 resize，动画期间拿到的高度仍是旧值。
+  // 所以聚焦后自己轮询 1.5 秒，把中间那几帧补上；稳定后自动停。
+  //
+  // iOS dispatches visualViewport resize only after the keyboard animation settles, so
+  // reading during the animation gives the old height. Poll for 1.5s after focus to catch
+  // the intermediate frames, then stop.
+  var pollTimer = 0;
+  function startViewportPoll() {
+    if (pollTimer) return;
+    var until = Date.now() + 1500;
+    pollTimer = setInterval(function () {
+      syncViewport();
+      if (Date.now() > until) { clearInterval(pollTimer); pollTimer = 0; }
+    }, 120);
+  }
+  function stopViewportPoll() {
+    if (pollTimer) { clearInterval(pollTimer); pollTimer = 0; }
   }
 
   function bindViewport() {
     if (!viewport) return;
     viewport.addEventListener('resize', syncViewport);
     viewport.addEventListener('scroll', syncViewport);
+    window.addEventListener('resize', syncViewport);
     window.addEventListener('orientationchange', syncViewport);
+    startViewportPoll();
   }
   function unbindViewport() {
+    stopViewportPoll();
     if (viewport) {
       viewport.removeEventListener('resize', syncViewport);
       viewport.removeEventListener('scroll', syncViewport);
     }
+    window.removeEventListener('resize', syncViewport);
     window.removeEventListener('orientationchange', syncViewport);
     if (viewportRaf) { cancelAnimationFrame(viewportRaf); viewportRaf = 0; }
     panel.style.height = '';
     panel.style.bottom = '';
+    panel.style.top = '';
   }
 
   // ── Auto-grow textarea ─────────────────────────────────────────────────────
@@ -195,6 +242,27 @@ const blogAskScript = `
     input.style.height = 'auto';
     input.style.height = Math.min(input.scrollHeight, 132) + 'px';
   }
+  // 微信里无法感知键盘高度，只能把面板整体压矮到键盘上方：聚焦时降到 46vh，
+  // iPhone 的键盘约占 40% 屏高，这样输入框稳定落在键盘之上。
+  // 绝不能滚页面——面板一打开就 focus，滚到底会让「点一下入口」变成「跳到页尾」。
+  //
+  // WeChat gives no keyboard height, so the panel itself gets shorter while typing rather than
+  // scrolling the page — the panel focuses its input on open, and scrolling there would turn a
+  // tap on the entry into a jump to the bottom of the page.
+  function setWeChatTyping(on) {
+    if (!inWeChat) return;
+    document.documentElement.classList.toggle('is-wx-typing', !!on);
+    syncViewport();
+  }
+
+  input.addEventListener('focus', function () {
+    startViewportPoll();
+    setWeChatTyping(true);
+  });
+  input.addEventListener('blur', function () {
+    startViewportPoll();
+    setWeChatTyping(false);
+  });
   input.addEventListener('input', grow);
   input.addEventListener('keydown', function (e) {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); form.requestSubmit(); }
@@ -253,8 +321,10 @@ const blogAskScript = `
     el.className = 'ask-msg ask-bot';
     el.innerHTML =
       '<div class="ask-trace" hidden>' +
-        '<div class="ask-steps"></div>' +
-        '<div class="ask-sources"></div>' +
+        '<div class="ask-fold">' +
+          '<div class="ask-steps"></div>' +
+          '<div class="ask-sources"></div>' +
+        '</div>' +
       '</div>' +
       '<div class="ask-bubble ask-answer"></div>' +
       '<div class="ask-cites" hidden></div>' +
@@ -300,7 +370,18 @@ const blogAskScript = `
       send(question);
     });
   }
-  function scroll() { body.scrollTop = body.scrollHeight; }
+  // Follow the stream only while the reader is already at the bottom. Yanking the view down on
+  // every delta makes it impossible to scroll back and re-read mid-answer.
+  //
+  // 只在读者本来贴着底部时才跟随。每来一段就强行拉到底，就没法在回答中途往回翻着看。
+  var FOLLOW = true;
+  body.addEventListener('scroll', function () {
+    FOLLOW = body.scrollHeight - body.scrollTop - body.clientHeight < 96;
+  }, { passive: true });
+
+  function scroll() {
+    if (FOLLOW) body.scrollTop = body.scrollHeight;
+  }
 
   // ── Retrieval trace ────────────────────────────────────────────────────────
   var STAGE_ICON = {
@@ -349,7 +430,7 @@ const blogAskScript = `
     function armThinkTimer() {
       clearTimeout(thinkAt);
       thinkAt = setTimeout(function () {
-        if (!raw) curStep = step(trace, 'think', '正在组织语言…');
+        if (!raw) curStep = step(trace, 'think', '想一下怎么讲你才听得懂…');
       }, 1400);
     }
 
@@ -399,14 +480,14 @@ const blogAskScript = `
     }).catch(function (err) {
       if (err && err.name === 'AbortError') {
         trace.hidden = false;
-        curStep = step(trace, 'think', '已停止');
+        curStep = step(trace, 'think', '已经喊停');
         if (!raw) answer.innerHTML = '<p class="ask-none">已停止生成。</p>';
         return;
       }
       clearTimeout(thinkAt);
       failed = true;
       trace.hidden = false;
-      step(trace, 'think', '出错了').classList.add('is-error');
+      step(trace, 'think', '出岔子了').classList.add('is-error');
       answer.innerHTML = '<p class="ask-err">' + esc(err.message || String(err)) + '</p>';
       scroll();
     }).then(function () {
@@ -427,14 +508,18 @@ const blogAskScript = `
         return;
       }
       if (ev.type === 'retrieval') {
-        renderSources(trace, ev.sources || []);
         sourceCount = (ev.sources || []).length;
-        curStep = step(trace, 'think', '已选定 ' + sourceCount + ' 篇笔记作为依据');
+        // Say what is happening first, then show the list underneath it. Appending the line
+        // after the list made the entries look like they belonged to the step above.
+        //
+        // 先说在做什么，再把清单列在它下面。先列清单后补这句话，条目看起来就归到了上一行名下。
+        curStep = step(trace, 'link', '正在翻阅这 ' + sourceCount + ' 篇…');
+        renderSources(trace, ev.sources || []);
         armThinkTimer();
         return;
       }
       if (ev.type === 'route') {
-        curStep = step(trace, 'route', '由 ' + (ev.model || ev.route) + ' 作答');
+        curStep = step(trace, 'route', '由 ' + (ev.route || ev.model) + ' 接手');
         return;
       }
       if (ev.type === 'thinking') {
@@ -459,7 +544,7 @@ const blogAskScript = `
       if (ev.type === 'error') {
         failed = true;
         trace.hidden = false;
-        step(trace, 'think', '出错了').classList.add('is-error');
+        step(trace, 'think', '出岔子了').classList.add('is-error');
         if (!raw) answer.innerHTML = '<p class="ask-err">' + esc(ev.message || '未知错误') + '</p>';
         scroll();
         return;
@@ -491,12 +576,12 @@ const blogAskScript = `
       '<span class="ask-sum-ico" aria-hidden="true">' +
         '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m9 12 2 2 4-4"/><circle cx="12" cy="12" r="9"/></svg>' +
       '</span>' +
-      '<span class="ask-sum-t">检索完成 · 依据 ' + n + ' 篇笔记</span>' +
-      '<span class="ask-sum-x">过程</span>';
+      '<span class="ask-sum-t">（GPT大小姐正在烧烤）</span>' +
+      '<span class="ask-sum-x">看火候</span>';
     sum.addEventListener('click', function () {
       var open = trace.classList.toggle('is-open');
       sum.setAttribute('aria-expanded', open ? 'true' : 'false');
-      sum.querySelector('.ask-sum-x').textContent = open ? '收起' : '过程';
+      sum.querySelector('.ask-sum-x').textContent = open ? '收起' : '看火候';
     });
     trace.insertBefore(sum, trace.firstChild);
     var live = trace.querySelector('.ask-step.is-live');

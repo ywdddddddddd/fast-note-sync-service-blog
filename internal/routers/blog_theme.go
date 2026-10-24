@@ -1125,9 +1125,14 @@ mjx-container[display="true"]{margin:.9rem 0}
 .ask-sum-t{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .ask-sum-x{font-size:.6875rem;font-weight:600;color:var(--primary);
   padding:.1rem .4rem;border-radius:.4rem;background:color-mix(in srgb,var(--primary) 12%,transparent)}
-.ask-trace.is-min .ask-steps,.ask-trace.is-min .ask-sources{display:none}
-.ask-trace.is-min.is-open .ask-steps{display:flex}
-.ask-trace.is-min.is-open .ask-sources{display:flex}
+/* 折叠用 grid-template-rows 0fr↔1fr 过渡，而不是 display:none 开关。
+   display 是不可动画属性，切换时整块「啪」地出现或消失；这里从 0 行高长到内容高度，
+   收放都是连续的。子项必须 overflow:hidden，否则 0fr 时内容仍会溢出可视。 */
+.ask-fold{display:grid;grid-template-rows:1fr;
+  transition:grid-template-rows .34s cubic-bezier(.22,1,.36,1)}
+.ask-fold>*{overflow:hidden;min-height:0}
+.ask-fold>.ask-sources{margin-top:.5rem}
+.ask-trace.is-min:not(.is-open) .ask-fold{grid-template-rows:0fr}
 
 /* 回答里的引用角标 */
 .ask-cite{
@@ -1145,12 +1150,19 @@ mjx-container[display="true"]{margin:.9rem 0}
 .ask-cites-head{display:flex;align-items:center;gap:.35rem;font-size:.6875rem;font-weight:700;
   letter-spacing:.06em;text-transform:uppercase;color:var(--muted-foreground);margin-bottom:.1rem}
 .ask-cites-head svg{width:.85rem;height:.85rem}
+/* 引用列表压成一行一条：序号 + 标题 + 灰色摘录。
+   卡片式（边框 + 底色 + 内边距）每条要 60px 高，八条就吃掉半屏，
+   而这几条只是「去哪看原文」的索引，不该比回答本身还占地方。 */
 .ask-cite-card{
-  display:flex;gap:.55rem;padding:.5rem .6rem;border-radius:.7rem;
-  border:1px solid var(--border);background:color-mix(in srgb,var(--muted) 22%,transparent);
+  display:flex;align-items:baseline;gap:.42rem;
+  padding:.3rem .05rem;border:0;border-radius:0;
+  border-bottom:1px solid color-mix(in srgb,var(--border) 65%,transparent);
+  background:none;font-size:.78rem;line-height:1.55;
   text-decoration:none;color:inherit;
   animation:ask-line-in .5s cubic-bezier(.22,1,.36,1) backwards;
   transition:border-color .3s ease,background .3s ease,box-shadow .3s ease}
+.ask-cite-card:last-child{border-bottom:0}
+.ask-cite-card:hover{color:var(--primary)}
 .ask-cite-card:hover{border-color:color-mix(in srgb,var(--primary) 45%,var(--border));
   background:color-mix(in srgb,var(--primary) 7%,transparent)}
 .ask-cite-card.is-flash{border-color:var(--primary);
@@ -2125,7 +2137,25 @@ body.is-reader{overflow:hidden}
 }
 @keyframes reader-hint-in{from{opacity:0;transform:translate(-50%,6px)}to{opacity:1;transform:translate(-50%,0)}}
 
+/* 微信内置浏览器：键盘弹出时布局视口不变、fixed 也不跟随，拿不到键盘高度。
+   既然量不到，就不去量——把面板高度压到键盘之上：常态 60vh，打字时 46vh
+   （iPhone 键盘约占 40% 屏高）。面板本身始终 fixed，页面不发生任何滚动。
+   把面板放回文档流是错的：面板一打开就 focus 输入框，那会让「点入口」变成「滚到页尾」。 */
+html.is-wx .ask-panel{
+  top:0;bottom:auto;height:60vh;
+  transition:height .28s cubic-bezier(.22,1,.36,1),opacity .34s ease,transform .44s cubic-bezier(.22,1,.36,1);
+}
+html.is-wx.is-wx-typing .ask-panel{height:46vh}
+html.is-wx .ask-panel{left:.45rem;right:.45rem;width:auto}
+
 @media (max-width:860px){
+  /* 面板横向铺满、四角留一点缝；纵向位置与高度由 JS 按 visualViewport 写内联样式，
+     因为 iOS 键盘弹出时只有视觉视口会变，vh 与 bottom 都不会跟着动。 */
+  .ask-panel{
+    left:.45rem;right:.45rem;width:auto;height:auto;
+    border-radius:var(--ask-r);
+  }
+  .ask-cite-x{display:none}
   .shelf{padding:1.1rem .9rem 2.6rem}
   .shelf-h1{font-size:1.25rem}
   .shelf-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:1.25rem .85rem}

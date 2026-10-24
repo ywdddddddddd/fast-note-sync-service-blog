@@ -44,7 +44,7 @@ func registerBlogAskRoutes(r *gin.Engine, appContainer *app.App) {
 		}
 		_ = cfg
 		c.Header("Content-Type", "application/javascript; charset=utf-8")
-		c.Header("Cache-Control", "public, max-age=300")
+		c.Header("Cache-Control", "no-cache")
 		c.String(http.StatusOK, blogAskScript)
 	})
 
@@ -64,7 +64,7 @@ func registerBlogAskRoutes(r *gin.Engine, appContainer *app.App) {
 		// 用短缓存而不是版本化 URL：模板是纯字符串字面量，为拼版本号得在两处把字面量割开，
 		// 而 max-age 已经给到同样的效果。五分钟与 ask.js 一致，也界定了部署后旧查看器
 		// 最长能存活多久。
-		c.Header("Cache-Control", "public, max-age=300")
+		c.Header("Cache-Control", "no-cache")
 		c.String(http.StatusOK, blogLightboxScript)
 	})
 

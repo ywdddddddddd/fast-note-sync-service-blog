@@ -817,7 +817,23 @@ func (s *shareService) askCallRoute(ctx context.Context, r AskRoute, msgs []upst
 	// 因此「不带这个字段」等于「让模型去思考」——与 false 想要的正好相反。
 	// 实测省略该字段时，4096 token 的预算被 5131 字推理全部吃掉，回答每次都是空的。
 	// 不认识该字段的供应商会忽略它。
-	set("enable_thinking", r.EnableThinking)
+	// 商汤的 DeepSeek V4 用 thinking:{type:...} 开关思考，不认 enable_thinking；
+	// 而认 enable_thinking 的那批供应商（SiliconFlow 等）不认 thinking 里的对象。
+	// 所以按上游分开发，而不是两个都发——往一个只接受布尔值的同名字段塞对象，
+	// 有的网关直接 400，有的默默忽略，两种都比明确分流难排查。
+	//
+	// SenseNova's DeepSeek V4 toggles reasoning through thinking:{type:...} and does not know
+	// enable_thinking; providers that do know enable_thinking do not accept an object there.
+	// Send one or the other based on the upstream rather than both.
+	if strings.Contains(strings.ToLower(r.BaseURL), "sensenova") {
+		mode := "disabled"
+		if r.EnableThinking {
+			mode = "enabled"
+		}
+		set("thinking", map[string]string{"type": mode})
+	} else {
+		set("enable_thinking", r.EnableThinking)
+	}
 
 	body, _ := json.Marshal(payload)
 	url := strings.TrimRight(r.BaseURL, "/") + "/chat/completions"
@@ -970,7 +986,7 @@ func (s *shareService) Ask(ctx context.Context, opts AskOptions, emit func(AskEv
 		budget = 14000
 	}
 
-	if err := emit(AskEvent{Type: "stage", Stage: "正在解析问题…"}); err != nil {
+	if err := emit(AskEvent{Type: "stage", Stage: "先看清楚你问的是哪件事…"}); err != nil {
 		return err
 	}
 	tokens := askTokenize(question)
@@ -982,7 +998,7 @@ func (s *shareService) Ask(ctx context.Context, opts AskOptions, emit func(AskEv
 	// than printing a placeholder that would immediately be contradicted.
 	// 语料规模要等到构建完成才知道，因此第一行不带数字，避免先印一个随后立刻被推翻的占位值。
 	if err := emit(AskEvent{Type: "stage",
-		Stage: "正在检索已发布笔记…", Query: question, Terms: tokens}); err != nil {
+		Stage: "翻箱倒柜，先把相关的那几页找出来…", Query: question, Terms: tokens}); err != nil {
 		return err
 	}
 
@@ -1024,7 +1040,7 @@ func (s *shareService) Ask(ctx context.Context, opts AskOptions, emit func(AskEv
 		return emit(AskEvent{Type: "error", Message: "检索繁忙，请稍候再试"})
 	}
 	if err := emit(AskEvent{Type: "stage",
-		Stage: fmt.Sprintf("在 %d 篇笔记中按%s检索，命中 %d 篇…", len(corpus.notes), channels, len(hits))}); err != nil {
+		Stage: fmt.Sprintf("翻遍了 %d 篇，按%s捞到 %d 篇最像的…", len(corpus.notes), channels, len(hits))}); err != nil {
 		return err
 	}
 	if len(hits) == 0 {
@@ -1068,7 +1084,7 @@ func (s *shareService) Ask(ctx context.Context, opts AskOptions, emit func(AskEv
 		return err
 	}
 
-	if err := emit(AskEvent{Type: "stage", Stage: "正在生成回答…"}); err != nil {
+	if err := emit(AskEvent{Type: "stage", Stage: "想清楚了，开始写…"}); err != nil {
 		return err
 	}
 
@@ -1115,7 +1131,7 @@ func (s *shareService) Ask(ctx context.Context, opts AskOptions, emit func(AskEv
 				// A transport-level failure (TLS reset, dropped stream) is worth one clean
 				// retry on a fresh connection: the first attempt proves nothing about the second.
 				if err := emit(AskEvent{Type: "stage",
-					Stage: fmt.Sprintf("连接中断，重试第 %d 次…", attempt)}); err != nil {
+					Stage: fmt.Sprintf("路断了一下，再走一次（第 %d 次）…", attempt)}); err != nil {
 					return err
 				}
 				time.Sleep(500 * time.Millisecond)
@@ -1124,6 +1140,15 @@ func (s *shareService) Ask(ctx context.Context, opts AskOptions, emit func(AskEv
 				return emit(AskEvent{Type: "delta", Text: text}) == nil
 			}, onReasoning)
 			if callErr == nil || started {
+				break
+			}
+			// 429 是分钟级冷却（实测 10s–2min，连续触发会更长），在同一条线路上
+			// 等 500ms 再试必然还是 429。直接跳到下一条线路：换 key 有可能立刻可用。
+			//
+			// A 429 means a cooldown measured in minutes; retrying the same route after 500 ms
+			// just spends another 429. Move to the next route instead — a different key may
+			// have quota right now.
+			if strings.Contains(callErr.Error(), "HTTP 429") {
 				break
 			}
 		}
@@ -1161,7 +1186,7 @@ func (s *shareService) Ask(ctx context.Context, opts AskOptions, emit func(AskEv
 
 		if i < len(opts.Routes)-1 {
 			if err := emit(AskEvent{Type: "stage",
-				Stage: "当前线路不可用，正在切换备用线路…"}); err != nil {
+				Stage: "这条道堵了，换条路走…"}); err != nil {
 				return err
 			}
 		}
