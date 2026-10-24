@@ -954,6 +954,17 @@ mjx-container[display="true"]{margin:.9rem 0}
 #ask-root.ask-on .ask-fab{opacity:0;pointer-events:none;transform:scale(.9) translateY(6px)}
 
 
+/* 顶栏里的问答入口（仅移动端主页）。与 .topnav a 同一行的排版，
+   但它是按钮——走 JS 打开面板，不是链接。 */
+.topnav-ask{
+  border:0;background:transparent;padding:0;margin:0 0 0 .1rem;
+  font:inherit;font-size:inherit;color:inherit;cursor:pointer;
+  transition:color .2s ease;
+}
+.topnav-ask:hover{color:var(--foreground)}
+/* 入口已经在顶栏里，悬浮圆钮就该退场，否则两个入口同时存在且有一个压着别人 */
+html.ask-inline .ask-fab{display:none}
+
 .ask-backdrop{
   position:fixed;inset:0;z-index:calc(var(--ask-z) - 1);
   background:color-mix(in srgb,var(--foreground) 22%,transparent);

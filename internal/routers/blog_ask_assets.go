@@ -96,6 +96,27 @@ const blogAskScript = `
   var sendBtn  = host.querySelector('.ask-send');
   var closeBtn = host.querySelector('.ask-close');
 
+  // ── 移动端主页：入口搬进顶栏 ────────────────────────────────────────────────
+  // 手机上悬浮按钮固定在右下角，但主页首屏那一带正好压着顶栏右侧的页面入口，
+  // 于是「关于我」被完整挡住。移动端主页改成顶栏里的一个文字入口，不再有悬浮圆钮。
+  //
+  // On phones the floating button sits right on top of the top bar's page links, hiding them.
+  // On the home page at mobile width the entry moves into the top bar instead.
+  var isHome = /^\/blog\/?$/.test(location.pathname) || location.pathname === '/';
+  var isNarrow = window.matchMedia ? window.matchMedia('(max-width:860px)').matches : false;
+  if (isHome && isNarrow) {
+    var nav = document.querySelector('.topnav');
+    if (nav) {
+      var inlineBtn = document.createElement('button');
+      inlineBtn.type = 'button';
+      inlineBtn.className = 'topnav-ask';
+      inlineBtn.textContent = '问道';
+      inlineBtn.addEventListener('click', function (e) { e.preventDefault(); open(); });
+      nav.insertBefore(inlineBtn, nav.firstChild);
+      document.documentElement.classList.add('ask-inline');
+    }
+  }
+
   // ── Open / close ───────────────────────────────────────────────────────────
   function open() {
     if (OPEN) return;
@@ -410,6 +431,12 @@ const blogAskScript = `
     bolt:     ico('<path d="M13 2 3 14h7l-1 8 10-12h-7l1-8z"/>'),
     // 分叉 —— 换一条路
     fork:     ico('<circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="12" r="2"/><path d="M8 5h4a4 4 0 0 1 4 4v1"/><path d="M8 19h4a4 4 0 0 0 4-4v-1"/>'),
+    // 火焰 —— 正在努力烧烤
+    flame:    ico('<path d="M12 21c3.6 0 6-2.4 6-5.8 0-4.3-3.8-6.2-3.8-10.4-2.9 1.9-4.3 4.3-4.3 6.7 0-1-.7-1.9-1.4-2.9C7.3 10.1 6 12.4 5.8 15.2 5.8 18.6 8.4 21 12 21z"/>'),
+    // 眩晕 —— 被知识砸晕
+    dizzy:    ico('<circle cx="12" cy="12" r="9"/><path d="M8.6 10.2h.01"/><path d="M15.4 10.2h.01"/><path d="M8.2 15.4c1.4-1.2 2.9-1.2 4.2 0 1.3 1.2 2.8 1.2 4.2 0"/>'),
+    // 生气 —— 被拖下工作台
+    angry:    ico('<circle cx="12" cy="12" r="9"/><path d="M8.3 9.1 10 10.5"/><path d="M15.7 9.1 14 10.5"/><path d="M9.2 16.2c1.7-1.4 3.9-1.4 5.6 0"/>'),
     // 叹号 —— 出岔子
     alert:    ico('<circle cx="12" cy="12" r="9"/><path d="M12 7.5v5.5"/><path d="M12 16.6v.1"/>'),
     think:    ico('<path d="M9 18.5h6"/><path d="M10 21.5h4"/><path d="M12 2.5a6.5 6.5 0 0 0-3.9 11.7c.5.4.9.9.9 1.5v.8h6v-.8c0-.6.4-1.1.9-1.5A6.5 6.5 0 0 0 12 2.5z"/>'),
@@ -423,6 +450,15 @@ const blogAskScript = `
     if (prev) { prev.classList.remove('is-live'); prev.classList.add('is-done'); }
     var el = document.createElement('div');
     el.className = 'ask-step is-live';
+    // 后端几十毫秒内就能把八步全推过来，而每条入场动画只有 .55s——
+    // 不加错峰，八条会同时刷出，读者根本看不清过程。按插入序号递增延迟，
+    // 配合已有的 animation-fill-mode: backwards（延迟期间不可见），就是依次出现。
+    //
+    // The server pushes every step within tens of milliseconds while each entrance animation
+    // is only .55s, so without staggering they all flash in at once. Delay by insertion order;
+    // combined with the existing backwards fill mode, they appear one after another.
+    var idx = steps.children.length;
+    if (!reduce) el.style.animationDelay = (idx * 110) + 'ms';
     el.innerHTML = '<span class="ask-step-ico">' + (STAGE_ICON[kind] || STAGE_ICON.think) + '</span>' +
                    '<span class="ask-step-t">' + esc(text) + '</span>';
     steps.appendChild(el);
@@ -543,18 +579,18 @@ const blogAskScript = `
         return;
       }
       if (ev.type === 'route') {
-        curStep = step(trace, 'route', '由 ' + (ev.route || ev.model) + ' 接手');
+        curStep = step(trace, 'route', '现在工作由 ' + (ev.route || ev.model) + ' 接手');
         return;
       }
       if (ev.type === 'thinking') {
         clearTimeout(thinkAt);
-        if (!minimized) { minimized = true; minimizeTrace(trace, sourceCount); }
+        if (!minimized) { minimized = true; scheduleMinimize(trace); }
         feedThought(trace, thoughtState, ev.text || '', ev.thoughtChars || 0);
         return;
       }
       if (ev.type === 'delta') {
         clearTimeout(thinkAt);
-        if (!minimized) { minimized = true; minimizeTrace(trace, sourceCount); }
+        if (!minimized) { minimized = true; scheduleMinimize(trace); }
         finishThought(trace);
         raw += ev.text;
         feedAnswer(answer, stream, raw);
@@ -582,7 +618,16 @@ const blogAskScript = `
           stream.tail = null;
         }
         renderCites(citesBox, cites);
-        scroll();
+        // 生成结束时平滑落位。此前是直接改 scrollTop，画面一下子「跳」到末尾；
+        // 用 smooth 走完最后一段，读者能看清引文是从哪里长出来的。
+        //
+        // Glide to the end on completion. Assigning scrollTop snapped the view to the bottom;
+        // a smooth scroll lets the reader see where the citations came from.
+        if (FOLLOW && body.scrollTo) {
+          body.scrollTo({ top: body.scrollHeight, behavior: reduce ? 'auto' : 'smooth' });
+        } else {
+          scroll();
+        }
       }
     }
   }
@@ -590,6 +635,20 @@ const blogAskScript = `
   // Once answer text starts arriving, collapse the trace to a single summary line.
   // The steps and the source list together run to several hundred pixels, which pushed the
   // answer itself below the fold — the one thing the reader is actually waiting for.
+  // 折叠推迟到步骤播完：八步各延迟 110ms、入场 .55s，最后一条大约在 1.3s 落定。
+  // 生成一开始就折叠，等于把刚铺垫的过程全收走，这一步白做。
+  //
+  // Delay the collapse until the staggered steps have landed (last one ~1.3s). Collapsing the
+  // instant generation starts throws away the sequence that was just set up.
+  var minimizeTimer = 0;
+  function scheduleMinimize(trace) {
+    if (minimizeTimer) clearTimeout(minimizeTimer);
+    minimizeTimer = setTimeout(function () {
+      minimizeTimer = 0;
+      minimizeTrace(trace, sourceCount);
+    }, reduce ? 0 : 900);
+  }
+
   function minimizeTrace(trace, n) {
     trace.classList.add('is-min');
     var sum = document.createElement('button');
@@ -597,15 +656,13 @@ const blogAskScript = `
     sum.className = 'ask-trace-sum';
     sum.setAttribute('aria-expanded', 'false');
     sum.innerHTML =
-      '<span class="ask-sum-ico" aria-hidden="true">' +
-        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m9 12 2 2 4-4"/><circle cx="12" cy="12" r="9"/></svg>' +
-      '</span>' +
-      '<span class="ask-sum-t">（GPT大小姐正在烧烤）</span>' +
-      '<span class="ask-sum-x">看火候</span>';
+      '<span class="ask-sum-ico" aria-hidden="true">' + STAGE_ICON.flame + '</span>' +
+      '<span class="ask-sum-t">wendao 正在努力烧烤</span>' +
+      '<span class="ask-sum-x">火</span>';
     sum.addEventListener('click', function () {
       var open = trace.classList.toggle('is-open');
       sum.setAttribute('aria-expanded', open ? 'true' : 'false');
-      sum.querySelector('.ask-sum-x').textContent = open ? '收起' : '看火候';
+      sum.querySelector('.ask-sum-x').textContent = open ? '收' : '火';
     });
     trace.insertBefore(sum, trace.firstChild);
     var live = trace.querySelector('.ask-step.is-live');

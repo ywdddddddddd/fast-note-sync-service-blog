@@ -1110,7 +1110,21 @@ func (s *shareService) Ask(ctx context.Context, opts AskOptions, emit func(AskEv
 		if err := s.askWaitPacing(ctx, route); err != nil {
 			return err
 		}
-		if err := emit(AskEvent{Type: "route", Route: route.Name, Model: route.Model}); err != nil {
+		// 模型接手前的两幕。纯粹的叙事垫场：检索与生成之间本来没有任何可展示的动作，
+	// 而这两句把「等待」讲成了一个有情绪的过程。
+	//
+	// Two beats before the model takes over. There is genuinely nothing to show between
+	// retrieval and generation; these turn the wait into something with a pulse.
+	if err := emit(AskEvent{Type: "stage", Icon: "angry",
+		Stage: "wendao 被 GPT 小姐拖下工作台…"}); err != nil {
+		return err
+	}
+	if err := emit(AskEvent{Type: "stage", Icon: "dizzy",
+		Stage: "wendao 被海量知识砸晕…"}); err != nil {
+		return err
+	}
+
+	if err := emit(AskEvent{Type: "route", Route: route.Name, Model: route.Model}); err != nil {
 			return err
 		}
 
