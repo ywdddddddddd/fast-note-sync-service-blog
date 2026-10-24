@@ -384,11 +384,37 @@ const blogAskScript = `
   }
 
   // ── Retrieval trace ────────────────────────────────────────────────────────
+  // 一套统一的手绘线性图标：24×24、1.8 描边、圆头圆角、纯描边无填充。
+  // 之前几个图标混了 fill 与复杂造型（链条 vs 实心圆眼），并排放着像两套东西。
+  //
+  // One consistent line set: 24×24, 1.8 stroke, round caps, stroke-only. The previous mix
+  // (a chain glyph next to a filled-circle face) read as two different icon families.
+  function ico(d) {
+    return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" ' +
+           'stroke-linecap="round" stroke-linejoin="round">' + d + '</svg>';
+  }
   var STAGE_ICON = {
-    search: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>',
-    link:   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"/></svg>',
-    think:  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 3a7 7 0 0 1 7 7c0 2-1 3-1 3l1 4h-5a7 7 0 1 1-2-14z"/></svg>',
-    route:  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M13 2 3 14h7l-1 8 10-12h-7l1-8z"/></svg>'
+    // 问号 —— 先弄清楚问的是什么
+    question: ico('<circle cx="12" cy="12" r="9"/><path d="M9.2 9.4a2.9 2.9 0 1 1 3.9 2.7c-.7.3-1.1.9-1.1 1.6v.3"/><path d="M12 17.2v.1"/>'),
+    // 放大镜 —— 翻箱倒柜地找
+    search:   ico('<circle cx="10.5" cy="10.5" r="6.5"/><path d="m20 20-4.7-4.7"/>'),
+    // 灯泡 —— 想怎么讲
+    idea:     ico('<path d="M9 18.5h6"/><path d="M10 21.5h4"/><path d="M12 2.5a6.5 6.5 0 0 0-3.9 11.7c.5.4.9.9.9 1.5v.8h6v-.8c0-.6.4-1.1.9-1.5A6.5 6.5 0 0 0 12 2.5z"/>'),
+    // 漏斗 —— 从一堆里筛出几篇
+    funnel:   ico('<path d="M4 5h16l-6.2 7.3v6.2L10.2 20v-7.7z"/>'),
+    // 眼镜 —— 正在看这几篇
+    eye:      ico('<circle cx="6.5" cy="14.5" r="3.5"/><circle cx="17.5" cy="14.5" r="3.5"/><path d="M10 14.5h4"/><path d="M3.2 11.6 4.8 7.6"/><path d="M20.8 11.6 19.2 7.6"/>'),
+    // 铅笔 —— 开始写
+    pencil:   ico('<path d="M4 20h3.6L20 7.6a2.5 2.5 0 0 0-3.6-3.6L4 16.4z"/><path d="m14.4 5.6 4 4"/>'),
+    // 闪电 —— 由谁接手（保留原造型）
+    bolt:     ico('<path d="M13 2 3 14h7l-1 8 10-12h-7l1-8z"/>'),
+    // 分叉 —— 换一条路
+    fork:     ico('<circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="12" r="2"/><path d="M8 5h4a4 4 0 0 1 4 4v1"/><path d="M8 19h4a4 4 0 0 0 4-4v-1"/>'),
+    // 叹号 —— 出岔子
+    alert:    ico('<circle cx="12" cy="12" r="9"/><path d="M12 7.5v5.5"/><path d="M12 16.6v.1"/>'),
+    think:    ico('<path d="M9 18.5h6"/><path d="M10 21.5h4"/><path d="M12 2.5a6.5 6.5 0 0 0-3.9 11.7c.5.4.9.9.9 1.5v.8h6v-.8c0-.6.4-1.1.9-1.5A6.5 6.5 0 0 0 12 2.5z"/>'),
+    link:     ico('<path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"/>'),
+    route:    ico('<path d="M13 2 3 14h7l-1 8 10-12h-7l1-8z"/>')
   };
   function step(trace, kind, text) {
     trace.hidden = false;
@@ -430,7 +456,7 @@ const blogAskScript = `
     function armThinkTimer() {
       clearTimeout(thinkAt);
       thinkAt = setTimeout(function () {
-        if (!raw) curStep = step(trace, 'think', '想一下怎么讲你才听得懂…');
+        if (!raw) curStep = step(trace, 'idea', '想一下怎么讲你才听得懂…');
       }, 1400);
     }
 
@@ -480,7 +506,7 @@ const blogAskScript = `
     }).catch(function (err) {
       if (err && err.name === 'AbortError') {
         trace.hidden = false;
-        curStep = step(trace, 'think', '已经喊停');
+        curStep = step(trace, 'alert', '已经喊停');
         if (!raw) answer.innerHTML = '<p class="ask-none">已停止生成。</p>';
         return;
       }
@@ -501,10 +527,9 @@ const blogAskScript = `
 
     function handle(ev) {
       if (ev.type === 'stage') {
-        var kind = /检索/.test(ev.stage) ? 'search'
-                 : /关联|扩展/.test(ev.stage) ? 'link'
-                 : /线路/.test(ev.stage) ? 'route' : 'think';
-        curStep = step(trace, kind, ev.stage);
+        // 图标由服务端在事件里给出；关键词推断只在老事件上兜底。
+        // The icon comes from the event; keyword guessing is only a fallback for old events.
+        curStep = step(trace, ev.icon || 'think', ev.stage);
         return;
       }
       if (ev.type === 'retrieval') {
@@ -709,9 +734,7 @@ const blogAskScript = `
     // 回答末尾的引文卡片才是可读版本，这里只作为可展开的溯源记录。
     box.innerHTML =
       '<button type="button" class="ask-src-toggle" aria-expanded="false">' +
-        '<span class="ask-src-tg-ico" aria-hidden="true">' +
-          '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>' +
-        '</span>' +
+        '<span class="ask-step-ico" aria-hidden="true">' + STAGE_ICON.eye + '</span>' +
         '<span class="ask-src-toggle-t">正在浏览 ' + list.length + ' 篇相关笔记</span>' +
       '</button>' +
       '<ul class="ask-src-list" hidden>' +

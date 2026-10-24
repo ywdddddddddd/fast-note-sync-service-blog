@@ -116,6 +116,12 @@ type AskEvent struct {
 	Query     string         `json:"query,omitempty"`     // echoed question
 	Terms     []string       `json:"terms,omitempty"`     // tokens actually used
 	Stage     string         `json:"stage,omitempty"`     // human-readable progress line
+	// Icon names the pictogram for this step. Derived here rather than in the browser:
+	// matching Chinese keywords to icons breaks the moment a line is reworded, and it did
+	// ("翻遍了 147 篇…" contains no 检索, so it silently fell back to the generic icon).
+	// Icon 指定这一步的图标。由服务端给出而不是浏览器猜：用中文关键词匹配图标，
+	// 文案一改就失灵，事实上已经失灵过——「翻遍了 147 篇…」不含「检索」，于是落到了通用图标。
+	Icon      string         `json:"icon,omitempty"`
 	Sources   []*AskSource   `json:"sources,omitempty"`   // retrieved notes
 	Text      string         `json:"text,omitempty"`      // streamed answer fragment
 	// ThoughtChars is the running count of reasoning characters seen so far; it lets the
@@ -986,7 +992,7 @@ func (s *shareService) Ask(ctx context.Context, opts AskOptions, emit func(AskEv
 		budget = 14000
 	}
 
-	if err := emit(AskEvent{Type: "stage", Stage: "先看清楚你问的是哪件事…"}); err != nil {
+	if err := emit(AskEvent{Type: "stage", Icon: "question", Stage: "先看清楚你问的是哪件事…"}); err != nil {
 		return err
 	}
 	tokens := askTokenize(question)
@@ -998,7 +1004,7 @@ func (s *shareService) Ask(ctx context.Context, opts AskOptions, emit func(AskEv
 	// than printing a placeholder that would immediately be contradicted.
 	// 语料规模要等到构建完成才知道，因此第一行不带数字，避免先印一个随后立刻被推翻的占位值。
 	if err := emit(AskEvent{Type: "stage",
-		Stage: "翻箱倒柜，先把相关的那几页找出来…", Query: question, Terms: tokens}); err != nil {
+		Icon: "search", Stage: "翻箱倒柜，先把相关的那几页找出来…", Query: question, Terms: tokens}); err != nil {
 		return err
 	}
 
@@ -1040,7 +1046,7 @@ func (s *shareService) Ask(ctx context.Context, opts AskOptions, emit func(AskEv
 		return emit(AskEvent{Type: "error", Message: "检索繁忙，请稍候再试"})
 	}
 	if err := emit(AskEvent{Type: "stage",
-		Stage: fmt.Sprintf("翻遍了 %d 篇，按%s捞到 %d 篇最像的…", len(corpus.notes), channels, len(hits))}); err != nil {
+		Icon: "funnel", Stage: fmt.Sprintf("翻遍了 %d 篇，按%s捞到 %d 篇最像的…", len(corpus.notes), channels, len(hits))}); err != nil {
 		return err
 	}
 	if len(hits) == 0 {
@@ -1084,7 +1090,7 @@ func (s *shareService) Ask(ctx context.Context, opts AskOptions, emit func(AskEv
 		return err
 	}
 
-	if err := emit(AskEvent{Type: "stage", Stage: "想清楚了，开始写…"}); err != nil {
+	if err := emit(AskEvent{Type: "stage", Icon: "pencil", Stage: "想清楚了，开始写…"}); err != nil {
 		return err
 	}
 
@@ -1131,7 +1137,7 @@ func (s *shareService) Ask(ctx context.Context, opts AskOptions, emit func(AskEv
 				// A transport-level failure (TLS reset, dropped stream) is worth one clean
 				// retry on a fresh connection: the first attempt proves nothing about the second.
 				if err := emit(AskEvent{Type: "stage",
-					Stage: fmt.Sprintf("路断了一下，再走一次（第 %d 次）…", attempt)}); err != nil {
+					Icon: "alert", Stage: fmt.Sprintf("路断了一下，再走一次（第 %d 次）…", attempt)}); err != nil {
 					return err
 				}
 				time.Sleep(500 * time.Millisecond)
@@ -1186,7 +1192,7 @@ func (s *shareService) Ask(ctx context.Context, opts AskOptions, emit func(AskEv
 
 		if i < len(opts.Routes)-1 {
 			if err := emit(AskEvent{Type: "stage",
-				Stage: "这条道堵了，换条路走…"}); err != nil {
+				Icon: "fork", Stage: "这条道堵了，换条路走…"}); err != nil {
 				return err
 			}
 		}
