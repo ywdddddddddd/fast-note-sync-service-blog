@@ -1102,6 +1102,9 @@ mjx-container[display="true"]{margin:.9rem 0}
 .ask-src-list{margin:.1rem 0 0 .55rem;padding:0 0 0 .6rem;list-style:none;
   border-left:1px solid var(--border);
   display:flex;flex-direction:column;gap:.14rem}
+/* hidden 属性自带的 display:none 会被上面的 display:flex 直接盖掉，
+   于是这个列表默认就是摊开的、点折叠也没反应。 */
+.ask-src-list[hidden]{display:none}
 .ask-src-list li{display:flex;flex-wrap:wrap;align-items:baseline;gap:.4rem;
   animation:ask-line-in .5s cubic-bezier(.22,1,.36,1) backwards}
 .ask-src-list a{font-size:.75rem;color:color-mix(in srgb,var(--primary) 88%,var(--foreground));
@@ -1128,11 +1131,12 @@ mjx-container[display="true"]{margin:.9rem 0}
 /* 折叠用 grid-template-rows 0fr↔1fr 过渡，而不是 display:none 开关。
    display 是不可动画属性，切换时整块「啪」地出现或消失；这里从 0 行高长到内容高度，
    收放都是连续的。子项必须 overflow:hidden，否则 0fr 时内容仍会溢出可视。 */
-.ask-fold{display:grid;grid-template-rows:1fr;
-  transition:grid-template-rows .34s cubic-bezier(.22,1,.36,1)}
-.ask-fold>*{overflow:hidden;min-height:0}
+/* 折叠用 max-height 而不是 grid-template-rows 0fr：后者要 Chrome 107+/Safari 16+，
+   微信的 X5 内核达不到，规则被整条忽略，表现为「点了折叠没反应」。 */
+.ask-fold{overflow:hidden;max-height:1600px;
+  transition:max-height .34s cubic-bezier(.22,1,.36,1)}
 .ask-fold>.ask-sources{margin-top:.5rem}
-.ask-trace.is-min:not(.is-open) .ask-fold{grid-template-rows:0fr}
+.ask-trace.is-min:not(.is-open) .ask-fold{max-height:0}
 
 /* 回答里的引用角标 */
 .ask-cite{
