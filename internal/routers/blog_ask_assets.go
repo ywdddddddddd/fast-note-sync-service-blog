@@ -509,11 +509,10 @@ const blogAskScript = `
       }
       if (ev.type === 'retrieval') {
         sourceCount = (ev.sources || []).length;
-        // Say what is happening first, then show the list underneath it. Appending the line
-        // after the list made the entries look like they belonged to the step above.
+        // renderSources 自己那一行就是这一步，不要再补一条 —— 两条说的是同一件事，
+        // 展开思维链时读起来像重复了一次。
         //
-        // 先说在做什么，再把清单列在它下面。先列清单后补这句话，条目看起来就归到了上一行名下。
-        curStep = step(trace, 'link', '正在翻阅这 ' + sourceCount + ' 篇…');
+        // renderSources already contributes this line; adding another says the same thing twice.
         renderSources(trace, ev.sources || []);
         armThinkTimer();
         return;
@@ -691,9 +690,18 @@ const blogAskScript = `
   }
 
   function renderSources(trace, list) {
-    var box = trace.querySelector('.ask-sources');
     if (!list.length) return;
-    box.hidden = false;
+    // 插进 .ask-steps 当场追加，而不是塞进 .ask-sources。
+    // 后者是 steps 的兄弟节点，天生只能排在所有步骤之后 ——
+    // 于是「正在浏览 N 篇」永远出现在「由 X 接手」下面，顺序看起来就是乱的。
+    //
+    // Append into .ask-steps at the current position instead of the sibling .ask-sources:
+    // a sibling can only ever render after every step, which is why this line kept showing up
+    // below the model hand-off.
+    var steps = trace.querySelector('.ask-steps');
+    var box = document.createElement('div');
+    box.className = 'ask-src';
+    steps.appendChild(box);
     // Collapsed by default. The retrieval list is process detail, and twelve rows of it pushed
     // the answer — the thing being waited for — below the fold. The citations at the end of the
     // answer are the readable version; this stays as a fold-out audit trail.

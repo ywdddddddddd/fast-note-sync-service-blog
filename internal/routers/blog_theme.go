@@ -1087,6 +1087,8 @@ mjx-container[display="true"]{margin:.9rem 0}
   mask-image:linear-gradient(180deg,#000 55%,transparent)}
 .ask-thought.is-open .ask-thought-b{max-height:none;mask-image:none;-webkit-mask-image:none}
 /* 检索明细：默认收起的过程信息，字号刻意小于正文与引文，避免与回答争夺注意力。 */
+/* 来源清单是步骤流里的一条，不是旁支容器。 */
+.ask-src{display:flex;flex-direction:column;gap:.14rem}
 .ask-src-toggle{
   display:flex;align-items:center;gap:.35rem;width:100%;
   padding:.1rem 0;border:0;background:transparent;cursor:pointer;
