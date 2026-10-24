@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"html/template"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -42,7 +44,7 @@ func registerBlogShelfRoutes(blog *gin.RouterGroup, appContainer *app.App) {
 			//
 			// 文件缺失或读不出来的书直接不上墙。列出来会得到一张点开什么都没有的卡片，
 			// 比不给这个入口更糟。
-			n := shelfPageCount(c.Request.Context(), b)
+			n := shelfPageCountMode(c.Request.Context(), b)
 			if n <= 0 {
 				continue
 			}
@@ -96,7 +98,7 @@ func registerBlogShelfRoutes(blog *gin.RouterGroup, appContainer *app.App) {
 				[]string{"回到 /blog/shelf 看看架上有什么。"})
 			return
 		}
-		pages := shelfPageCount(c.Request.Context(), book)
+		pages := shelfPageCountMode(c.Request.Context(), book)
 		if pages <= 0 {
 			blogErrorPage(c, appContainer, http.StatusNotFound, "无法访问",
 				"这份文档打不开", "文件存在，但读不出页数。",
@@ -124,7 +126,7 @@ func registerBlogShelfRoutes(blog *gin.RouterGroup, appContainer *app.App) {
 			Author:      book.Author,
 			Note:        book.Note,
 			PageCount:   pages,
-			FirstPage:   "/blog/shelfimg/" + book.ID + "/1.jpg",
+			FirstPage:   "/blog/shelfimg/" + book.ID + "/1",
 			Canonical:   bookURL,
 			Description: desc,
 			FeedURL:     base + "/blog/rss.xml",
@@ -146,17 +148,36 @@ func registerBlogShelfRoutes(blog *gin.RouterGroup, appContainer *app.App) {
 			c.AbortWithStatus(http.StatusNotFound)
 			return
 		}
-		raw := strings.TrimSuffix(c.Param("n"), ".jpg")
+		// The URL carries no extension: a pages-mode book stores .avif, a pdf-mode book produces
+		// .jpg, and the reader should not have to know which kind it is looking at.
+		//
+		// URL 不带扩展名：pages 模式存的是 .avif，pdf 模式产出 .jpg，
+		// 阅读器不该需要知道自己在看哪一种。
+		raw := c.Param("n")
+		if i := strings.LastIndex(raw, "."); i > 0 {
+			raw = raw[:i]
+		}
 		page, err := strconv.Atoi(raw)
 		if err != nil || page < 1 {
 			c.AbortWithStatus(http.StatusNotFound)
 			return
 		}
-		total := shelfPageCount(c.Request.Context(), book)
+		total := shelfPageCountMode(c.Request.Context(), book)
 		if total <= 0 || page > total {
 			c.AbortWithStatus(http.StatusNotFound)
 			return
 		}
+
+		if shelfIsPages(book) {
+			p := shelfPageFile(book, page)
+			if p == "" {
+				c.AbortWithStatus(http.StatusNotFound)
+				return
+			}
+			serveShelfImage(c, p)
+			return
+		}
+
 		path, err := shelfRenderPage(c.Request.Context(), book, page)
 		if err != nil {
 			// Renders fail for reasons the visitor cannot act on (a corrupt source file, a
@@ -181,6 +202,27 @@ func registerBlogShelfRoutes(blog *gin.RouterGroup, appContainer *app.App) {
 			c.AbortWithStatus(http.StatusNotFound)
 			return
 		}
+		// A hand-made cover wins: a scan of the real jacket looks far better on a wall of covers
+		// than page one of a textbook, which is usually a title page or a half-title.
+		//
+		// 手做封面优先：一面封面墙上，扫描的真实书封比教材第一页好看得多，
+		// 而教材第一页通常是扉页或书名页。
+		if book.Cover != "" {
+			if p := filepath.Join(shelfRoot, "covers", book.Cover); shelfCoverNameOK(book.Cover) {
+				if st, err := os.Stat(p); err == nil && st.Size() > 0 {
+					serveShelfImage(c, p)
+					return
+				}
+			}
+		}
+		if shelfIsPages(book) {
+			if p := shelfPageFile(book, 1); p != "" {
+				serveShelfImage(c, p)
+				return
+			}
+			c.AbortWithStatus(http.StatusNotFound)
+			return
+		}
 		path := shelfRenderCover(c.Request.Context(), book)
 		if path == "" {
 			c.AbortWithStatus(http.StatusNotFound)
@@ -199,6 +241,20 @@ func registerBlogShelfRoutes(blog *gin.RouterGroup, appContainer *app.App) {
 func serveShelfImage(c *gin.Context, path string) {
 	c.Header("Cache-Control", "public, max-age=2592000")
 	c.Header("X-Content-Type-Options", "nosniff")
+	// image/avif is not in Go's built-in mime table on some toolchains; set it explicitly rather
+	// than relying on the browser to sniff.
+	//
+	// image/avif 在某些工具链里不在 Go 内置 mime 表；显式设置，不靠浏览器嗅探。
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".avif":
+		c.Header("Content-Type", "image/avif")
+	case ".webp":
+		c.Header("Content-Type", "image/webp")
+	case ".png":
+		c.Header("Content-Type", "image/png")
+	case ".jpg", ".jpeg":
+		c.Header("Content-Type", "image/jpeg")
+	}
 	// c.File sets Content-Type from the extension and honours Range/If-Modified-Since.
 	// c.File 按扩展名设置 Content-Type，并处理 Range 与 If-Modified-Since。
 	c.File(path)

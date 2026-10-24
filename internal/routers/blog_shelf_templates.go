@@ -191,6 +191,14 @@ const blogReaderPage = `<!DOCTYPE html>
     <div class="reader-tail" aria-hidden="true">末页</div>
   </div>
 
+  <!-- 桌面端的翻页箭头：平时淡出，鼠标一动才浮上来。移动端隐藏，用底部的按钮。 -->
+  <button type="button" class="reader-arrow reader-arrow-prev" id="fns-arrow-prev" aria-label="上一页">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
+  </button>
+  <button type="button" class="reader-arrow reader-arrow-next" id="fns-arrow-next" aria-label="下一页">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>
+  </button>
+
   <footer class="reader-ctl">
     <button type="button" class="reader-nav" id="fns-reader-prev" aria-label="上一页">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
@@ -199,7 +207,9 @@ const blogReaderPage = `<!DOCTYPE html>
       <input id="fns-reader-input" type="text" inputmode="numeric" value="1" aria-label="页码" autocomplete="off">
       <span class="reader-of">/ {{.PageCount}}</span>
     </div>
-    <div class="reader-rail"><i id="fns-reader-rail"></i></div>
+    <div class="reader-track" id="fns-reader-track">
+      <div class="reader-rail"><i id="fns-reader-rail"></i></div>
+    </div>
     <button type="button" class="reader-nav" id="fns-reader-next" aria-label="下一页">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>
     </button>

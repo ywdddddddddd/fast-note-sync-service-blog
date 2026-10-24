@@ -2079,13 +2079,43 @@ body.is-reader{overflow:hidden}
 }
 .reader-jump input:focus{outline:none;border-color:color-mix(in srgb,var(--primary) 55%,transparent)}
 .reader-of{font-variant-numeric:tabular-nums}
-.reader-rail{
-  flex:1;height:2px;border-radius:2px;overflow:hidden;
-  background:color-mix(in srgb,var(--muted) 85%,transparent);
+/* 进度条外面套一层 22px 的命中区：2px 的线好看，但手指点不中。 */
+.reader-track{
+  flex:1;height:22px;display:flex;align-items:center;cursor:pointer;
+  touch-action:none;
 }
+.reader-rail{
+  width:100%;height:2px;border-radius:2px;overflow:hidden;
+  background:color-mix(in srgb,var(--muted) 85%,transparent);
+  transition:height .18s ease;
+}
+.reader-track:hover .reader-rail,.reader-track.is-dragging .reader-rail{height:4px}
 .reader-rail i{display:block;height:100%;width:0;border-radius:2px;
   background:color-mix(in srgb,var(--primary) 70%,transparent);
   transition:width .32s cubic-bezier(.22,1,.36,1)}
+/* 拖动中不跟随过渡，否则指针和色块会脱节。 */
+.reader-track.is-dragging .reader-rail i{transition:none}
+
+/* 桌面端左右翻页。平时不出现，鼠标一动浮上来、停一会儿淡回去——
+   一块常驻的半透明按钮会一直压在正文边上。 */
+/* 箭头本身不带背景框：一块常驻的灰底方块会像浮在纸边上的控件，
+   而一根箭头只是提示「这边可以翻」。位置由 JS 贴着纸边算，不是贴视口边。 */
+.reader-arrow{
+  position:absolute;top:50%;z-index:6;
+  width:56px;height:120px;padding:0;border:0;background:none;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;
+  color:color-mix(in srgb,var(--foreground) 46%,transparent);
+  opacity:0;pointer-events:none;
+  transform:translateY(-50%) scale(.9);
+  transition:opacity .3s ease,transform .3s cubic-bezier(.22,1,.36,1),color .2s ease;
+  filter:drop-shadow(0 1px 4px rgba(0,0,0,.16));
+}
+.reader-arrow.is-on{opacity:1;pointer-events:auto;transform:translateY(-50%) scale(1)}
+.reader-arrow:hover{color:var(--foreground)}
+.reader-arrow:active{transform:translateY(-50%) scale(.96)}
+.reader-arrow:disabled{opacity:0;pointer-events:none}
+.reader-arrow svg{width:38px;height:38px}
+@media (hover:none),(max-width:860px){.reader-arrow{display:none}}
 
 .reader-hint{
   position:fixed;left:50%;bottom:4.8rem;z-index:20;pointer-events:none;
@@ -2127,6 +2157,7 @@ body.is-reader{overflow:hidden}
   .reader.is-closing{transition:none}
   .reader-stack.is-anim .reader-sheet{transition:none}
   .reader-hint{animation:none}
-  .reader-rail i{transition:none}
+  .reader-rail,.reader-rail i{transition:none}
+  .reader-arrow{transition:none}
 }
 `

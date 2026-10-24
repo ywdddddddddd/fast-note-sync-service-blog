@@ -73,11 +73,28 @@ const (
 	shelfWaitTimeout = 25 * time.Second
 )
 
-// shelfBook is one manifest entry. Pages is deliberately absent: the page count comes from the
-// PDF itself, never from a hand-written field that can drift out of date.
+// shelfBook is one manifest entry.
 //
-// shelfBook 是书目里的一条。这里刻意没有 Pages 字段：页数从 PDF 本身数出来，
-// 而不是来自一个会跟文件对不上的手写字段。
+// Mode decides where the pages come from:
+//
+//	"pdf"   (default) — the PDF lives in books/, pdftoppm renders a page on demand
+//	"pages"           — no PDF at all; the images live in pages/<id>/, pre-rendered elsewhere
+//
+// The second mode exists because a 600 dpi scanned textbook is 1–2 GB, and the server only ever
+// needs 150 dpi pages of it. Ship the pages, not the book: 20x less to upload, no rasteriser, no
+// 88 MB decode buffer per page. The trade is that DPI can no longer be changed server-side, and
+// there is no PDF to hand out — which is the point.
+//
+// shelfBook 是书目里的一条。
+//
+// Mode 决定页从哪来：
+//
+//	"pdf"   （默认）—— PDF 放在 books/，pdftoppm 按需渲染某一页
+//	"pages"          —— 没有 PDF；图片在 pages/<id>/ 下，预先在别处渲染好
+//
+// 第二种模式的存在理由：600 dpi 扫描教材有 1–2 GB，而服务器自始至终只需要它 150 dpi 的页。
+// 传页、不传书：上传量少 20 倍，不需要光栅化器，也没有每页 88 MB 的解码缓冲。
+// 代价是服务器侧不能再改 DPI，也没有 PDF 可以给出去——而这正是目的。
 type shelfBook struct {
 	ID     string   `json:"id"`
 	Title  string   `json:"title"`
@@ -87,9 +104,78 @@ type shelfBook struct {
 	Added  string   `json:"added"`
 	Tags   []string `json:"tags"`
 
-	// Pages is resolved lazily from the file and kept in memory. See shelfPageCount.
-	// Pages 从文件惰性取得并留在内存里，见 shelfPageCount。
+	// Mode is "pdf" (default) or "pages". Empty means pdf.
+	// Mode 是 "pdf"（默认）或 "pages"。空值即 pdf。
+	Mode string `json:"mode"`
+	// Cover is an optional file name under covers/ for a hand-made cover. Without it the cover
+	// falls back to page one, which for a scanned textbook is usually the cover spread anyway.
+	// Cover 是可选的封面文件名（在 covers/ 下）。没有它就用第一页兜底，
+	// 而扫描教材的第一页通常本来就是了。
+	Cover string `json:"cover"`
+	// PagesHint is required in pages mode: there is no PDF to count.
+	// PagesHint 在 pages 模式下必须给：没有 PDF 可数。
+	PagesHint int `json:"pages"`
+
+	// Pages is resolved lazily from the file (pdf mode) or the directory (pages mode).
+	// Pages 惰性取得：pdf 模式数文件，pages 模式数目录。
 	Pages int `json:"-"`
+}
+
+// shelfIsPages reports whether this book is served from pre-rendered page images.
+// shelfIsPages 报告这本书是否走预渲染页图。
+func shelfIsPages(b shelfBook) bool {
+	return strings.EqualFold(strings.TrimSpace(b.Mode), "pages")
+}
+
+// shelfPageDir is where a pages-mode book keeps its images.
+// shelfPageDir 是 pages 模式书籍存放图片的目录。
+func shelfPageDir(b shelfBook) string {
+	return filepath.Join(shelfRoot, "pages", b.ID)
+}
+
+// shelfPageFile returns the image path for one page of a pages-mode book, trying the extensions
+// the converter can produce. It returns "" when the page is missing, which callers treat as 404.
+//
+// shelfPageFile 返回 pages 模式书籍某一页的图片路径，按转换器可能产出的扩展名依次尝试。
+// 页缺失时返回 ""，调用方当作 404。
+func shelfPageFile(b shelfBook, n int) string {
+	dir := shelfPageDir(b)
+	for _, ext := range []string{".avif", ".webp", ".jpg"} {
+		p := filepath.Join(dir, fmt.Sprintf("%04d%s", n, ext))
+		if st, err := os.Stat(p); err == nil && st.Size() > 0 {
+			return p
+		}
+	}
+	return ""
+}
+
+// shelfPageCountMode counts pages in pages mode by listing the directory. In pdf mode it defers
+// to pdfinfo. The manifest's pages field is only a hint used when the directory cannot be read.
+//
+// shelfPageCountMode 在 pages 模式下按目录数页；pdf 模式交给 pdfinfo。
+// 书目里的 pages 字段只是目录读不到时的兜底。
+func shelfPageCountMode(ctx context.Context, b shelfBook) int {
+	if !shelfIsPages(b) {
+		return shelfPageCount(ctx, b)
+	}
+	entries, err := os.ReadDir(shelfPageDir(b))
+	if err != nil {
+		return b.PagesHint
+	}
+	n := 0
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		switch strings.ToLower(filepath.Ext(e.Name())) {
+		case ".avif", ".webp", ".jpg":
+			n++
+		}
+	}
+	if n == 0 {
+		return b.PagesHint
+	}
+	return n
 }
 
 type shelfManifestFile struct {
@@ -161,7 +247,16 @@ func shelfBooks() []shelfBook {
 
 	kept := make([]shelfBook, 0, len(mf.Books))
 	for _, b := range mf.Books {
-		if !shelfIDPattern.MatchString(b.ID) || !shelfSafeFileName(b.File) {
+		if !shelfIDPattern.MatchString(b.ID) {
+			continue
+		}
+		// A pages-mode book has no PDF at all — its file field is empty by design, so the PDF
+		// name check only applies to pdf mode. Getting this wrong silently drops every
+		// pre-rendered book from the shelf (it did, on the first deploy).
+		//
+		// pages 模式的书根本没有 PDF——file 字段按设计就是空的，所以 PDF 文件名检查只适用于 pdf 模式。
+		// 这里写错的后果是每一本预渲染的书都被无声地从书架上剔除（第一次部署就是这么错的）。
+		if !shelfIsPages(b) && !shelfSafeFileName(b.File) {
 			continue
 		}
 		if strings.TrimSpace(b.Title) == "" {
@@ -195,6 +290,23 @@ func shelfSafeFileName(name string) bool {
 	// 它没有危害（仍在 books/ 内），但绝不会是作者的本意。
 	base := strings.TrimSuffix(name, filepath.Ext(name))
 	return base != "" && base != "."
+}
+
+// shelfCoverNameOK validates a hand-made cover file name. Same reasoning as shelfSafeFileName:
+// the name comes from a manifest the author writes, but a traversal in it would still hand out an
+// arbitrary file, so it is checked rather than assumed.
+//
+// shelfCoverNameOK 校验手做封面的文件名。理由同 shelfSafeFileName：名字来自作者写的书目，
+// 但其中一处路径穿越仍然会交出任意文件，所以检查而不假设。
+func shelfCoverNameOK(name string) bool {
+	if name == "" || strings.ContainsAny(name, `/\`) || strings.Contains(name, "..") {
+		return false
+	}
+	switch strings.ToLower(filepath.Ext(name)) {
+	case ".jpg", ".jpeg", ".png", ".webp", ".avif":
+		return true
+	}
+	return false
 }
 
 // shelfHasBooks answers the one question every blog page asks: does the top bar get a 资料 entry?

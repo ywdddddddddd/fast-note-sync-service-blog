@@ -46,6 +46,9 @@ const blogReaderJS = `
   var hintEl = document.getElementById('fns-reader-hint');
   var zoomLabel = document.getElementById('fns-reader-zoom');
   var backBtn = document.getElementById('fns-reader-back');
+  var arrowPrev = document.getElementById('fns-arrow-prev');
+  var arrowNext = document.getElementById('fns-arrow-next');
+  var track = document.getElementById('fns-reader-track');
   var prevBtn = document.getElementById('fns-reader-prev');
   var nextBtn = document.getElementById('fns-reader-next');
   var zoomInBtn = document.getElementById('fns-reader-zoom-in');
@@ -66,7 +69,7 @@ const blogReaderJS = `
   var touchY = 0;
   var touching = false;
 
-  function pageURL(n) { return '/blog/shelfimg/' + book + '/' + n + '.jpg'; }
+  function pageURL(n) { return '/blog/shelfimg/' + book + '/' + n; }
   function clamp(n) { return n < 1 ? 1 : (n > total ? total : n); }
   function pct() { return Math.round(page / total * 100) + '%'; }
 
@@ -99,6 +102,8 @@ const blogReaderJS = `
     root.setAttribute('data-page', String(page));
     if (prevBtn) prevBtn.disabled = page <= 1;
     if (nextBtn) nextBtn.disabled = page >= total;
+    if (arrowPrev) arrowPrev.disabled = page <= 1;
+    if (arrowNext) arrowNext.disabled = page >= total;
     try { localStorage.setItem(KEY, String(page)); } catch (e) {}
     // replaceState, not assignment: turning pages must not fill the back button with forty entries.
     // 用 replaceState 而不是赋值：翻页不该在后退按钮里塞进四十条记录。
@@ -191,6 +196,20 @@ const blogReaderJS = `
     }
   }
 
+  // jumpTo is for the progress bar's landing point: the page-turn animation fights itself when
+  // you land repeatedly, so swap the image outright instead.
+  //
+  // 进度条落点用这个：连续跳转时翻页动画只会跟自己打架，直接换图才对。
+  function jumpTo(target) {
+    target = clamp(target);
+    if (target === page) { syncUI(); return; }
+    var cur = sheets[front];
+    cur.src = pageURL(target);
+    page = target;
+    syncUI();
+    preload();
+  }
+
   function setZoom(z) {
     zoom = Math.min(3, Math.max(1, Math.round(z * 10) / 10));
     if (stage) stage.style.zoom = zoom === 1 ? '' : String(zoom);
@@ -276,6 +295,92 @@ const blogReaderJS = `
       if (Math.abs(dx) < 55 || Math.abs(dx) < Math.abs(dy)) return;
       go(page + (dx < 0 ? 1 : -1), dx < 0 ? 1 : -1);
     }, { passive: true });
+  }
+
+  // ── 桌面端箭头：鼠标一动浮上来，停 2.4 秒淡回去 ──────────────────────────
+  var hideTimer = 0;
+  var lastPoke = 0;
+
+  function hideArrows() {
+    if (arrowPrev) arrowPrev.classList.remove('is-on');
+    if (arrowNext) arrowNext.classList.remove('is-on');
+  }
+
+  function showArrows() {
+    if (!arrowPrev || !arrowNext) return;
+    arrowPrev.classList.add('is-on');
+    arrowNext.classList.add('is-on');
+    window.clearTimeout(hideTimer);
+    hideTimer = window.setTimeout(hideArrows, 2400);
+  }
+
+  // 箭头贴着纸边，不是贴着视口边：屏幕上纸只占中间一条，贴视口的箭头会离纸三四百像素，
+  // 看着跟这本书没关系。位置随窗口尺寸重算。
+  function placeArrows() {
+    if (!arrowPrev || !arrowNext || !stack) return;
+    var r = stack.getBoundingClientRect();
+    var w = 56, gap = 10;
+    var vw = window.innerWidth;
+    arrowPrev.style.left = Math.max(6, r.left - w - gap) + 'px';
+    arrowNext.style.left = Math.min(vw - w - 6, r.right + gap) + 'px';
+  }
+
+  if (arrowPrev && arrowNext) {
+    placeArrows();
+    window.addEventListener('resize', placeArrows);
+    root.addEventListener('mousemove', function () {
+      var now = Date.now();
+      if (now - lastPoke < 180) return;
+      lastPoke = now;
+      showArrows();
+    }, { passive: true });
+    root.addEventListener('mouseleave', hideArrows);
+    arrowPrev.addEventListener('click', function () { go(page - 1, -1); });
+    arrowNext.addEventListener('click', function () { go(page + 1, 1); });
+    showArrows();
+  }
+
+  // ── 进度条拖动 ──────────────────────────────────────────────────────────
+  var dragging = false;
+
+  function ratioAt(e) {
+    var r = track.getBoundingClientRect();
+    var cx = (e.touches && e.touches[0]) ? e.touches[0].clientX : e.clientX;
+    var x = cx - r.left;
+    return Math.min(1, Math.max(0, r.width ? x / r.width : 0));
+  }
+
+  function previewSeek(e) {
+    var p = Math.max(1, Math.min(total, Math.round(ratioAt(e) * total)));
+    if (input) input.value = String(p);
+    if (rail) rail.style.width = Math.round(p / total * 100) + '%';
+    return p;
+  }
+
+  if (track) {
+    // Pointer Events 一套就同时覆盖鼠标、触摸和手写笔；touch-action:none 已在 CSS 里关掉
+    // 浏览器自己的滚动手势，否则拖动会被页面滚动抢走。
+    track.addEventListener('pointerdown', function (e) {
+      dragging = true;
+      track.classList.add('is-dragging');
+      try { track.setPointerCapture(e.pointerId); } catch (err) {}
+      previewSeek(e);
+      e.preventDefault();
+    });
+    track.addEventListener('pointermove', function (e) {
+      if (dragging) previewSeek(e);
+    });
+    track.addEventListener('pointerup', function (e) {
+      if (!dragging) return;
+      dragging = false;
+      track.classList.remove('is-dragging');
+      jumpTo(previewSeek(e));
+    });
+    track.addEventListener('pointercancel', function () {
+      dragging = false;
+      track.classList.remove('is-dragging');
+      syncUI();
+    });
   }
 
   document.addEventListener('keydown', function (e) {
