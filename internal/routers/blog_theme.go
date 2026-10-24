@@ -956,12 +956,21 @@ mjx-container[display="true"]{margin:.9rem 0}
 
 /* 顶栏里的问答入口（仅移动端主页）。与 .topnav a 同一行的排版，
    但它是按钮——走 JS 打开面板，不是链接。 */
+/* 必须逐项对齐 .topnav a：它是 button，会拿到浏览器默认的按钮排版，
+   而 font:inherit 继承到的是 body 的 16px/400 —— 与链接的 13px/500 不是一套字。
+   截图里「问道」比旁边两个明显大一号，就是这个原因。 */
 .topnav-ask{
-  border:0;background:transparent;padding:0;margin:0 0 0 .1rem;
-  font:inherit;font-size:inherit;color:inherit;cursor:pointer;
-  transition:color .2s ease;
+  margin:0;padding:.3rem .6rem;border:0;border-radius:.5rem;
+  background:transparent;color:var(--muted-foreground);cursor:pointer;
+  font-family:inherit;font-size:.8125rem;font-weight:500;line-height:inherit;
+  letter-spacing:inherit;text-align:inherit;
+  -webkit-appearance:none;appearance:none;
+  transition:color .16s ease,background-color .16s ease;
 }
-.topnav-ask:hover{color:var(--foreground)}
+.topnav-ask:hover{color:var(--foreground);background:color-mix(in srgb,var(--muted) 34%,transparent)}
+/* 键盘聚焦时给一圈可见轮廓；鼠标点击本就不会触发 :focus-visible，
+   不要写 :focus{outline:none} —— 那会把只有 :focus 概念的环境也一起阉掉。 */
+.topnav-ask:focus-visible{outline:2px solid var(--primary);outline-offset:1px;border-radius:.5rem}
 /* 入口已经在顶栏里，悬浮圆钮就该退场，否则两个入口同时存在且有一个压着别人 */
 html.ask-inline .ask-fab{display:none}
 
