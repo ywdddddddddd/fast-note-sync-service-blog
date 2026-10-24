@@ -51,6 +51,9 @@ type readerView struct {
 	Author    string
 	Note      string
 	PageCount int
+	// Version stamps image URLs so a re-rendered book busts the 30-day cache.
+	// Version 给图片 URL 打戳，重做后击穿 30 天缓存。
+	Version   string
 	FirstPage string // URL of page 1, server-rendered so the page shows something without JS
 
 	Canonical   string
@@ -159,7 +162,7 @@ const blogReaderPage = `<!DOCTYPE html>
 <style>{{.CSS}}</style>
 </head>
 <body class="is-reader">
-<div class="reader" id="fns-reader" data-book="{{.ID}}" data-pages="{{.PageCount}}">
+<div class="reader" id="fns-reader" data-book="{{.ID}}" data-pages="{{.PageCount}}" data-ver="{{.Version}}">
 
   <header class="reader-bar">
     <a class="reader-back" href="/blog/shelf" id="fns-reader-back" aria-label="返回资料">

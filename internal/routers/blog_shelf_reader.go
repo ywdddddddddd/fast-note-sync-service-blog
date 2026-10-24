@@ -34,6 +34,7 @@ const blogReaderJS = `
   if (!root) return;
 
   var book = root.getAttribute('data-book') || '';
+  var ver = root.getAttribute('data-ver') || '';
   var total = parseInt(root.getAttribute('data-pages'), 10) || 0;
   if (!book || total < 1) return;
 
@@ -69,7 +70,7 @@ const blogReaderJS = `
   var touchY = 0;
   var touching = false;
 
-  function pageURL(n) { return '/blog/shelfimg/' + book + '/' + n; }
+  function pageURL(n) { return '/blog/shelfimg/' + book + '/' + n + (ver ? '?v=' + ver : ''); }
   function clamp(n) { return n < 1 ? 1 : (n > total ? total : n); }
   function pct() { return Math.round(page / total * 100) + '%'; }
 

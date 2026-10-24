@@ -56,7 +56,7 @@ func registerBlogShelfRoutes(blog *gin.RouterGroup, appContainer *app.App) {
 				Tags:     b.Tags,
 				Added:    b.Added,
 				Pages:    n,
-				CoverURL: "/blog/shelfcover/" + b.ID,
+				CoverURL: "/blog/shelfcover/" + b.ID + "?v=" + shelfCoverVersion(b),
 			})
 		}
 
@@ -126,7 +126,8 @@ func registerBlogShelfRoutes(blog *gin.RouterGroup, appContainer *app.App) {
 			Author:      book.Author,
 			Note:        book.Note,
 			PageCount:   pages,
-			FirstPage:   "/blog/shelfimg/" + book.ID + "/1",
+			Version:     shelfAssetVersion(book),
+			FirstPage:   "/blog/shelfimg/" + book.ID + "/1?v=" + shelfAssetVersion(book),
 			Canonical:   bookURL,
 			Description: desc,
 			FeedURL:     base + "/blog/rss.xml",

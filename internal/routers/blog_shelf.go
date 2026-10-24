@@ -407,6 +407,50 @@ func shelfBookStamp(b shelfBook) string {
 	return strconv.FormatInt(st.ModTime().Unix(), 36) + strconv.FormatInt(st.Size(), 36)
 }
 
+// shelfAssetVersion is what goes into image URLs as ?v=. A 30-day max-age is only safe if the URL
+// moves with the content, and it has to move exactly then: re-rendering a book changes the page
+// bytes under an unchanged path, which is precisely the case a browser will not revalidate.
+//
+// Pages mode watches the page directory (it is rebuilt wholesale whenever pages are replaced);
+// pdf mode watches the PDF itself, via the same stamp the cache file names already use.
+//
+// shelfAssetVersion 是放进图片 URL 的 ?v=。30 天强缓存只有在 URL 随内容变化时才安全，
+// 而且必须恰好在内容变时变：重做一本会让同一路径下的字节不同，而那正是浏览器不会去校验的情形。
+//
+// pages 模式看页面目录（页图替换时整个目录会被重建）；pdf 模式看 PDF 本身，
+// 用的就是缓存文件名里那个戳。
+func shelfAssetVersion(b shelfBook) string {
+	if shelfIsPages(b) {
+		dir := shelfPageDir(b)
+		st, err := os.Stat(dir)
+		if err != nil {
+			return "0"
+		}
+		// 目录 mtime 只在目录项变化时更新；再叠加文件数，覆盖式替换也能触发失效。
+		// Directory mtime only moves when entries change; folding in the count covers
+		// overwrite-in-place as well.
+		n := 0
+		if entries, err := os.ReadDir(dir); err == nil {
+			n = len(entries)
+		}
+		return strconv.FormatInt(st.ModTime().Unix(), 36) + strconv.Itoa(n)
+	}
+	return shelfBookStamp(b)
+}
+
+// shelfCoverVersion tracks a hand-made cover separately: replacing only the jacket should not
+// require re-rendering every page.
+//
+// shelfCoverVersion 单独跟踪手做封面：只换封面不该导致整本页图重取。
+func shelfCoverVersion(b shelfBook) string {
+	if b.Cover != "" && shelfCoverNameOK(b.Cover) {
+		if st, err := os.Stat(filepath.Join(shelfRoot, "covers", b.Cover)); err == nil {
+			return strconv.FormatInt(st.ModTime().Unix(), 36)
+		}
+	}
+	return shelfAssetVersion(b)
+}
+
 // shelfJpegOptionTag makes the option string safe for a file name.
 // shelfJpegOptionTag 把参数串变成可用于文件名的形式。
 func shelfJpegOptionTag() string {
