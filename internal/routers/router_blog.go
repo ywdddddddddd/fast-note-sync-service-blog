@@ -195,18 +195,13 @@ func registerBlogRoutes(r *gin.Engine, appContainer *app.App) {
 		// 反应计数：仪表盘的第七个数字与热门列表都来自这同一次读取。
 		reactions := shareSvc.GetBlogReactions()
 
-		// Page entry points. Taken from GetBlogNav because GetBlogHome's own Nav.Pages comes back
-		// empty on this page — a discrepancy I could not explain and did not chase; see
-		// docs/47-问题记录-首页顶栏入口.md. Rather than let a mystery decide whether the "about me"
-		// card exists, the home page asks the same source the article page does.
+		// Page entry points come from the home assembly itself. They used to be re-fetched from
+		// GetBlogNav because Nav.Pages arrived empty — the cause was GetBlogHome replacing the
+		// whole Nav struct after filling Pages, and that is now fixed at the source.
 		//
-		// 页面入口。取自 GetBlogNav，因为首页自己的 Nav.Pages 在这个页面上是空的 ——
-		// 一个我没能解释也没有深追的差异，见 docs/47-问题记录-首页顶栏入口.md。
-		// 与其让一个谜团决定「关于我」这张卡片是否存在，首页改为问文章页所问的同一个来源。
-		pages := home.Nav.Pages
-		if navDTO, err := shareSvc.GetBlogNav(c.Request.Context(), uid); err == nil && navDTO != nil && len(navDTO.Pages) > 0 {
-			pages = navDTO.Pages
-		}
+		// 页面入口直接取首页自己的组装结果。它此前要从 GetBlogNav 重新取一次，因为 Nav.Pages
+		// 到手时是空的——原因是 GetBlogHome 在填好 Pages 之后又把整个 Nav 结构体替换掉了，
+		// 现在已在源头修好。
 
 		// The particle count is the published-note count. home.Stats.Notes is exactly that number,
 		// and it is already computed for the dashboard — so the field and the seventh figure can
@@ -253,7 +248,6 @@ func registerBlogRoutes(r *gin.Engine, appContainer *app.App) {
 			Hot:          blogHotList(reactions, home.Entries, blogHotLimit),
 			ReactionJS:   template.JS(blogReactionJS()),
 			WarpJS:       template.JS(blogWarpJS()),
-			HasAbout:     len(pages) > 0,
 			ParticlesJS:  template.JS(blogParticlesJS()),
 			ParticlesCfg: template.JS(particlesCfg),
 		}); err != nil {
@@ -568,6 +562,23 @@ func serveBlogPage(c *gin.Context, appContainer *app.App, shareSvc service.Share
 	pageURL := strings.TrimRight(base, "/") + "/blog/" + alias
 	desc := fmt.Sprintf("%s — %s", siteTitle, pageTitle)
 
+	// The page route shows the same top bar as the article route, so it needs the same page-note
+	// entries. They come from GetBlogNav rather than RenderBlogPage because the latter knows only
+	// about the single page it was asked to render. The alias being viewed right now is dropped:
+	// a top bar whose only item points at the page you are already standing on is not a way out.
+	//
+	// 页面路由与文章路由显示同一个顶栏，因此需要同一份页面笔记入口。它们取自 GetBlogNav
+	// 而不是 RenderBlogPage，因为后者只认识被索取渲染的那一个页面。当前正在看的别名会被剔除：
+	// 一个只有「指向你脚下」的入口的顶栏，不是一条去路。
+	pages := []dto.BlogNavPageDTO{}
+	if navDTO, err := shareSvc.GetBlogNav(c.Request.Context(), uid); err == nil && navDTO != nil {
+		for _, p := range navDTO.Pages {
+			if p.Alias != alias {
+				pages = append(pages, p)
+			}
+		}
+	}
+
 	var buf bytes.Buffer
 	if err := blogPageTmpl.Execute(&buf, blogPageView{
 		Title:       pageTitle,
@@ -580,6 +591,7 @@ func serveBlogPage(c *gin.Context, appContainer *app.App, shareSvc service.Share
 		CSS:         template.CSS(blogCSS),
 		PageTitle:   pageTitle,
 		PageAlias:   page.Alias,
+		Pages:       pages,
 		Avatar:      page.Avatar,
 		UpdatedAt:   page.UpdatedAt,
 		Path:        page.Path,

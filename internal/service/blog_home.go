@@ -680,7 +680,15 @@ func (s *shareService) GetBlogHome(ctx context.Context, uid int64, baseURL strin
 		}
 	}
 
-	home.Nav = &dto.BlogNavDTO{Tree: root.toDTO(), Total: len(sources)}
+	// Only the tree is written back here. The constructor above already filled Nav.Pages from
+	// `all`; replacing the whole struct discarded them, which is why the home page's top bar had
+	// no page entries while the article page — which reads GetBlogNav — had them.
+	//
+	// 这里只写回目录树。上面构造时已经从 `all` 填好了 Nav.Pages；
+	// 整个替换结构体会把它们丢掉——这正是首页顶栏没有页面入口、
+	// 而文章页（读的是 GetBlogNav）却有的原因。
+	home.Nav.Tree = root.toDTO()
+	home.Nav.Total = len(sources)
 	home.Activity = buildActivity(dayCount, earliest, 14, 53)
 
 	home.Stats.Links = totalLinks

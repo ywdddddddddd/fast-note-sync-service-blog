@@ -553,6 +553,10 @@ svg:not(.graph-svg) .g-node:hover text{opacity:1}
   .post{padding:1.5rem 1.25rem 2.5rem}
   .topbar-inner{padding:.6rem 1rem}
   .brand-sub{display:none}
+  /* 首页顶栏在窄屏只剩一行：品牌 + 顶栏入口 + 「最近更新」塞不下。
+     与阅读页隐藏整个顶栏是同一条判断——「你在哪」不如「能去哪」重要。
+     差别在于首页顶栏同时承载品牌与入口，所以只收掉面包屑这一格，而不是整条收掉。 */
+  body.is-home .crumb{display:none}
 }
 /* ── 错误页（404 / 未公开 / 站点关闭 / 渲染失败）────────────────────── */
 /* 与首页、文章页共用 .shell / .topbar / .footer 骨架；居中卡片，复用既有令牌与动效语汇。 */
@@ -1345,29 +1349,6 @@ mjx-container[display="true"]{margin:.9rem 0}
 }
 /* 首页内容的底衬只做在首页，避免在文章页把粒子也挡掉（那些页面不注入粒子）。 */
 .layout-home{position:relative;z-index:1}
-
-/* ── 关于我 ─────────────────────────────────────────────────────────── */
-/* 整张卡片是一个链接：读者要点的是「关于我」这件事，而不是卡片里某个词。 */
-.about-card{
-  display:block;padding:.9rem 1rem 1.1rem;
-  text-decoration:none;color:inherit;
-  transition:border-color .18s ease,background-color .18s ease,transform .22s cubic-bezier(.22,1,.36,1);
-}
-.about-card:hover{
-  border-color:color-mix(in srgb,var(--foreground) 24%,transparent);
-  background:color-mix(in srgb,var(--muted) 30%,transparent);
-  transform:translateY(-1px);
-}
-.about-card:active{transform:translateY(0)}
-.about-line{
-  margin:.35rem 0 0;font-size:.75rem;line-height:1.7;color:var(--muted-foreground);
-}
-/* 一条向右的小箭头，表示这是一个可以走进去的地方。 */
-.about-card .nav-title::after{
-  content:"→";float:right;font-weight:400;opacity:.45;
-  transition:transform .22s cubic-bezier(.22,1,.36,1),opacity .22s ease;
-}
-.about-card:hover .nav-title::after{transform:translateX(3px);opacity:.8}
 
 /* ── 穿越过渡 ───────────────────────────────────────────────────────── */
 /* 覆盖层。pointer-events:none：它盖住整个视口，若可点击，导航过程中页面上的东西都点不到。 */

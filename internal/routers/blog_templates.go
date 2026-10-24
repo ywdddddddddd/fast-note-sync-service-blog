@@ -80,12 +80,6 @@ type blogHomeView struct {
 	// ReactionJS 承载仪表盘七个数字的滚动。脚本里属于互动条的那一半在这个页面上会提前返回，
 	// 因为这里没有互动条。
 	ReactionJS template.JS
-	// HasAbout is true when a page note with the "about" alias is published, which is when the
-	// right-hand column offers the entry point. A link that 404s is worse than no link.
-	//
-	// HasAbout 在有已发布的 about 页面笔记时为真，也就是右栏给出入口的时候。
-	// 一个 404 的链接比没有链接更糟。
-	HasAbout bool
 	// WarpJS carries the warp transition. The home page uses it to leave; every page uses it to
 	// fade in when it was reached through the warp.
 	//
@@ -253,11 +247,19 @@ type blogPostView struct {
 // It renders nothing at all when there is no page note — an empty <nav> would still take part in
 // the flex layout and shift the breadcrumb.
 //
+// The "about" entry carries id="fns-warp": that is what the warp transition binds its departing
+// half to. It moved here from the right-hand card, which is gone — the top bar is now the only
+// way into the résumé, so the transition follows the entry rather than the other way round.
+//
 // topnav 渲染页面笔记的入口。
 //
 // 没有页面笔记时它什么都不输出：一个空的 <nav> 仍会参与弹性布局，把面包屑挤偏。
+//
+// "about" 那一条带 id="fns-warp"：穿越过渡的「出发」那一半绑的就是它。
+// 它从右栏那张卡片迁到这里，卡片已经撤掉——顶栏现在是通往简历的唯一入口，
+// 所以过渡跟着入口走，而不是让入口迁就过渡。
 const blogTopNav = `
-{{define "topnav"}}{{if .Pages}}<nav class="topnav">{{range .Pages}}<a href="{{.URL}}">{{.Title}}</a>{{end}}</nav>{{end}}{{end}}`
+{{define "topnav"}}{{if .Pages}}<nav class="topnav">{{range .Pages}}<a href="{{.URL}}"{{if eq .Alias "about"}} id="fns-warp"{{end}}>{{.Title}}</a>{{end}}</nav>{{end}}{{end}}`
 
 const blogNavTree = `
 {{define "navnode"}}{{if .Children}}<details class="nav-folder"{{if le .Depth 2}} open{{end}}>
@@ -351,6 +353,7 @@ var blogHomeTmpl = template.Must(template.New("blog-home").Parse(`<!DOCTYPE html
       </div>
     </div>
     <div class="topbar-spacer"></div>
+    {{template "topnav" .}}
     <div class="crumb">{{if .Stats.Updated}}最近更新 {{.Stats.Updated}}{{end}}</div>
   </div></header>
 
@@ -440,20 +443,6 @@ var blogHomeTmpl = template.Must(template.New("blog-home").Parse(`<!DOCTYPE html
         </div>
         <p class="act-note">按笔记的创建日期统计，最近 {{.Activity.Weeks}} 周。单日最多 {{.Activity.Max}} 篇。</p>
       </div>
-      {{end}}
-      {{if .HasAbout}}
-      <!-- The "about me" entry point.
-           It used to be a card of explanatory text about how the page is generated, which was
-           written for the author rather than the reader: a visitor does not need to know that
-           publishing happens by sharing a note. The card is now the way to reach the résumé.
-
-           关于我的入口。
-           它原本是一张解释「这个页面是怎么生成的」的说明卡，那是写给作者而不是写给读者的：
-           访客不需要知道发布是通过分享笔记完成的。现在这张卡片是通往简历的路。 -->
-      <a class="panel about-card" href="/blog/about" id="fns-warp">
-        <div class="nav-title">关于我</div>
-        <p class="about-line">简历与联系方式</p>
-      </a>
       {{end}}
       {{if .Hot}}
       <!-- Popular articles, sorted by likes. The whole block is omitted when nothing has been
@@ -570,6 +559,7 @@ var blogPostTmpl = template.Must(template.New("blog-post").Parse(`<!DOCTYPE html
       </div>
     </div>
     <div class="topbar-spacer"></div>
+    {{template "topnav" .}}
     <nav class="crumb"><a href="/blog">首页</a><span>/</span><b>{{.PostTitle}}</b></nav>
   </div></header>
 
@@ -840,6 +830,11 @@ type blogPageView struct {
 	CSS        template.CSS
 	PageTitle  string
 	PageAlias  string
+	// Pages are the page-note entry points shown in the top bar, with this page's own alias
+	// already removed by the caller. Same meaning as blogPostView.Pages.
+	//
+	// Pages 是顶栏里的页面笔记入口，调用方已剔除本页自己的别名。含义同 blogPostView.Pages。
+	Pages      []dto.BlogNavPageDTO
 	Avatar     string
 	UpdatedAt  string
 	Path       string
@@ -924,6 +919,7 @@ var blogPageTmpl = template.Must(template.New("blog-page").Parse(`<!DOCTYPE html
       </div>
     </div>
     <div class="topbar-spacer"></div>
+    {{template "topnav" .}}
     <nav class="crumb"><a href="/blog">首页</a><span>/</span><b>{{.PageTitle}}</b></nav>
   </div></header>
 
@@ -1060,7 +1056,7 @@ var blogPageTmpl = template.Must(template.New("blog-page").Parse(`<!DOCTYPE html
   })();
   </script>
 </body>
-</html>`))
+</html>` + blogTopNav))
 
 // blogErrorView is the data for the shared error page (404 / not published / blog disabled
 // / render failure). It deliberately carries no navigation tree: an error page must not cost
