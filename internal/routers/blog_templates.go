@@ -57,7 +57,13 @@ type blogHomeView struct {
 	Nav       []dto.BlogNavNode
 	// Page-note entry points for the top bar. See blogPostView.Pages.
 	// 顶栏的页面笔记入口。说明见 blogPostView.Pages。
-	Pages      []dto.BlogNavPageDTO
+	Pages []dto.BlogNavPageDTO
+	// HasShelf shows the 资料 entry. True only when the shelf manifest lists something: an entry
+	// leading to an empty shelf is the same apology an empty 热门 block would be.
+	//
+	// HasShelf 决定是否显示「资料」入口。只有在书目里确实有东西时为真：
+	// 一个通往空书架的入口，与一个空的「热门」区块是同一种道歉。
+	HasShelf   bool
 	ActiveSlug string
 	GraphSVG   template.HTML
 	GraphNote  string
@@ -123,7 +129,10 @@ type blogPostView struct {
 	//
 	// Pages 是顶栏里的页面笔记入口。它们不属于 Nav，因为目录树是文章按文件夹的组织方式，
 	// 而页面不属于任何文件夹位置。
-	Pages      []dto.BlogNavPageDTO
+	Pages []dto.BlogNavPageDTO
+	// HasShelf shows the 资料 entry. See blogHomeView.HasShelf.
+	// HasShelf 决定是否显示「资料」入口。见 blogHomeView.HasShelf。
+	HasShelf   bool
 	ActiveSlug string
 	PostTitle  string
 	PostPath   string
@@ -259,7 +268,7 @@ type blogPostView struct {
 // 它从右栏那张卡片迁到这里，卡片已经撤掉——顶栏现在是通往简历的唯一入口，
 // 所以过渡跟着入口走，而不是让入口迁就过渡。
 const blogTopNav = `
-{{define "topnav"}}{{if .Pages}}<nav class="topnav">{{range .Pages}}<a href="{{.URL}}"{{if eq .Alias "about"}} id="fns-warp"{{end}}>{{.Title}}</a>{{end}}</nav>{{end}}{{end}}`
+{{define "topnav"}}{{if or .Pages .HasShelf}}<nav class="topnav">{{range .Pages}}<a href="{{.URL}}"{{if eq .Alias "about"}} id="fns-warp"{{end}}>{{.Title}}</a>{{end}}{{if .HasShelf}}<a href="/blog/shelf">资料</a>{{end}}</nav>{{end}}{{end}}`
 
 const blogNavTree = `
 {{define "navnode"}}{{if .Children}}<details class="nav-folder"{{if le .Depth 2}} open{{end}}>
@@ -834,7 +843,10 @@ type blogPageView struct {
 	// already removed by the caller. Same meaning as blogPostView.Pages.
 	//
 	// Pages 是顶栏里的页面笔记入口，调用方已剔除本页自己的别名。含义同 blogPostView.Pages。
-	Pages      []dto.BlogNavPageDTO
+	Pages []dto.BlogNavPageDTO
+	// HasShelf shows the 资料 entry. See blogHomeView.HasShelf.
+	// HasShelf 决定是否显示「资料」入口。见 blogHomeView.HasShelf。
+	HasShelf   bool
 	Avatar     string
 	UpdatedAt  string
 	Path       string

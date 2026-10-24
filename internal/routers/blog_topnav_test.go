@@ -51,14 +51,25 @@ func TestTopNavIsWiredOnEveryPage(t *testing.T) {
 			t.Fatalf("%s: page body does not include topnav", tc.page)
 		}
 
-		// Finally the view must carry the entries, or the include renders nothing at all.
-		// 最后，view 必须带着入口数据，否则这个 include 什么也不渲染。
+		// Finally the view must carry the entries, or the include renders nothing at all. HasShelf
+		// is checked the same way: topnav reads it in the same conditional, so a view missing it
+		// fails at execute time rather than at compile time.
+		//
+		// 最后，view 必须带着入口数据，否则这个 include 什么也不渲染。HasShelf 同样要查：
+		// topnav 在同一个条件里读它，所以少了这个字段的 view 会在执行时失败，而不是编译时。
 		field, ok := reflect.TypeOf(tc.view).FieldByName("Pages")
 		if !ok {
 			t.Fatalf("%s: view has no Pages field, so topnav could never render", tc.page)
 		}
 		if want := reflect.TypeOf([]dto.BlogNavPageDTO{}); field.Type != want {
 			t.Fatalf("%s: Pages is %s, want %s", tc.page, field.Type, want)
+		}
+		shelfField, ok := reflect.TypeOf(tc.view).FieldByName("HasShelf")
+		if !ok {
+			t.Fatalf("%s: view has no HasShelf field, so topnav would fail to render", tc.page)
+		}
+		if shelfField.Type.Kind() != reflect.Bool {
+			t.Fatalf("%s: HasShelf is %s, want bool", tc.page, shelfField.Type)
 		}
 	}
 }
@@ -121,5 +132,15 @@ func TestPageTopNavRendersAboutEntry(t *testing.T) {
 	}
 	if strings.Contains(empty.String(), `class="topnav"`) {
 		t.Fatalf("empty Pages still rendered a topnav shell")
+	}
+
+	// The shelf entry appears on its own, without any page note being published.
+	// 书架入口可以单独出现，不依赖任何已发布的页面笔记。
+	var shelfOnly bytes.Buffer
+	if err := blogPageTmpl.Execute(&shelfOnly, blogPageView{SiteName: "test", HasShelf: true}); err != nil {
+		t.Fatalf("render shelf: %v", err)
+	}
+	if !strings.Contains(shelfOnly.String(), `<a href="/blog/shelf">资料</a>`) {
+		t.Fatalf("HasShelf produced no 资料 entry")
 	}
 }

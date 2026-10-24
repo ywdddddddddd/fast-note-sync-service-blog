@@ -161,6 +161,15 @@ func registerBlogRoutes(r *gin.Engine, appContainer *app.App) {
 		serveGraphFragment(c, appContainer)
 	})
 
+	// The materials shelf: a folder of PDFs, read one server-rendered page at a time.
+	// Registered before "/blog/:slug" for the same reason as the feed — "shelf" is a literal
+	// segment and must not be mistaken for a note slug.
+	//
+	// 资料书架：一叠 PDF，一次读一页服务端渲染的结果。
+	// 与订阅源同理，注册在 "/blog/:slug" 之前——"shelf" 是一个字面段，
+	// 不能被当成某篇笔记的 slug。
+	registerBlogShelfRoutes(blog, appContainer)
+
 	blog.GET("/blog", func(c *gin.Context) {
 		cfg, ok := blogEnabled(c, appContainer)
 		if !ok {
@@ -238,6 +247,7 @@ func registerBlogRoutes(r *gin.Engine, appContainer *app.App) {
 			Entries:      home.Entries,
 			Nav:          home.Nav.Tree,
 			Pages:        home.Nav.Pages,
+			HasShelf:     shelfHasBooks(),
 			GraphSVG:     svg,
 			GraphNote:    note,
 			Truncated:    home.Graph != nil && home.Graph.Truncated,
@@ -450,6 +460,7 @@ func registerBlogRoutes(r *gin.Engine, appContainer *app.App) {
 			CSS:         template.CSS(blogCSS),
 			Nav:         nav,
 			Pages:       pages,
+			HasShelf:    shelfHasBooks(),
 			Like:        tally.Like,
 			Dislike:     tally.Dislike,
 			Visits:      reactions.Visits,
@@ -592,6 +603,7 @@ func serveBlogPage(c *gin.Context, appContainer *app.App, shareSvc service.Share
 		PageTitle:   pageTitle,
 		PageAlias:   page.Alias,
 		Pages:       pages,
+		HasShelf:    shelfHasBooks(),
 		Avatar:      page.Avatar,
 		UpdatedAt:   page.UpdatedAt,
 		Path:        page.Path,

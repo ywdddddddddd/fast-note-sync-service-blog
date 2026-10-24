@@ -1906,4 +1906,227 @@ html.lb-lock{overflow:hidden}
   .lb-backdrop,.lb-stage,.lb-img,.lb-shimmer,.lb-bar,.lb-btn,.lb-close{transition:none}
   .lb-shimmer{animation:none}
 }
+
+/* ── 资料书架 ───────────────────────────────────────────────────────── */
+/* 封面墙。列宽用 auto-fill 而不是写死断点：一张封面的可读宽度下限是 15rem，
+   屏幕能放下几张就排几张，中间不需要任何一次性数字。 */
+.shelf{max-width:78rem;margin:0 auto;padding:1.75rem var(--layout-pad) 3.5rem;width:100%}
+.shelf-head{margin:0 0 1.7rem}
+.shelf-h1{font-size:1.5rem;font-weight:700;letter-spacing:-.02em;margin:0 0 .3rem}
+.shelf-sub{font-size:.8125rem;color:var(--muted-foreground);margin:0}
+
+.shelf-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(15rem,1fr));gap:1.7rem 1.4rem}
+.shelf-card{display:block;text-decoration:none;color:inherit;animation:shelf-in .5s cubic-bezier(.22,1,.36,1) both}
+@keyframes shelf-in{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+.shelf-card:nth-child(1){animation-delay:40ms}
+.shelf-card:nth-child(2){animation-delay:80ms}
+.shelf-card:nth-child(3){animation-delay:120ms}
+.shelf-card:nth-child(4){animation-delay:160ms}
+.shelf-card:nth-child(5){animation-delay:200ms}
+.shelf-card:nth-child(6){animation-delay:240ms}
+.shelf-card:nth-child(7){animation-delay:280ms}
+.shelf-card:nth-child(8){animation-delay:320ms}
+.shelf-card:nth-child(n+9){animation-delay:360ms}
+
+/* 封面盒。hover 时整本书抬起、书影加深、封面图轻微推近 —— 三件事同时发生，
+   读起来是「把这本书从架上拿起来了一点」，而不是三个独立的效果。 */
+.shelf-cover{
+  position:relative;aspect-ratio:1/1.414;border-radius:.8rem;overflow:hidden;
+  background:var(--card);border:1px solid var(--border);box-shadow:var(--shadow-sm);
+  transform-origin:50% 100%;
+  transition:transform .34s cubic-bezier(.22,1,.36,1),box-shadow .34s ease,border-color .22s ease;
+}
+.shelf-card:hover .shelf-cover{
+  transform:translateY(-7px) scale(1.015);
+  box-shadow:0 20px 42px -20px rgba(0,0,0,.5);
+  border-color:color-mix(in srgb,var(--foreground) 20%,transparent);
+}
+.shelf-card:active .shelf-cover{transform:translateY(-2px) scale(1.005);transition-duration:.12s}
+.shelf-cover img{
+  position:absolute;inset:0;width:100%;height:100%;object-fit:cover;z-index:1;
+  transition:transform .55s cubic-bezier(.22,1,.36,1);
+}
+.shelf-card:hover .shelf-cover img{transform:scale(1.045)}
+/* 没有封面（或渲染失败被移除）时的兜底：一块渐变书壳，书名竖排居中。
+   它必须自己就成立 —— 缺图不是一种错误状态，而是常见状态。 */
+.shelf-jacket{
+  position:absolute;inset:0;display:flex;align-items:center;justify-content:center;padding:1.3rem;
+  text-align:center;
+  background:linear-gradient(158deg,color-mix(in srgb,var(--primary) 13%,var(--card)) 0%,var(--card) 68%);
+}
+.shelf-jacket span{
+  font-size:.9375rem;font-weight:600;line-height:1.55;color:var(--foreground);
+  display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden;
+}
+/* 一道斜向高光。只在 hover 出现，给「纸面被转过一个角度」一点依据。 */
+.shelf-sheen{
+  position:absolute;inset:0;z-index:2;pointer-events:none;opacity:0;
+  background:linear-gradient(118deg,rgba(255,255,255,.55) 0%,rgba(255,255,255,0) 44%);
+  transition:opacity .34s ease;
+}
+.shelf-card:hover .shelf-sheen{opacity:.55}
+
+.shelf-info{padding:.72rem .12rem 0}
+.shelf-title{
+  font-size:.9375rem;font-weight:600;line-height:1.45;margin:0 0 .22rem;
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;
+}
+.shelf-author{font-size:.8125rem;color:var(--muted-foreground);margin:0 0 .3rem}
+.shelf-note{
+  font-size:.8125rem;line-height:1.65;color:var(--muted-foreground);margin:0 0 .42rem;
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;
+}
+.shelf-foot{display:flex;justify-content:space-between;gap:.5rem;font-size:.6875rem;
+  color:var(--muted-foreground);font-variant-numeric:tabular-nums}
+
+.shelf-empty{padding:3.5rem 1rem;text-align:center;color:var(--muted-foreground);font-size:.875rem}
+.shelf-empty p{margin:0 0 .5rem}
+.shelf-empty-hint{font-size:.8125rem}
+.shelf-empty code{background:var(--muted);padding:.12em .4em;border-radius:.25rem;
+  font-size:.95em;color:var(--foreground)}
+
+/* ── 阅读器 ─────────────────────────────────────────────────────────── */
+/* 一次一张纸。整页固定，绝不滚动外层：滚动只发生在舞台内部，
+   这样缩放以后（用的是 zoom，会重排）原生滚动仍然是对的。 */
+body.is-reader{overflow:hidden}
+.reader{
+  position:fixed;inset:0;display:flex;flex-direction:column;
+  background:var(--background);z-index:40;
+  animation:reader-in .44s cubic-bezier(.22,1,.36,1) both;
+}
+@keyframes reader-in{from{opacity:0;transform:scale(.945)}to{opacity:1;transform:none}}
+.reader.is-closing{animation:none;opacity:0;transform:scale(.965);
+  transition:opacity .24s ease,transform .24s cubic-bezier(.22,1,.36,1)}
+
+.reader-bar{
+  display:flex;align-items:center;gap:.7rem;padding:.55rem .85rem;flex:none;z-index:5;
+  border-bottom:1px solid var(--border);
+  background:color-mix(in srgb,var(--card) 80%,transparent);
+  -webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px);
+}
+.reader-back{
+  width:34px;height:34px;flex:0 0 34px;border-radius:.6rem;
+  display:flex;align-items:center;justify-content:center;color:var(--foreground);
+  transition:background-color .16s ease,transform .18s cubic-bezier(.22,1,.36,1);
+}
+.reader-back:hover{background:color-mix(in srgb,var(--muted) 60%,transparent);transform:translateX(-2px)}
+.reader-back svg{width:17px;height:17px}
+.reader-head{min-width:0;flex:1}
+.reader-title{font-size:.875rem;font-weight:600;line-height:1.35;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.reader-by{font-size:.6875rem;color:var(--muted-foreground);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.reader-tools{display:flex;align-items:center;gap:.12rem;flex:none}
+.reader-btn{
+  width:32px;height:32px;border:0;background:none;border-radius:.5rem;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;color:var(--muted-foreground);
+  transition:color .16s ease,background-color .16s ease;
+}
+.reader-btn:hover{color:var(--foreground);background:color-mix(in srgb,var(--muted) 55%,transparent)}
+.reader-btn svg{width:16px;height:16px}
+.reader-zoom{font-size:.6875rem;color:var(--muted-foreground);min-width:2.7em;text-align:center;
+  font-variant-numeric:tabular-nums}
+
+/* 舞台。margin:auto 而不是 justify-content:center —— 放大以后内容溢出时，
+   居中的 flex 会把左侧与顶部推到不可滚动的区域外；auto 外边距在溢出时退化为 0。 */
+.reader-stage{
+  flex:1;min-height:0;display:flex;overflow:auto;padding:1.1rem;
+  perspective:1800px;overscroll-behavior:contain;
+}
+.reader-stack{
+  position:relative;margin:auto;
+  height:min(100%,calc(100vh - 9rem));
+  height:min(100%,calc(100dvh - 9rem));
+  aspect-ratio:1/1.414;max-width:100%;
+  transform-style:preserve-3d;
+}
+.reader-sheet{
+  position:absolute;inset:0;width:100%;height:100%;object-fit:contain;
+  opacity:0;backface-visibility:hidden;will-change:opacity,transform;
+  filter:drop-shadow(0 14px 30px rgba(0,0,0,.15));
+}
+/* 过渡只在翻页期间打开。常驻会让「换 src」也变成一次淡入，读起来像加载而不是翻页。 */
+.reader-stack.is-anim .reader-sheet{
+  transition:opacity .34s cubic-bezier(.22,1,.36,1),transform .34s cubic-bezier(.22,1,.36,1);
+}
+.reader-stage.is-zoomed{cursor:grab}
+.reader-tail{
+  position:absolute;inset:auto 0 0 0;text-align:center;font-size:.6875rem;
+  color:var(--muted-foreground);opacity:0;
+}
+
+.reader-ctl{
+  display:flex;align-items:center;gap:.7rem;padding:.55rem .85rem;flex:none;
+  border-top:1px solid var(--border);
+  background:color-mix(in srgb,var(--card) 80%,transparent);
+  -webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px);
+}
+.reader-nav{
+  width:36px;height:36px;flex:0 0 36px;border:1px solid var(--border);border-radius:.6rem;
+  background:var(--card);color:var(--foreground);cursor:pointer;
+  display:flex;align-items:center;justify-content:center;
+  transition:background-color .16s ease,opacity .16s ease;
+}
+.reader-nav:hover:not(:disabled){background:color-mix(in srgb,var(--muted) 55%,transparent)}
+.reader-nav:disabled{opacity:.3;cursor:default}
+.reader-nav svg{width:16px;height:16px}
+.reader-jump{display:flex;align-items:center;gap:.35rem;font-size:.75rem;
+  color:var(--muted-foreground);flex:none}
+.reader-jump input{
+  width:3.4em;padding:.28rem .35rem;text-align:center;font-size:.75rem;
+  border:1px solid var(--border);border-radius:.45rem;background:var(--card);color:var(--foreground);
+  font-variant-numeric:tabular-nums;
+}
+.reader-jump input:focus{outline:none;border-color:color-mix(in srgb,var(--primary) 55%,transparent)}
+.reader-of{font-variant-numeric:tabular-nums}
+.reader-rail{
+  flex:1;height:2px;border-radius:2px;overflow:hidden;
+  background:color-mix(in srgb,var(--muted) 85%,transparent);
+}
+.reader-rail i{display:block;height:100%;width:0;border-radius:2px;
+  background:color-mix(in srgb,var(--primary) 70%,transparent);
+  transition:width .32s cubic-bezier(.22,1,.36,1)}
+
+.reader-hint{
+  position:fixed;left:50%;bottom:4.8rem;z-index:20;pointer-events:none;
+  padding:.45rem .85rem;border-radius:.55rem;font-size:.75rem;
+  background:color-mix(in srgb,var(--foreground) 88%,transparent);color:var(--background);
+  animation:reader-hint-in .2s ease both;
+}
+@keyframes reader-hint-in{from{opacity:0;transform:translate(-50%,6px)}to{opacity:1;transform:translate(-50%,0)}}
+
+@media (max-width:860px){
+  .shelf{padding:1.1rem .9rem 2.6rem}
+  .shelf-h1{font-size:1.25rem}
+  .shelf-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:1.25rem .85rem}
+  .shelf-note{display:none}
+  .shelf-title{font-size:.875rem}
+  .shelf-foot{font-size:.625rem}
+
+  .reader-bar{padding:.45rem .55rem;gap:.5rem}
+  .reader-by{display:none}
+  .reader-zoom{display:none}
+  .reader-btn-fs{display:none}
+  .reader-stage{padding:.55rem}
+  .reader-stack{
+    height:min(100%,calc(100vh - 7rem));
+    height:min(100%,calc(100dvh - 7rem));
+  }
+  .reader-ctl{gap:.5rem;padding:.45rem .55rem;
+    padding-bottom:calc(.45rem + env(safe-area-inset-bottom,0px))}
+  .reader-hint{bottom:calc(4.2rem + env(safe-area-inset-bottom,0px))}
+}
+@media (max-width:420px){
+  .shelf-grid{grid-template-columns:minmax(0,1fr)}
+  .shelf-cover{aspect-ratio:1/1.3}
+}
+@media (prefers-reduced-motion:reduce){
+  .shelf-card{animation:none}
+  .shelf-cover,.shelf-cover img,.shelf-sheen{transition:none}
+  .reader{animation:none}
+  .reader.is-closing{transition:none}
+  .reader-stack.is-anim .reader-sheet{transition:none}
+  .reader-hint{animation:none}
+  .reader-rail i{transition:none}
+}
 `
