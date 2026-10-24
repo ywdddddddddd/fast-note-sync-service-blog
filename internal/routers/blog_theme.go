@@ -1263,12 +1263,18 @@ mjx-container[display="true"]{margin:.9rem 0}
 
 /* 顶栏里的页面笔记入口。
    放在面包屑左侧、与它同一条基线：两者都是「我在哪、能去哪」的指路信息，
-   分开摆会让顶栏出现两簇方向感互相打架的链接。 */
+   分开摆会让顶栏出现两簇方向感互相打架的链接。
+
+   文字色用 --muted-foreground 而不是 --muted：后者是 #f3f3f3，一个背景令牌，
+   压在白色顶栏上对比度只有 1.11:1，链接等于不存在。这段样式自写就从未被渲染过
+   （见 02 文档 §8 第 3 条），所以那个错一直没暴露；接线之后才第一次看得见。
+   与 .nav-item 同一套取值：次要文字色起步（实测 #858481 on #fff = 3.74:1），
+   hover 转前景色。与面包屑同色系的差别靠 font-weight 与 hover 底色表达。 */
 .topnav{display:flex;align-items:center;gap:.15rem;margin-left:.4rem;flex:none}
 .topnav a{
   padding:.3rem .6rem;border-radius:.5rem;
   font-size:.8125rem;font-weight:500;
-  color:var(--muted);text-decoration:none;
+  color:var(--muted-foreground);text-decoration:none;
   transition:color .16s ease,background-color .16s ease;
 }
 .topnav a:hover{color:var(--foreground);background:color-mix(in srgb,var(--muted) 34%,transparent)}
