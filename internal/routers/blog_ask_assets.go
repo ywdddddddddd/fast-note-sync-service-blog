@@ -209,62 +209,55 @@ function broadcastOpen(who) {
   var viewportRaf = 0;
   var narrowQuery = window.matchMedia ? window.matchMedia('(max-width:860px)') : null;
 
+  // 关键的基准：**没有键盘时**的布局视口高度。
+  //
+  // 需要的判据是「键盘吃掉多少屏」，而不同内核给出的信号不一样：
+  //   iOS WKWebView（含微信）：innerHeight 不变，只有 visualViewport.height 变小；
+  //   Android X5：两者一起变小（innerHeight 自己就缩了）。
+  // 所以不能拿 innerHeight 和 visH 相减 —— 在 Android 上那是 0，接管永远不触发。
+  // 只能拿「当前可视高度」和「曾经见过的最大 innerHeight」相减：
+  // 键盘只会让可视区变小，所以基准只增不减，键盘弹起期间不会被自己污染。
+  var BASE_H = window.innerHeight || 0;
+  function noteBaseHeight() {
+    var ih = window.innerHeight || 0;
+    if (ih > BASE_H) BASE_H = ih;
+  }
+
+  function clearPanelGeometry() {
+    panel.style.top = '';
+    panel.style.height = '';
+    panel.style.bottom = '';
+  }
+
   function syncViewport() {
-    if (!OPEN || !viewport) return;
-    // 微信里这条路整条不走。
-    //
-    // 交接 06 §2.3 早就写了「微信拿不到键盘高度，fixed 也不跟随」，并且配了 CSS
-    // （html.is-wx .ask-panel 压到 60vh / 聚焦时 46vh）。但这里从未加守卫 ——
-    // 于是那段 CSS 被内联的 top/height/bottom 整条盖掉，微信里跑的是「按 visualViewport 钉」
-    // 这条本来就对微信不适用的路。
-    //
-    // 表现因此按 visualViewport 返回什么而分裂成三种：
-    //   visH 返回 0      -> h 算成负数 -> 面板塌成一条（截图一：只剩顶部一条白线）
-    //   visH 返回全高    -> h≈771     -> 输入框落在键盘后面（截图二）
-    //   offsetTop 异常   -> top 被推走 -> 面板整体错位（截图三）
-    // 同一个 bug，三种长相 —— 而 CSS 里那份正确答案一次都没被执行过。
-    if (inWeChat) {
-      panel.style.top = '';
-      panel.style.height = '';
-      panel.style.bottom = '';
-      return;
-    }
+    if (!OPEN) return;
     if (viewportRaf) return;
     viewportRaf = requestAnimationFrame(function () {
       viewportRaf = 0;
       if (!OPEN) return;
-      if (narrowQuery && !narrowQuery.matches) {
-        panel.style.height = '';
-        panel.style.bottom = '';
-        return;
-      }
-      // Pin the panel to the visual viewport: top = how far the page was pushed up,
-      // height = what is actually visible. The earlier version set only height and bottom,
-      // then scrolled the transcript to the end — with the keyboard up those three add up and
-      // hand the panel a negative top, which is why the input box vanished past the edge.
-      //
-      // 面板直接钉在视觉视口上：top 取页面被顶起的量，height 取真正可见的高度。
-      // 旧写法只设 height 与 bottom、再把对话滚到底——键盘弹起时三者相加会算出负的 top，
-      // 输入框就是这么被挤出屏幕的。
-      // 取两者较小值：键盘升降过程中 visualViewport 与 innerHeight 会短暂不同步，
+      // 桌面端永不接管：桌面没有软键盘，CSS 那份定位就够了。
+      if (narrowQuery && !narrowQuery.matches) { clearPanelGeometry(); return; }
+
+      // 当前真正看得见的高度：取两者较小值。
+      // 键盘升降过程中 visualViewport 与 innerHeight 会短暂不同步，
       // 用较大的那个就会把面板底部撑到键盘下面去。
-      //
-      // Take the smaller of the two: during the keyboard animation visualViewport and
-      // innerHeight disagree for a frame or two, and trusting the larger one leaves the
-      // panel's bottom edge sitting behind the keyboard.
+      noteBaseHeight();
       var visH = viewport ? viewport.height : window.innerHeight;
       var visT = viewport ? viewport.offsetTop : 0;
-      // 底部要给常驻胶囊留出一条：它压在面板之上（z-index 61），
-      // 面板若铺到屏幕底，输入框就落在胶囊后面 —— 实测 elementFromPoint 在胶囊中心
-      // 取到的是 ask-field。这个值必须与 CSS 里 body .dock 的底边距 + 高度一致，
-      // 所以从胶囊自身量出来，而不是再抄一个常数。
-      var dockEl = document.getElementById('fns-dock');
-      var gap = 0;
-      if (dockEl) {
-        var dr = dockEl.getBoundingClientRect();
-        gap = Math.max(0, Math.round(window.innerHeight - dr.top + 10));
-      }
-      var h = Math.min(visH, window.innerHeight) - gap;
+      // 有效性守卫：页面刚加载、面板刚插入时 visualViewport.height 可能还是 0 或 undefined。
+      // 曾经没有这一条，h 被算成负数，面板塌成一条白线 —— 那不是微信的问题，
+      // 是读到了一个还没初始化的值。读到无效值就退回样式表。
+      if (!(visH > 200)) { clearPanelGeometry(); return; }
+      var h = Math.min(visH, window.innerHeight);
+
+      // 键盘吃掉的高度。60px 以下不算键盘：地址栏/工具栏收缩也会让这些数字抖几十像素，
+      // 为那点抖动接管几何会让面板无缘无故跳一下。
+      if (!(BASE_H - h >= 60)) { clearPanelGeometry(); return; }
+
+      // 键盘弹起时胶囊（position:fixed，不跟随键盘）也被盖在键盘后面了，
+      // 所以这里不再给它让位 —— 让了就是在输入框和键盘之间凭空塞一条空白。
+      // 面板底边就是键盘顶边，输入框贴着键盘上方，和豆包那种聊天窗一致。
+      if (!(h > 160)) { clearPanelGeometry(); return; }
       panel.style.top = Math.max(0, Math.round(visT)) + 'px';
       panel.style.height = Math.round(h) + 'px';
       panel.style.bottom = 'auto';
@@ -290,12 +283,23 @@ function broadcastOpen(who) {
     if (pollTimer) { clearInterval(pollTimer); pollTimer = 0; }
   }
 
+  // 横竖屏切换后基准整个失效（844 → 390 会被当成「键盘吃掉了 454」），
+  // 必须重取。等一拍再取，内核这会儿还在改尺寸。
+  function onOrientation() {
+    setTimeout(function () {
+      BASE_H = window.innerHeight || 0;
+      syncViewport();
+    }, 260);
+  }
+
   function bindViewport() {
-    if (!viewport) return;
-    viewport.addEventListener('resize', syncViewport);
-    viewport.addEventListener('scroll', syncViewport);
+    // window 的两个事件始终绑：visualViewport 不存在的老内核靠 innerHeight 的 resize 也能走通。
     window.addEventListener('resize', syncViewport);
-    window.addEventListener('orientationchange', syncViewport);
+    window.addEventListener('orientationchange', onOrientation);
+    if (viewport) {
+      viewport.addEventListener('resize', syncViewport);
+      viewport.addEventListener('scroll', syncViewport);
+    }
     startViewportPoll();
   }
   function unbindViewport() {
@@ -305,11 +309,9 @@ function broadcastOpen(who) {
       viewport.removeEventListener('scroll', syncViewport);
     }
     window.removeEventListener('resize', syncViewport);
-    window.removeEventListener('orientationchange', syncViewport);
+    window.removeEventListener('orientationchange', onOrientation);
     if (viewportRaf) { cancelAnimationFrame(viewportRaf); viewportRaf = 0; }
-    panel.style.height = '';
-    panel.style.bottom = '';
-    panel.style.top = '';
+    clearPanelGeometry();
   }
 
   // ── Auto-grow textarea ─────────────────────────────────────────────────────
@@ -324,11 +326,12 @@ function broadcastOpen(who) {
   // WeChat gives no keyboard height, so the panel itself gets shorter while typing rather than
   // scrolling the page — the panel focuses its input on open, and scrolling there would turn a
   // tap on the entry into a jump to the bottom of the page.
+  // 只做一个状态标记：加 is-wx-typing 类，记录「键盘正开着」。
+  // 面板几何不在这里算 —— 全部交给 syncViewport()，它对所有内核用同一套逻辑。
+  // 之前这里根据 UA 分支改高度/改上限，微信里恰好就是那条分支把布局弄坏。
   function setWeChatTyping(on) {
     if (!inWeChat) return;
     document.documentElement.classList.toggle('is-wx-typing', !!on);
-    // 不调 syncViewport()：微信下它什么都不做（见该函数开头的守卫），
-    // 高度改由 CSS 的 is-wx-typing 规则接住。
   }
 
   input.addEventListener('focus', function () {

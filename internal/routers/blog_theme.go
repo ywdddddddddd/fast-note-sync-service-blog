@@ -2405,25 +2405,22 @@ body.is-reader{overflow:hidden}
 }
 @keyframes reader-hint-in{from{opacity:0;transform:translate(-50%,6px)}to{opacity:1;transform:translate(-50%,0)}}
 
-/* 微信内置浏览器：键盘弹出时布局视口不变、fixed 也不跟随，拿不到键盘高度。
-   既然量不到，就不去量——把面板高度压到键盘之上：常态 60vh，打字时 46vh
-   （iPhone 键盘约占 40% 屏高）。面板本身始终 fixed，页面不发生任何滚动。
-   把面板放回文档流是错的：面板一打开就 focus 输入框，那会让「点入口」变成「滚到页尾」。 */
+/* 微信内置浏览器（以及一切移动内核）：面板底边贴住键盘顶边，输入框就在键盘正上方。
+   这就是豆包/微信自己的聊天窗那种形态 —— 消息区从顶部铺到键盘顶，输入框压在最下面。
+
+   具体怎么做到的：不靠 CSS 猜，靠 visualViewport ——
+   键盘弹起时它变小，top 与 height 就按它写内联样式（见 blog_ask_assets.go 的
+   syncViewport）。这条逻辑本来就是对的，微信里也走这条路。
+
+   下面这些规则只在 **JS 没跑 / 读到无效值时** 生效，是兜底，不是主力：
+   兜底态贴顶定高，至少输入框不会被键盘盖住。
+   注意绝不能给 min-height —— 它会压过 JS 写的内联 height，把面板底边顶到键盘下面去。 */
 html.is-wx .ask-panel{
   top:0;bottom:auto;
-  /* 高度跟内容走，不是写死的 60vh。
-     空态只有几个 chip 时 60vh 会得到一片空白（实测截图里中间全空），
-     而聊起来后高度又不够。这里让面板自己量：内容少就矮，内容多长到 60vh 封顶。
-     max-content 会被 .ask-body 的 overflow 撑成无穷大，所以上限用 clamp 压在 60vh。
-     配合 .ask-body 的 min-height:0，超出的部分进入滚动。 */
-  height:auto;
-  min-height:9rem;
-  max-height:60vh;
-  transition:max-height .28s cubic-bezier(.22,1,.36,1),opacity .34s ease,transform .44s cubic-bezier(.22,1,.36,1);
+  height:56vh;
+  min-height:0;
+  max-height:none;
 }
-/* 打字时上限降到 46vh：iPhone 键盘约占屏高 40%，46vh 让输入框稳定落在键盘上方。
-   注意这里改的是 max-height —— 内容本来就矮时面板不会为了凑高度而变高。 */
-html.is-wx.is-wx-typing .ask-panel{max-height:46vh}
 html.is-wx .ask-panel{left:.45rem;right:.45rem;width:auto}
 
 @media (max-width:860px){
