@@ -116,6 +116,9 @@ img{max-width:100%;height:auto;border-radius:.5rem}
 .brand-mark svg{width:18px;height:18px}
 .brand-name{font-size:1.0625rem;font-weight:700;letter-spacing:-.01em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .brand-sub{font-size:.75rem;color:var(--muted-foreground);white-space:nowrap}
+/* 同一条信息的两种长度。宽屏用完整写法，窄屏用压缩写法（字数按「万」计），
+   两者读的是同一批字段，所以永远同步——不需要在服务端判断一次屏幕宽度。 */
+.brand-sub .bs-compact{display:none}
 .topbar-spacer{flex:1}
 .crumb{font-size:.8125rem;color:var(--muted-foreground);display:flex;align-items:center;gap:.4rem;min-width:0}
 .crumb b{color:var(--foreground);font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -296,6 +299,12 @@ img{max-width:100%;height:auto;border-radius:.5rem}
 .item-meta{display:flex;flex-wrap:wrap;gap:.85rem;margin-top:.45rem;font-size:.6875rem;color:var(--c3)}
 .item-meta span{display:inline-flex;align-items:center;gap:.25rem}
 .item-meta svg{width:11px;height:11px}
+
+/* 底部三点（爻路 / 目录 / 问道）只在窄屏首页出现 —— 模板只为首页输出它。
+   桌面走三栏，入口在右下角的悬浮钮与顶栏，不需要这一条。
+   基础规则写在这里（媒体查询之前），窄屏断点里再把它打开，
+   否则一条更靠后的 display:none 会把它一直压在关着的状态。 */
+.dock{display:none}
 
 /* ── 右：目录 / 侧栏 ──────────────────────────────────────────────── */
 .rail{display:flex;flex-direction:column;gap:1.25rem}
@@ -532,12 +541,14 @@ svg:not(.graph-svg) .g-node:hover text{opacity:1}
     grid-template-columns:minmax(0,1fr);
     padding:1rem .9rem 3rem;gap:1.25rem;
   }
-  /* 单列顺序按页面类型区分。首页的正文是近百篇的长列表，若把日历与目录树
-     排在它后面，等于换个方式藏起来——所以首页改为「日历 → 目录树 → 正文」；
-     文章页仍以正文为先，目录树与本页目录随后。 */
-  .layout-home .rail{order:1}
+  /* 单列顺序按页面类型区分。
+     首页此前是「日历 → 目录树 → 正文」，实测第一篇笔记落在 y=1696，也就是第 2.01 屏：
+     读者滑过一整屏半才看到第一个能点开的东西。正文是这一页的目的，仪表、目录、看板
+     都是关于正文的注释，注释不该排在正文前面。现在第一篇落在 y≈132。
+     文章页维持正文优先。 */
+  .layout-home .content{order:1}
   .layout-home .aside{order:2}
-  .layout-home .content{order:3}
+  .layout-home .rail{order:3}
   .layout-post .content{order:1}
   .layout-post .aside{order:2}
   .layout-post .rail{order:3}
@@ -547,16 +558,151 @@ svg:not(.graph-svg) .g-node:hover text{opacity:1}
   }
   /* 侧栏不再吸顶。目录树给一个上限并保留内部滚动，否则十来个来源目录
      的整棵树会占满数屏，把正文压到最底下。 */
-  .aside{max-height:52vh;overflow-y:auto}
-  .rail{max-height:none;overflow:visible;margin-top:0}
+  .aside{max-height:52vh;overflow-y:auto;margin-top:1rem}
+  .rail{max-height:none;overflow:visible;margin-top:1rem}
   .aside>.panel,.rail>.panel{position:static}
   .post{padding:1.5rem 1.25rem 2.5rem}
-  .topbar-inner{padding:.6rem 1rem}
-  .brand-sub{display:none}
+  .topbar-inner{padding:.45rem .9rem .5rem}
   /* 首页顶栏在窄屏只剩一行：品牌 + 顶栏入口 + 「最近更新」塞不下。
      与阅读页隐藏整个顶栏是同一条判断——「你在哪」不如「能去哪」重要。
      差别在于首页顶栏同时承载品牌与入口，所以只收掉面包屑这一格，而不是整条收掉。 */
   body.is-home .crumb{display:none}
+
+  /* ── 首页：七格仪表盘让位给一行状态条 ────────────────────────────── */
+  /* 七格里「标签 0」是一个没有信息的格子；「来源目录」「篇均字数」「访问次数」
+     是博主视角的读数。读者真正要的只有三个：有多少可读、有多厚、连得多密。
+     而这三个数本来就在 .brand-sub 里，此前被 display:none 藏了起来。
+     所以这里不是新增组件，是把它放出来，把七格收回给桌面端。 */
+  body.is-home .board{display:none}
+  body.is-home .brand-sub{
+    display:block;margin-top:.05rem;
+    font-size:.6875rem;letter-spacing:.01em;line-height:1.35;
+    overflow:hidden;text-overflow:ellipsis;
+  }
+  body.is-home .brand-sub .bs-wide{display:none}
+  body.is-home .brand-sub .bs-compact{display:inline}
+
+  /* ── 首页：卡片元信息降噪 ────────────────────────────────────────── */
+  /* 窄屏一行放不下「日期／字数／出链 16 · 入链 14／目录」四段，实测已挤到换行边缘。
+     只留读者真会用到的三段；出链数对读者没有意义——想知道关联，点进文章有完整局部图谱。
+     顺序用 order 重排，DOM 顺序不动，桌面端的排列因此保持原样。 */
+  .list .item .m-link{display:none}
+  .list .item .m-cat{
+    order:1;padding:.1rem .42rem;border-radius:.35rem;
+    background:color-mix(in srgb,var(--muted) 60%,transparent);
+  }
+  .list .item .m-words{order:2}
+  .list .item .m-date{order:3}
+  .list .item .item-meta{gap:.55rem;margin-top:.4rem}
+
+  /* ── 首页：长列表为什么**不用** content-visibility ─────────────────── */
+  /* 试过 content-visibility:auto 配 contain-intrinsic-size:auto 131px，实测结果：
+     加载时 scrollHeight=24782，滚过列表后收缩到 21215 —— 视口外的卡片按 131px 估算，
+     真实高度 134px，146 张的误差攒成 3567px，读者眼前的滚动条会缩水 17%。
+     它换来的只是跳过视口外卡片的绘制，而首屏成本在 396 KB 的解析与样式计算上，不在这里。
+     加上 Safari 18 才支持，iOS 17 及以下本来就没有任何收益。
+     所以不做：一个让滚动条长度说谎的优化，比它省下的那点绘制更贵。 */
+  /* ── 首页：顶栏入口的触控区 ──────────────────────────────────────── */
+  /* 实测三个入口的可点高度只有 32px，低于 40px 的舒适下限，而它们又是窄屏上仅有的
+     跨页导航。撑开内边距，代价是顶栏高约 8px。
+     选择器要带一个 body 才压得住基础规则 .topnav a —— 那条在文件更靠后，
+     同特异性时由它胜出，这里不加限定就完全不生效（第一次改正是这样落空的）。 */
+  body .topnav a,body .topnav-ask{padding:.55rem .6rem}
+
+  /* ── 底部五点胶囊（首页与文章页共用）──────────────────────────────── */
+  /* 位置贴底居中，留一个安全区的距离。
+     形态：一条药丸容器 + 一个滑块。滑块就是「五段式开关」里那块东西 ——
+     它停在哪，说明刚才动了哪一格；位置本身是反馈，不需要再给选中项加一套样式。
+     静止时图标 .46，指到或按下转为完全不透明并轻微放大。
+     尺寸：按钮 34px、图标 20px，五个键挤在 390px 宽里仍然留得下。 */
+  .dock{
+    position:fixed;left:50%;transform:translateX(-50%);
+    bottom:calc(1.05rem + env(safe-area-inset-bottom,0px));
+    /* 59 = 与阅读页的边缘书签同级，压在遮罩（57）与抽屉（58）之上。
+       抽屉打开时那一格必须还能再点一次把它关回去。 */
+    z-index:59;display:flex;align-items:center;gap:0;
+    padding:5px;border-radius:999px;
+    border:1px solid var(--border);
+    /* 82% 而不是更淡：半透明到能看见底下的卡片文字时，图标会和摘要叠在一起，
+       读起来是一次印刷事故而不是一个控件。磨砂只负责质感，不负责透读。 */
+    background:color-mix(in srgb,var(--card) 82%,transparent);
+    -webkit-backdrop-filter:blur(18px) saturate(1.5);
+    backdrop-filter:blur(18px) saturate(1.5);
+    box-shadow:0 6px 24px rgba(0,0,0,.10),inset 0 1px 0 rgba(255,255,255,.55);
+    /* 自成合成层：遮罩的 backdrop-filter 在 WebKit 上会把同级的 fixed 元素卷进合成组，
+       药丸的边框因此跟着糊掉。阅读页抽屉用的是同一处处理。 */
+    isolation:isolate;
+    /* --slot 由脚本按「点了第几个键」写成整数，滑块据此平移。
+       用变量而不是给每个键各写一条 transform：键的数量还会变（文章页那套与首页不同），
+       而滑块永远只有一块。 */
+    --slot:0;
+    --slot-w:34px;
+  }
+  .dock-thumb{
+    position:absolute;top:5px;left:5px;
+    width:var(--slot-w);height:var(--slot-w);border-radius:50%;
+    background:color-mix(in srgb,var(--foreground) 8%,transparent);
+    border:1px solid var(--border);
+    transform:translateX(calc(var(--slot) * var(--slot-w)));
+    /* 带一点点回弹：滑到位时越过几个像素再回来，读起来是「拨到档位」而不是「数值变化」。 */
+    transition:transform .3s cubic-bezier(.34,1.4,.44,1);
+  }
+  .dock-b{
+    position:relative;z-index:1;
+    display:inline-flex;align-items:center;justify-content:center;
+    width:var(--slot-w);height:var(--slot-w);padding:0;
+    border:0;border-radius:50%;background:transparent;
+    color:var(--foreground);cursor:pointer;opacity:.55;
+    -webkit-appearance:none;appearance:none;
+    transition:opacity .2s ease,transform .26s cubic-bezier(.22,1,.36,1);
+  }
+  .dock-b svg{width:20px;height:20px;display:block}
+  .dock-b:hover,.dock-b:focus-visible{opacity:.9;transform:scale(1.06)}
+  .dock-b:active{opacity:1;transform:scale(.94)}
+  .dock-b:focus-visible{outline:2px solid var(--primary);outline-offset:2px}
+  /* 某一格正处于打开状态时，它的图标与滑块同为全亮。 */
+  .dock-b[aria-expanded="true"]{opacity:1}
+
+  /* .layout-home 自己只有 z-index:1，而顶栏是 30 —— 抽屉的 58 只在那块层叠上下文里有效，
+     整块仍是 1，于是顶栏会盖住抽屉顶部那一截。打开抽屉时把整块抬到顶栏之上。 */
+  body.drawer-nav .layout-home,
+  body.drawer-hot .layout-home,
+  body.drawer-live .layout-home{z-index:40}
+  /* 首页三条抽屉共用同一条右栏容器：打开哪一条，就只留那一条在里面。
+     这样每个模块的内容在服务端只渲染一次，DOM 不需要复制。 */
+  body.drawer-hot .layout-home .rail>.panel:not(.hot){display:none}
+  body.drawer-live .layout-home .rail>.panel:not(.act){display:none}
+
+  /* 首页窄屏的问答入口在这条 dock 上，原本的悬浮钮退场。 */
+  body.is-home .ask-fab{display:none}
+  /* 阅读页的图谱与问答入口也都搬到底部胶囊上了，顶部那两颗退场。
+     注意：这只是把重复的入口藏起来，不是把功能藏起来 ——
+     胶囊里那两格仍在调它们原来的逻辑（图谱直接点这个按钮，问答走 data-ask-open）。
+     display:none 的元素照样能被 .click() 派发事件，这正是图谱那一格能用的原因。 */
+  body.is-post .graph-fab,
+  body.is-post .ask-fab{display:none}
+  /* 页面笔记同样把问答搬进胶囊，顶部那颗圆钮退场；底部留白一并加够。 */
+  body.is-page .ask-fab{display:none}
+  body.is-page .layout.layout-page{padding-bottom:5.5rem}
+  /* 阅读页底部同样常驻一条：正文最后一行不该被它压住。
+     必须写成 .layout.layout-post 才压得住 —— 文件后面那条把 padding 设成 3rem 的规则
+     与本条同特异性、且更靠后，只写 body.is-post .layout-post 会被它整条盖掉
+     （实测仍是 48px，两次）。 */
+  body.is-post .layout.layout-post{padding-bottom:5.5rem}
+  /* 热门与活跃都只有几行字，给它们全屏抽屉会得到一块大白板。
+     这两条改成右侧浮出的卡片：高度跟着内容走，四角圆，离顶留一点距离。
+     目录不一样 —— 它有二十来个栏目，只有全高才有意义，所以它保持全高抽屉。 */
+  body.drawer-hot .layout-home .rail,
+  body.drawer-live .layout-home .rail{
+    top:calc(1rem + env(safe-area-inset-top,0px));
+    bottom:auto;height:auto;
+    max-height:calc(100dvh - 2rem);
+    border-radius:1rem 0 0 1rem;
+    box-shadow:0 12px 40px rgba(0,0,0,.14);
+    padding:1rem 1.1rem;
+  }
+  /* 底部常驻一条，列表最后一项不该被它压住。 */
+  body.is-home .layout{padding-bottom:5.5rem}
 }
 /* ── 错误页（404 / 未公开 / 站点关闭 / 渲染失败）────────────────────── */
 /* 与首页、文章页共用 .shell / .topbar / .footer 骨架；居中卡片，复用既有令牌与动效语汇。 */
@@ -1656,31 +1802,37 @@ html.fns-arrived .shell{animation:fns-arrive-fade .62s cubic-bezier(.22,1,.36,1)
    而 position:fixed 加一个 transform 就能让同一份 DOM 换一种呈现,没有第二份可走散的东西。 */
 
 /* 书签本体。
-   绑定在屏幕边缘的垂直中线,只露出一个窄条。
-   视觉语言与右下角的图谱/问答入口同一套:卡片底、细边、磨砂、圆角 —— 它是同一种东西,
-   只是贴着墙。 */
+   绑定在屏幕边缘的垂直中线，只露出一条极窄的透明热区与一个 V 型箭头。
+   旧版是一块带边框、带磨砂的实心方块 —— 它确实「看得见」，但也确实压住了正文的一角，
+   而它要说的只有一句话：这边能拉开。
+   于是改成：底完全透明，箭头静止 38% 不透明，指上去升到 95% 并铺一层极淡的底色。
+   热区仍是 1.5rem × 2.5rem，比箭头大得多 —— 看得小，点得到。
+   左书签已经撤掉：全局目录的入口挪到了底部那条胶囊的「山」上，
+   同一个页面不再需要两个通往目录的入口。 */
 .fns-tab{
-  display:none;                 /* 桌面端不渲染;断点内才显示。 */
-  /* 层序:遮罩 57、抽屉 58、书签 59。
-     书签必须在遮罩之上 —— 抽屉打开时,未被点的那一侧要保持可点,
-     否则「打开一个再点另一个切换」就没有入口,读者只能先关再开。
-     被点的那一侧本来就已隐藏,所以它压在抽屉上也不会露出。 */
+  display:none;                 /* 桌面端不渲染；断点内才显示。 */
+  /* 层序：遮罩 57、抽屉 58、书签 59。
+     书签必须在遮罩之上 —— 抽屉打开时这一侧要保持可点，
+     否则打开之后就只能靠点遮罩退出，而遮罩在窄屏上只剩两侧窄条。 */
   position:fixed;top:50%;z-index:59;
   align-items:center;justify-content:center;
-  width:1.85rem;height:4.4rem;
+  width:1.5rem;height:2.5rem;
   padding:0;
-  border:1px solid var(--border);
-  background:color-mix(in srgb,var(--card) 70%,transparent);
-  -webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px);
+  border:0;background:transparent;
   color:var(--muted-foreground);
+  opacity:.48;
   cursor:pointer;
   transform:translateY(-50%);
-  transition:opacity .26s ease,transform .34s cubic-bezier(.22,1,.36,1),
-             color .2s ease,background .2s ease;
+  transition:opacity .2s ease,background-color .2s ease,
+             transform .34s cubic-bezier(.22,1,.36,1);
 }
-.fns-tab-l{left:0;border-left:0;border-radius:0 .9rem .9rem 0}
-.fns-tab-r{right:0;border-right:0;border-radius:.9rem 0 0 .9rem}
-.fns-tab:active{color:var(--foreground)}
+.fns-tab-r{right:0;border-radius:.6rem 0 0 .6rem}
+.fns-tab:hover,.fns-tab:focus-visible{
+  opacity:.95;
+  background:color-mix(in srgb,var(--foreground) 6%,transparent);
+}
+.fns-tab:active{color:var(--foreground);opacity:1}
+.fns-tab:focus-visible{outline:2px solid var(--primary);outline-offset:-2px}
 .fns-tab-ico{display:inline-flex;width:1rem;height:1rem}
 .fns-tab-ico svg{width:100%;height:100%}
 
@@ -1712,23 +1864,35 @@ html.fns-arrived .shell{animation:fns-arrive-fade .62s cubic-bezier(.22,1,.36,1)
   /* ── 书签与遮罩 ─────────────────────────────────────────────────── */
   body.is-post .fns-tab,
   body.is-page .fns-tab{display:inline-flex}
+  /* 首页也启用遮罩：它的目录由底部那条 dock 的中间按钮打开，
+     与阅读页的边缘书签是同一套抽屉机制，只是入口换了位置。 */
   body.is-post .fns-scrim,
-  body.is-page .fns-scrim{display:block}
+  body.is-page .fns-scrim,
+  body.is-home .fns-scrim{display:block}
   body.is-post .fns-scrim[hidden],
-  body.is-page .fns-scrim[hidden]{display:none}
+  body.is-page .fns-scrim[hidden],
+  body.is-home .fns-scrim[hidden]{display:none}
 
   /* 抽屉打开时,被点的那一侧书签让开 —— 它此刻的位置正是抽屉的边缘,
      留着它会压在抽屉上,变成一条无处可点的窄条。另一侧保持可见,以便直接切换。 */
   body.drawer-nav .fns-tab-l{opacity:0;pointer-events:none;transform:translateY(-50%) translateX(-115%)}
   body.drawer-toc .fns-tab-r{opacity:0;pointer-events:none;transform:translateY(-50%) translateX(115%)}
 
-  /* ── 两个侧栏变成抽屉 ───────────────────────────────────────────── */
-  body.is-post .aside,body.is-page .aside,
-  body.is-post .rail,body.is-page .rail{
+  /* ── 侧栏变成抽屉 ───────────────────────────────────────────────── */
+  /* 首页三条（目录 / 热门 / 活跃），文章页两条（全局目录 / 本页大纲）。
+     全部共用同一条遮罩与同一个 class 名，任何时候 body 上只有一个 drawer class ——
+     互斥不是靠两个布尔值互相让步，而是靠「只可能存在一个」这条结构约束。
+     首页右栏里同时住着活跃度与热门两块，打开哪一条由 body 上的 class 决定只显示哪一块。 */
+  body.is-post .aside,body.is-page .aside,body.is-home .aside,
+  body.is-post .rail,body.is-page .rail,body.is-home .rail{
     /* display 必须显式写回。本断点前面有一条 .aside,.rail{display:none} 收掉了侧栏,
        只改 position 会得到一个「fixed 但不可见」的抽屉。 */
     display:block;
     position:fixed;top:0;bottom:0;z-index:58;
+    /* 首页的右栏是两个模块共用的容器，内容可长可短。top/bottom 同时设 0 本应撑满视口，
+       但实测在 grid 里退化成「内容高度」（热门只有 262px，抽屉就停在半空）——
+       显式给高度，不跟这条规则较劲。dvh 优先，vh 兜底。 */
+    height:100vh;height:100dvh;
     width:min(82vw,19rem);
     max-height:none;margin:0;
     padding:1.1rem .9rem calc(1.1rem + env(safe-area-inset-bottom,0px));
@@ -1743,27 +1907,31 @@ html.fns-arrived .shell{animation:fns-arrive-fade .62s cubic-bezier(.22,1,.36,1)
     isolation:isolate;
     will-change:transform;
   }
-  body.is-post .aside,body.is-page .aside{
+  body.is-post .aside,body.is-page .aside,body.is-home .aside{
     left:0;border-radius:0 1rem 1rem 0;
     transform:translateX(-101%);
   }
-  body.is-post .rail,body.is-page .rail{
+  body.is-post .rail,body.is-page .rail,body.is-home .rail{
     right:0;border-radius:1rem 0 0 1rem;
     transform:translateX(101%);
   }
   /* 抽屉里的卡片不再需要自己的边框与阴影 —— 它们现在住在一个已经有边界的容器里。 */
   body.is-post .aside>.panel,body.is-page .aside>.panel,
-  body.is-post .rail>.panel,body.is-page .rail>.panel{
+  body.is-post .rail>.panel,body.is-page .rail>.panel,body.is-home .rail>.panel{
     position:static;box-shadow:none;border:0;background:transparent;
   }
   body.drawer-nav .aside{transform:none}
-  body.drawer-toc .rail{transform:none}
+  body.drawer-toc .rail,
+  body.drawer-hot .rail,
+  body.drawer-live .rail{transform:none}
 
   /* 遮罩的打开态。基础规则给的是 opacity:0(为了能过渡),
      这里必须显式设回 1 —— 否则遮罩「显示」却完全透明,
      抽屉看起来像浮在正文上,而不是把正文压到后面去。 */
   body.drawer-nav .fns-scrim,
-  body.drawer-toc .fns-scrim{
+  body.drawer-toc .fns-scrim,
+  body.drawer-hot .fns-scrim,
+  body.drawer-live .fns-scrim{
     opacity:1;pointer-events:auto;
     -webkit-backdrop-filter:blur(2px);backdrop-filter:blur(2px);
   }

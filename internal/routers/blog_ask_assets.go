@@ -96,26 +96,23 @@ const blogAskScript = `
   var sendBtn  = host.querySelector('.ask-send');
   var closeBtn = host.querySelector('.ask-close');
 
-  // ── 移动端主页：入口搬进顶栏 ────────────────────────────────────────────────
-  // 手机上悬浮按钮固定在右下角，但主页首屏那一带正好压着顶栏右侧的页面入口，
-  // 于是「关于我」被完整挡住。移动端主页改成顶栏里的一个文字入口，不再有悬浮圆钮。
+  // ── 外部入口 ────────────────────────────────────────────────────────────────
+  // 首页窄屏的入口在模板里（底部那条 dock 的三个点：爻路／目录／问道），不在这个脚本里。
+  // 这里只提供一条通用约定：任何带 data-ask-open 的元素都能打开面板。
+  // 于是入口可以是按钮、可以是链接，脚本不必知道它在哪、长什么样 ——
+  // 之前这里动态造过一个悬浮钮，并在首页把它塞进顶栏；顶栏是拇指最难够到的位置，
+  // 而底部那条三点已经给了问答一个合适的地方。
   //
-  // On phones the floating button sits right on top of the top bar's page links, hiding them.
-  // On the home page at mobile width the entry moves into the top bar instead.
-  var isHome = /^\/blog\/?$/.test(location.pathname) || location.pathname === '/';
-  var isNarrow = window.matchMedia ? window.matchMedia('(max-width:860px)').matches : false;
-  if (isHome && isNarrow) {
-    var nav = document.querySelector('.topnav');
-    if (nav) {
-      var inlineBtn = document.createElement('button');
-      inlineBtn.type = 'button';
-      inlineBtn.className = 'topnav-ask';
-      inlineBtn.textContent = '问道';
-      inlineBtn.addEventListener('click', function (e) { e.preventDefault(); open(); });
-      nav.insertBefore(inlineBtn, nav.firstChild);
-      document.documentElement.classList.add('ask-inline');
-    }
-  }
+  // The home page's entry now lives in the template. This script only publishes the contract:
+  // any element carrying data-ask-open opens the panel.
+  var openers = document.querySelectorAll('[data-ask-open]');
+  Array.prototype.forEach.call(openers, function (el) {
+    el.addEventListener('click', function (e) {
+      e.preventDefault();
+      open();
+      el.setAttribute('aria-expanded', 'true');
+    });
+  });
 
   // ── Open / close ───────────────────────────────────────────────────────────
   function open() {
@@ -149,6 +146,8 @@ const blogAskScript = `
       clearTimeout(guard);
       unbindViewport();
       panel.hidden = true; backdrop.hidden = true; host.classList.remove('ask-on');
+      // 外部入口的展开态也要收回去，否则读屏软件会一直认为面板还开着。
+      Array.prototype.forEach.call(openers, function (el) { el.setAttribute('aria-expanded', 'false'); });
       panel.removeEventListener('transitionend', done);
     };
     if (reduce) { done(); return; }

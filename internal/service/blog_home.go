@@ -2,9 +2,11 @@ package service
 
 import (
 	"context"
+	"html"
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -59,13 +61,64 @@ var (
 	mdWikiRegex    = regexp.MustCompile(`\[\[([^\]\|]+)(?:\|([^\]]*))?\]\]`)
 	mdEmphRegex    = regexp.MustCompile("[*_~`]{1,3}")
 	mdHRRegex      = regexp.MustCompile(`(?m)^\s{0,3}(?:---+|\*\*\*+|___+)\s*$`)
+
+	// Raw HTML leaks into excerpts unless it is stripped: a note may *start* with a table, so the
+	// excerpt showed the literal text "&lt;table&gt;&lt;thead&gt;…" once Go escaped it. Nine of the
+	// 146 published notes were doing exactly that on the home page.
+	//
+	// 原始 HTML 不清洗就会漏进摘要：有的笔记正文就以表格开头，摘录于是在 Go 转义之后变成
+	// 字面量 "&lt;table&gt;&lt;thead&gt;…"。146 篇里恰好有 9 篇在首页显示成这个样子。
+	//
+	// The tag pattern requires a letter after "<" so that prose like "a < b" survives.
+	// 标签模式要求 "<" 后面跟字母，"a < b" 这类正文才不会被误删。
+	htmlCommentRegex = regexp.MustCompile(`(?s)<!--.*?-->`)
+	htmlTagRegex     = regexp.MustCompile(`(?s)</?[A-Za-z][^>]*>`)
 )
+
+// stripHTML removes markup, resolves entities, then removes markup again.
+//
+// Twice is deliberate: an excerpt can already be escaped in the source ("&lt;table&gt;"), and
+// unescaping turns it back into something the tag pattern recognises. One pass leaves the tag
+// body behind as visible text.
+//
+// stripHTML 去标记、解实体、再去一次标记。
+//
+// 去两遍是有意的：源文里可能本身就是转义过的（"&lt;table&gt;"），解实体之后它又恢复成标签形状，
+// 只走一遍会把标签体当作正文留下来。
+func stripHTML(s string) string {
+	s = htmlCommentRegex.ReplaceAllString(s, " ")
+	s = htmlTagRegex.ReplaceAllString(s, " ")
+	s = html.UnescapeString(s)
+	return htmlTagRegex.ReplaceAllString(s, " ")
+}
+
+// blogCountText renders a character count for the single-line status strip.
+//
+// Only "万" is used: 828335 characters reads as "82.8万", which fits the strip; "828.3千" would
+// be wrong usage in Chinese and "828335" defeats the purpose of the strip.
+//
+// blogCountText 把字数渲染成单行状态条用的形式。
+//
+// 只用「万」：828335 字读作「82.8万」，塞得进那一行；「828.3千」在中文里不是说法，
+// 而「828335」又让这一行失去意义。
+func blogCountText(n int) string {
+	if n < 10000 {
+		return strconv.Itoa(n)
+	}
+	s := strconv.FormatFloat(float64(n)/10000, 'f', 1, 64)
+	return strings.TrimSuffix(s, ".0") + "万"
+}
 
 // blogPlainText converts note content into a single-line plain-text excerpt.
 // blogPlainText 把笔记正文转换成单行纯文本摘录。
 func blogPlainText(content string, limit int) string {
 	s := fenceRegex.ReplaceAllString(content, " ")
 	s = frontmatterRegex.ReplaceAllString(s, "")
+	// Before the markdown rules, not after: HTML blocks may wrap markdown-looking text, and the
+	// heading/list rules would then edit the inside of a tag pair.
+	// 放在 markdown 规则之前而不是之后：HTML 块可能包着看起来像 markdown 的文字，
+	// 先跑 heading/list 规则会改到标签对内部。
+	s = stripHTML(s)
 	s = mdHRRegex.ReplaceAllString(s, " ")
 	s = mdEmbedRegex.ReplaceAllString(s, " ")
 	s = mdImageRegex.ReplaceAllString(s, " ")
@@ -693,6 +746,7 @@ func (s *shareService) GetBlogHome(ctx context.Context, uid int64, baseURL strin
 
 	home.Stats.Links = totalLinks
 	home.Stats.Folders = root.folderCount()
+	home.Stats.WordsText = blogCountText(home.Stats.Words)
 	if home.Stats.Notes > 0 {
 		home.Stats.AvgWords = home.Stats.Words / home.Stats.Notes
 	}

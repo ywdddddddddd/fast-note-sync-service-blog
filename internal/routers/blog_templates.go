@@ -358,7 +358,7 @@ var blogHomeTmpl = template.Must(template.New("blog-home").Parse(`<!DOCTYPE html
       <span class="brand-mark"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M10 9H8"/><path d="M16 13H8"/><path d="M16 17H8"/></svg></span>
       <div style="min-width:0">
         <div class="brand-name">{{.SiteName}}</div>
-        <div class="brand-sub">{{.Stats.Notes}} 篇 · {{.Stats.Words}} 字 · {{.Stats.Links}} 条链接</div>
+        <div class="brand-sub"><span class="bs-wide">{{.Stats.Notes}} 篇 · {{.Stats.Words}} 字 · {{.Stats.Links}} 条链接</span><span class="bs-compact">{{.Stats.Notes}} 篇 · {{.Stats.WordsText}}字 · {{.Stats.Links}} 双链</span></div>
       </div>
     </div>
     <div class="topbar-spacer"></div>
@@ -370,7 +370,7 @@ var blogHomeTmpl = template.Must(template.New("blog-home").Parse(`<!DOCTYPE html
     {{template "nav" .}}
     <main class="content">
 
-      <section class="card card-pad">
+      <section class="card card-pad board">
         <h2 class="card-title">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v16a2 2 0 0 0 2 2h16"/><path d="m19 9-5 5-4-4-3 3"/></svg>
           仪表盘
@@ -421,10 +421,10 @@ var blogHomeTmpl = template.Must(template.New("blog-home").Parse(`<!DOCTYPE html
             <h3>{{.Title}}</h3>
             {{if .Summary}}<p>{{.Summary}}</p>{{end}}
             <div class="item-meta">
-              {{if .CreatedAt}}<span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v4"/><path d="M16 2v4"/><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M3 10h18"/></svg>{{.CreatedAt}}</span>{{end}}
-              <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7V4h16v3"/><path d="M9 20h6"/><path d="M12 4v16"/></svg>{{.Words}} 字</span>
-              <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>出链 {{.LinksOut}} · 入链 {{.LinksIn}}</span>
-              {{if .Vault}}<span>{{.Vault}}</span>{{end}}
+              {{if .CreatedAt}}<span class="m-date"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v4"/><path d="M16 2v4"/><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M3 10h18"/></svg>{{.CreatedAt}}</span>{{end}}
+              <span class="m-words"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7V4h16v3"/><path d="M9 20h6"/><path d="M12 4v16"/></svg>{{.Words}} 字</span>
+              <span class="m-link"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>出链 {{.LinksOut}} · 入链 {{.LinksIn}}</span>
+              {{if .Vault}}<span class="m-cat">{{.Vault}}</span>{{end}}
             </div>
           </a>
           {{end}}
@@ -459,7 +459,7 @@ var blogHomeTmpl = template.Must(template.New("blog-home").Parse(`<!DOCTYPE html
            一个空的容器比没有容器更难看 —— 它占据视线却什么也没说。
 
            热门的整块在没有赞时不渲染:一个空的「热门」卡片等于为没人用过的功能长期道歉。 -->
-      <div class="panel" style="padding:.9rem 1rem 1.1rem">
+      <div class="panel hot" style="padding:.9rem 1rem 1.1rem">
         <div class="nav-title">热门</div>
         <ol class="hot">
           {{range .Hot}}<li><a href="/blog/{{.Slug}}" title="{{.Title}}">{{.Title}}</a><span class="hot-n">{{.Like}}</span></li>{{end}}
@@ -475,6 +475,10 @@ var blogHomeTmpl = template.Must(template.New("blog-home").Parse(`<!DOCTYPE html
       </div>
       {{end}}
     </aside>
+    <!-- 遮罩必须与抽屉同级。.shell 有 z-index:1，会在它内部新建层叠上下文 ——
+         遮罩若放在 .shell 外面，body 层上的 z-index:57 会盖住 shell 里那个 z-index:58 的抽屉，
+         于是抽屉被自己的遮罩模糊掉。这条约束与阅读页相同，原因也相同。 -->
+    <div class="fns-scrim" id="fns-scrim" hidden></div>
   </div>
 
   <footer class="footer">
@@ -482,6 +486,142 @@ var blogHomeTmpl = template.Must(template.New("blog-home").Parse(`<!DOCTYPE html
     <div class="footer-legal"><a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer nofollow">浙ICP备2026089991号-1</a></div>
   </footer>
 </div>
+<!-- 首页的三个入口：爻路（随机漫步）、山（目录）、问道（问答）。
+     位置上它们必须在正文之后，因为这是 fixed 元素，出现在 DOM 末尾才不会与流内内容抢位置。
+      左起：热门 · 问道 · 山 · 漫游 · 活跃。
+      五个图标同一套画法：24 网格、线宽 1.4、圆端圆角，笔画数都压在 2～4 笔。
+      山用一条连续脊线（不是两个分开的 M），漫游用竖 S，活跃用页面上那块热力图自己的语言。 -->
+<div class="dock" id="fns-dock" role="group" aria-label="首页入口" data-slot="0">
+  <span class="dock-thumb" aria-hidden="true"></span>
+  <button type="button" class="dock-b" data-i="0" id="dock-hot" aria-label="热门" aria-expanded="false">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 17.6 9 12.5l3.1 3.1L19.7 7.7"/><path d="M15.3 7.7h4.4v4.4"/></svg>
+  </button>
+  <button type="button" class="dock-b" data-i="1" id="dock-ask" aria-label="问道 · 向知识库提问" aria-expanded="false" data-ask-open>
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8.9 9.4a3.15 3.15 0 1 1 4.5 3.05c-.85.4-1.3 1.05-1.3 1.95"/><circle cx="12.1" cy="18.2" r=".82"/></svg>
+  </button>
+  <button type="button" class="dock-b" data-i="2" id="dock-nav" aria-label="目录" aria-expanded="false">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.4 19.5 9.4 7.8l3.2 6.1 2.6-3 5.4 8.6"/></svg>
+  </button>
+  <button type="button" class="dock-b" data-i="3" id="dock-walk" aria-label="漫游 · 随机打开一篇笔记">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="15.4" cy="8.6" r="1.45"/><path d="M6.2 11.4 10.2 9.4l3.4 2.9-1.5 1.9"/><path d="M3.4 17c1.6 0 1.6-1.2 3.2-1.2s1.6 1.2 3.2 1.2 1.6-1.2 3.2-1.2 1.6 1.2 3.2 1.2 1.6-1.2 2.8-1.2"/></svg>
+  </button>
+  <button type="button" class="dock-b" data-i="4" id="dock-live" aria-label="活跃度" aria-expanded="false">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4.6" y="4.6" width="6" height="6" rx="1.5"/><rect x="13.4" y="4.6" width="6" height="6" rx="1.5"/><rect x="4.6" y="13.4" width="6" height="6" rx="1.5"/><rect x="13.4" y="13.4" width="6" height="6" rx="1.5" fill="currentColor" fill-opacity=".2"/></svg>
+  </button>
+</div>
+<script>
+/* 首页五个入口的接线。
+
+   一、滑块。五个键共用一条轨道上的一个滑块，点哪滑到哪 —— 这是「五段式开关」的手感：
+   位置本身在告诉你刚才动了什么。滑块移动 300ms，跳转类的动作等它走完再发生。
+
+   二、抽屉只有一条。「热门」「活跃」「山」三者互斥，且换模块时先收再开 ——
+   两条抽屉同时平移会让人分不清哪条是刚打开的；多花 300ms，顺序读得出来。
+
+   三、漫游不需要请求。146 张卡已经在 DOM 里，随机只是取一个 href。
+   这也是这一页不分页的理由之一：分了页，这个按钮就得先问服务器要一篇。
+   跳转前会 prefetch 目标文档，动画结束的同一帧开始导航，画面因此接得上。
+
+   四、全部失效时（脚本不执行）五个键都不响应，页面本身仍然完整可读 ——
+   与目录树、计数、图谱的一贯处理相同：装饰与加速可以没有，内容不能没有。 */
+(function () {
+  var dock = document.getElementById('fns-dock');
+  if (!dock) { return; }
+  var scrim = document.getElementById('fns-scrim');
+  // 与 .dock-thumb 的过渡时长一致。跳转类入口等这一段时间播完再走，
+  // 否则「点了没反应」那 300ms 会让人再点一次。
+  var SLIDE = 300;
+  var DRAWERS = { nav: 'drawer-nav', hot: 'drawer-hot', live: 'drawer-live' };
+  var open = null;
+
+  function slide(i) {
+    dock.style.setProperty('--slot', i);
+  }
+  function hum(ms) {
+    // 震动是加分项：不支持的设备上什么都不发生，功能不依赖它。
+    if (navigator.vibrate) { try { navigator.vibrate(ms); } catch (e) {} }
+  }
+  function prefetch(href) {
+    // 动画期间把目标文档先拉进 HTTP 缓存，命中时跳转几乎是即时的。
+    // 服务端若给了 no-store，这里只是白做一次，不会更慢 —— 导航本来也要发这个请求。
+    try { fetch(href, { credentials: 'same-origin' }).catch(function () {}); } catch (e) {}
+  }
+  function setDrawer(name) {
+    for (var k in DRAWERS) {
+      if (Object.prototype.hasOwnProperty.call(DRAWERS, k)) { document.body.classList.remove(DRAWERS[k]); }
+    }
+    if (name) {
+      document.body.classList.add(DRAWERS[name]);
+      if (scrim) { scrim.hidden = false; }
+    } else if (scrim) {
+      scrim.hidden = true;
+    }
+    open = name;
+    ['hot', 'nav', 'live'].forEach(function (k) {
+      var b = document.getElementById('dock-' + k);
+      if (b) { b.setAttribute('aria-expanded', name === k ? 'true' : 'false'); }
+    });
+  }
+  function toggle(name) {
+    if (open === name) { setDrawer(null); return; }
+    if (open) {
+      // 先收一条再开另一条 —— 这就是「自回归」。
+      setDrawer(null);
+      setTimeout(function () { setDrawer(name); }, SLIDE);
+    } else {
+      setDrawer(name);
+    }
+  }
+  function bind(id, slot, action) {
+    var b = document.getElementById(id);
+    if (!b) { return; }
+    b.addEventListener('click', function (e) {
+      slide(slot);
+      hum(10);
+      if (action) { action(e); }
+    });
+  }
+
+  bind('dock-hot', 0, function () { toggle('hot'); });
+  bind('dock-nav', 2, function () { toggle('nav'); });
+  bind('dock-live', 4, function () { toggle('live'); });
+  // 问道的点击由 ask 脚本上的 data-ask-open 接管，这里只管滑块与震动。
+  bind('dock-ask', 1, null);
+
+  // ── 漫游：从已渲染的卡片里随机挑一篇 ────────────────────────────────
+  function walk() {
+    var cards = document.querySelectorAll('.list .item');
+    if (!cards.length) { return false; }
+    var href = cards[Math.floor(Math.random() * cards.length)].getAttribute('href');
+    if (!href) { return false; }
+    prefetch(href);
+    setTimeout(function () { location.href = href; }, SLIDE);
+    return true;
+  }
+  bind('dock-walk', 3, walk);
+
+  if (scrim) { scrim.addEventListener('click', function () { setDrawer(null); }); }
+  var panel = document.querySelector('.layout-home .aside');
+  if (panel) {
+    panel.addEventListener('click', function (e) {
+      var a = e.target.closest ? e.target.closest('a') : null;
+      if (a) { setDrawer(null); }
+    });
+  }
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape') { setDrawer(null); }
+  });
+  // 文章页的「漫游」跳到 /blog#walk：到这儿立刻随机一篇，
+  // 两个页面的漫游因此是同一条路，不需要服务端多一个接口。
+  if (location.hash === '#walk') { walk(); }
+  // 拉宽到桌面时抽屉形态消失，状态要一起清掉。
+  if (window.matchMedia) {
+    var mq = window.matchMedia('(min-width:861px)');
+    var reset = function () { if (mq.matches) { setDrawer(null); } };
+    if (mq.addEventListener) { mq.addEventListener('change', reset); } else if (mq.addListener) { mq.addListener(reset); }
+  }
+})();
+</script>
 {{if .ReactionJS}}<script>{{.ReactionJS}}</script>{{end}}
 {{if .WarpJS}}<script>{{.WarpJS}}</script>{{end}}
 {{if .ParticlesCfg}}<script type="application/json" id="fns-particles-cfg">{{.ParticlesCfg}}</script>{{end}}
@@ -755,62 +895,103 @@ var blogPostTmpl = template.Must(template.New("blog-post").Parse(`<!DOCTYPE html
 
        两个侧栏由 CSS 直接变成抽屉,这里没有复制任何内容。
        把目录树复制进第二个容器意味着两处要同步,而服务端已经恰好渲染了一份。 -->
-  <button type="button" class="fns-tab fns-tab-l" id="fns-tab-nav"
-          aria-label="打开目录" aria-expanded="false" aria-controls="fns-nav-drawer">
-    <span class="fns-tab-ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h.01"/><path d="M3 12h.01"/><path d="M3 18h.01"/><path d="M8 6h13"/><path d="M8 12h13"/><path d="M8 18h13"/></svg></span>
-  </button>
   <button type="button" class="fns-tab fns-tab-r" id="fns-tab-toc"
-          aria-label="打开本页目录" aria-expanded="false" aria-controls="fns-toc-drawer">
-    <span class="fns-tab-ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16"/><path d="M8 12h12"/><path d="M12 18h8"/></svg></span>
+          aria-label="本页目录" aria-expanded="false" aria-controls="fns-toc-drawer">
+    <span class="fns-tab-ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m9.5 6.5 5.5 5.5-5.5 5.5"/></svg></span>
   </button>
+
+  <!-- 阅读页的五点胶囊：山（全局目录）· 图谱 · 首页 · 漫游 · 问道。
+       左书签撤掉了 —— 全局目录的入口在这里的「山」上，同一个页面不需要两个通往目录的入口。
+       右书签保留，它管的是本页大纲，与全局目录不是一件事。 -->
+  <div class="dock" id="fns-dock" role="group" aria-label="阅读页入口" data-slot="0">
+    <span class="dock-thumb" aria-hidden="true"></span>
+    <button type="button" class="dock-b" data-i="0" id="dock-nav" aria-label="目录" aria-expanded="false">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.4 19.5 9.4 7.8l3.2 6.1 2.6-3 5.4 8.6"/></svg>
+    </button>
+    <button type="button" class="dock-b" data-i="1" id="dock-graph" aria-label="知识图谱">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="5.6" r="1.9"/><circle cx="5.6" cy="18" r="1.9"/><circle cx="18.4" cy="18" r="1.9"/><path d="M11.1 7.4 6.7 16.2"/><path d="M12.9 7.4l4.4 8.8"/><path d="M7.5 18h9"/></svg>
+    </button>
+    <button type="button" class="dock-b" data-i="2" id="dock-home" aria-label="回首页">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.6 10.4 12 4.2l7.4 6.2V19.7H4.6z"/></svg>
+    </button>
+    <button type="button" class="dock-b" data-i="3" id="dock-walk" aria-label="漫游 · 随机打开一篇笔记">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="15.4" cy="8.6" r="1.45"/><path d="M6.2 11.4 10.2 9.4l3.4 2.9-1.5 1.9"/><path d="M3.4 17c1.6 0 1.6-1.2 3.2-1.2s1.6 1.2 3.2 1.2 1.6-1.2 3.2-1.2 1.6 1.2 3.2 1.2 1.6-1.2 2.8-1.2"/></svg>
+    </button>
+    <button type="button" class="dock-b" data-i="4" id="dock-ask" aria-label="问道 · 向知识库提问" aria-expanded="false" data-ask-open>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8.9 9.4a3.15 3.15 0 1 1 4.5 3.05c-.85.4-1.3 1.05-1.3 1.95"/><circle cx="12.1" cy="18.2" r=".82"/></svg>
+    </button>
+  </div>
+
   <script>
+  /* 阅读页的入口接线。
+
+     一、两条抽屉：山 → 全局目录（左），右书签 → 本页大纲（右）。
+     互斥不靠两个必须互相协调的布尔值，而靠「任何时候 body 上只有一个 drawer class」。
+
+     二、图谱与问道不在这里实现逻辑。图谱直接点原来的那个按钮，
+     问了走 ask 脚本的 data-ask-open 约定 —— 只是把入口搬到胶囊上，不复制功能。
+
+     三、首页与漫游是跳转：等滑块走完（300ms）再走，期间先 prefetch 目标文档。
+     漫游交给首页处理，因为只有首页手上有 146 张卡可以随机挑。 */
   (function () {
     var b = document.body;
-    var tabNav = document.getElementById('fns-tab-nav');
     var tabToc = document.getElementById('fns-tab-toc');
     var scrim = document.getElementById('fns-scrim');
-    if (!tabNav || !tabToc || !scrim) return;
+    var dock = document.getElementById('fns-dock');
+    if (!tabToc || !scrim || !dock) return;
 
     var NAV = 'drawer-nav', TOC = 'drawer-toc';
+    var SLIDE = 300;
 
-    // One mode at a time. Mutual exclusion is not enforced by two booleans that must be kept in
-    // agreement — it is enforced by the fact that there is only ever one class.
-    //
-    // 一次只开一个。互斥不靠两个必须互相协调的布尔值,而靠「任何时候只存在一个 class」。
     function set(mode) {
       b.classList.remove(NAV, TOC);
       if (mode) b.classList.add(mode);
-
       scrim.hidden = !mode;
-      tabNav.setAttribute('aria-expanded', mode === NAV ? 'true' : 'false');
       tabToc.setAttribute('aria-expanded', mode === TOC ? 'true' : 'false');
-
-      // Lock the page behind the drawer. Without it a swipe on the scrim scrolls the article
-      // underneath, which reads as the drawer sliding rather than the page staying put.
-      //
-      // 抽屉打开时锁住身后的页面。否则在遮罩上滑动会滚动下面的正文,
-      // 看起来像抽屉在滑,而不是页面停在原地。
+      var navBtn = document.getElementById('dock-nav');
+      if (navBtn) navBtn.setAttribute('aria-expanded', mode === NAV ? 'true' : 'false');
+      // 抽屉打开时锁住身后页面。否则在遮罩上滑动会滚动下面的正文，
+      // 看起来像抽屉在滑，而不是页面停在原地。
       b.style.overflow = mode ? 'hidden' : '';
     }
+    function slide(i) { dock.style.setProperty('--slot', i); }
+    function hum(ms) { if (navigator.vibrate) { try { navigator.vibrate(ms); } catch (e) {} } }
+    function prefetch(href) {
+      try { fetch(href, { credentials: 'same-origin' }).catch(function () {}); } catch (e) {}
+    }
+    function bind(id, slot, action) {
+      var el = document.getElementById(id);
+      if (!el) return;
+      el.addEventListener('click', function (e) {
+        slide(slot); hum(10);
+        if (action) action(e);
+      });
+    }
 
-    tabNav.addEventListener('click', function () {
-      set(b.classList.contains(NAV) ? null : NAV);
+    bind('dock-nav', 0, function () { set(b.classList.contains(NAV) ? null : NAV); });
+    bind('dock-graph', 1, function () {
+      var fab = document.getElementById('graph-fab');
+      if (fab) fab.click();
     });
+    bind('dock-home', 2, function () {
+      prefetch('/blog');
+      setTimeout(function () { location.href = '/blog'; }, SLIDE);
+    });
+    bind('dock-walk', 3, function () {
+      prefetch('/blog');
+      setTimeout(function () { location.href = '/blog#walk'; }, SLIDE);
+    });
+    // 问道由 ask 脚本的 data-ask-open 接管，这里只管滑块与震动。
+    bind('dock-ask', 4, null);
+
     tabToc.addEventListener('click', function () {
       set(b.classList.contains(TOC) ? null : TOC);
     });
     scrim.addEventListener('click', function () { set(null); });
-
-    // Escape closes. A drawer that covers the page and ignores the keyboard is a trap.
-    // Escape 关闭。一个盖住页面又不响应键盘的抽屉是一个陷阱。
     document.addEventListener('keydown', function (e) {
       if (e.key === 'Escape') set(null);
     });
-
-    // Following a link inside a drawer closes it. Without this the target lands behind the scrim
-    // and the reader has to dismiss something they never opened.
-    //
-    // 点击抽屉里的链接后关闭它。否则目标内容落在遮罩后面,
+    // 点抽屉里的链接后关闭它。否则目标内容落在遮罩后面，
     // 读者得去关一个他并没有打开的东西。
     var links = document.querySelectorAll('.aside a[href], .rail a[href]');
     Array.prototype.forEach.call(links, function (a) {
@@ -1004,49 +1185,80 @@ var blogPageTmpl = template.Must(template.New("blog-page").Parse(`<!DOCTYPE html
 
        两个侧栏由 CSS 直接变成抽屉,这里没有复制任何内容。
        把目录树复制进第二个容器意味着两处要同步,而服务端已经恰好渲染了一份。 -->
-  <button type="button" class="fns-tab fns-tab-l" id="fns-tab-nav"
-          aria-label="打开目录" aria-expanded="false" aria-controls="fns-nav-drawer">
-    <span class="fns-tab-ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h.01"/><path d="M3 12h.01"/><path d="M3 18h.01"/><path d="M8 6h13"/><path d="M8 12h13"/><path d="M8 18h13"/></svg></span>
-  </button>
+  <!-- 页面笔记是终点，不是中转站：全局目录在这里本来就不存在，
+       所以只留一个本页大纲的书签。 -->
   <button type="button" class="fns-tab fns-tab-r" id="fns-tab-toc"
-          aria-label="打开本页目录" aria-expanded="false" aria-controls="fns-toc-drawer">
-    <span class="fns-tab-ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16"/><path d="M8 12h12"/><path d="M12 18h8"/></svg></span>
+          aria-label="本页目录" aria-expanded="false" aria-controls="fns-toc-drawer">
+    <span class="fns-tab-ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m9.5 6.5 5.5 5.5-5.5 5.5"/></svg></span>
   </button>
+
+  <!-- 页面笔记的三点胶囊：首页 · 漫游 · 问道。
+       比阅读页少两格，因为这两种东西在这一页上不存在 —— 全局目录没有（页面是终点），
+       局部图谱也没有（本页不携带图谱）。少两格比给对方一个点了没反应的键诚实。 -->
+  <div class="dock" id="fns-dock" role="group" aria-label="页面入口" data-slot="0">
+    <span class="dock-thumb" aria-hidden="true"></span>
+    <button type="button" class="dock-b" data-i="0" id="dock-home" aria-label="回首页">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.6 10.4 12 4.2l7.4 6.2V19.7H4.6z"/></svg>
+    </button>
+    <button type="button" class="dock-b" data-i="1" id="dock-walk" aria-label="漫游 · 随机打开一篇笔记">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="15.4" cy="8.6" r="1.45"/><path d="M6.2 11.4 10.2 9.4l3.4 2.9-1.5 1.9"/><path d="M3.4 17c1.6 0 1.6-1.2 3.2-1.2s1.6 1.2 3.2 1.2 1.6-1.2 3.2-1.2 1.6 1.2 3.2 1.2 1.6-1.2 2.8-1.2"/></svg>
+    </button>
+    <button type="button" class="dock-b" data-i="2" id="dock-ask" aria-label="问道 · 向知识库提问" aria-expanded="false" data-ask-open>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8.9 9.4a3.15 3.15 0 1 1 4.5 3.05c-.85.4-1.3 1.05-1.3 1.95"/><circle cx="12.1" cy="18.2" r=".82"/></svg>
+    </button>
+  </div>
   <script>
   (function () {
     var b = document.body;
-    var tabNav = document.getElementById('fns-tab-nav');
     var tabToc = document.getElementById('fns-tab-toc');
     var scrim = document.getElementById('fns-scrim');
-    if (!tabNav || !tabToc || !scrim) return;
+    if (!tabToc || !scrim) return;
 
-    var NAV = 'drawer-nav', TOC = 'drawer-toc';
+    var TOC = 'drawer-toc';
+    var dock = document.getElementById('fns-dock');
+    var SLIDE = 300;
 
-    // One mode at a time. Mutual exclusion is not enforced by two booleans that must be kept in
-    // agreement — it is enforced by the fact that there is only ever one class.
-    //
-    // 一次只开一个。互斥不靠两个必须互相协调的布尔值,而靠「任何时候只存在一个 class」。
-    function set(mode) {
-      b.classList.remove(NAV, TOC);
-      if (mode) b.classList.add(mode);
+    function slide(i) { if (dock) { dock.style.setProperty('--slot', i); } }
+    function hum(ms) { if (navigator.vibrate) { try { navigator.vibrate(ms); } catch (e) {} } }
+    function prefetch(href) {
+      try { fetch(href, { credentials: 'same-origin' }).catch(function () {}); } catch (e) {}
+    }
+    function bind(id, slot, fn) {
+      var el = document.getElementById(id);
+      if (!el) return;
+      el.addEventListener('click', function (e) {
+        slide(slot); hum(10);
+        if (fn) fn(e);
+      });
+    }
+    bind('dock-home', 0, function () {
+      prefetch('/blog');
+      setTimeout(function () { location.href = '/blog'; }, SLIDE);
+    });
+    bind('dock-walk', 1, function () {
+      prefetch('/blog');
+      setTimeout(function () { location.href = '/blog#walk'; }, SLIDE);
+    });
+    // 问道由 ask 脚本的 data-ask-open 接管，这里只管滑块与震动。
+    bind('dock-ask', 2, null);
 
-      scrim.hidden = !mode;
-      tabNav.setAttribute('aria-expanded', mode === NAV ? 'true' : 'false');
-      tabToc.setAttribute('aria-expanded', mode === TOC ? 'true' : 'false');
+    function set(open) {
+      b.classList.remove(TOC);
+      if (open) b.classList.add(TOC);
+
+      scrim.hidden = !open;
+      tabToc.setAttribute('aria-expanded', open ? 'true' : 'false');
 
       // Lock the page behind the drawer. Without it a swipe on the scrim scrolls the article
       // underneath, which reads as the drawer sliding rather than the page staying put.
       //
       // 抽屉打开时锁住身后的页面。否则在遮罩上滑动会滚动下面的正文,
       // 看起来像抽屉在滑,而不是页面停在原地。
-      b.style.overflow = mode ? 'hidden' : '';
+      b.style.overflow = open ? 'hidden' : '';
     }
 
-    tabNav.addEventListener('click', function () {
-      set(b.classList.contains(NAV) ? null : NAV);
-    });
     tabToc.addEventListener('click', function () {
-      set(b.classList.contains(TOC) ? null : TOC);
+      set(!b.classList.contains(TOC));
     });
     scrim.addEventListener('click', function () { set(null); });
 

@@ -225,6 +225,13 @@ type BlogStatsDTO struct {
 	Folders  int    `json:"folders"`  // Distinct source folders // 来源目录数
 	AvgWords int    `json:"avgWords"` // Average characters per note // 篇均字数
 	Updated  string `json:"updated"`  // Most recent source change // 最近一次源文件变更时间
+	// WordsText is Words in a human-sized form ("82.8万"). The raw count is six digits, which
+	// does not fit the single-line status strip that the mobile home page shows in place of the
+	// seven-cell dashboard; on the desktop the raw number stays the authority.
+	//
+	// WordsText 是 Words 的人读形式（"82.8万"）。原始数字是六位数，塞不进移动端首页那一行
+	// 状态条——它在窄屏上取代了原来七格仪表盘。桌面端仍以原始数字为准。
+	WordsText string `json:"wordsText"`
 }
 
 // BlogHomeDTO everything the blog home page needs

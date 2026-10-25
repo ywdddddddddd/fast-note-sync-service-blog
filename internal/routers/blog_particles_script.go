@@ -60,6 +60,21 @@ const blogParticlesScript = `
 
   var STILL = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
 
+  // Whether node-to-node edges are drawn. Declared before resize(), which assigns it — the ordering
+  // reason is the same one documented on LINK_DIST below.
+  //
+  // The pair loop is O(n²): 10658 distance checks per frame at 146 notes. On a 390px canvas those
+  // edges are too dense to read as structure anyway, so the phone gets the dots without the mesh.
+  // The particle count stays exactly as it was — the count is what carries information here; the
+  // edges are the part that only pays off on a wide screen.
+  //
+  // 是否绘制节点间连线。声明在 resize() 之前，因为它由 resize() 赋值 —— 顺序的理由与下方 LINK_DIST 相同。
+  //
+  // 这个双重循环是 O(n²)：146 篇笔记时每帧 10658 次距离计算。而在 390px 画布上，这些边本就
+  // 密到读不出结构，所以手机上给点、不给网。粒子数量一点没变 —— 数量才是这里的信息量，
+  // 边只是宽屏上才划算的那部分。
+  var LINKS = true;
+
   var canvas = document.createElement('canvas');
   canvas.className = 'fns-particles';
   canvas.setAttribute('aria-hidden', 'true');
@@ -85,6 +100,11 @@ const blogParticlesScript = `
     canvas.style.width = w + 'px';
     canvas.style.height = h + 'px';
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    // Re-evaluated on every resize, not just at load: rotating a phone or dragging a desktop
+    // window across the breakpoint has to switch the mesh back on or off.
+    // 每次 resize 都重新判断，而不是只在加载时判一次：手机转屏、或把桌面窗口拖过断点，
+    // 都必须能把网开回来或关掉。
+    LINKS = w > 860;
     recomputeLinkDist();
   }
   resize();
@@ -220,6 +240,8 @@ const blogParticlesScript = `
 
     // Links first, so a node is never hidden by its own edges.
     // 先画连线，使一个节点永远不会被它自己的边遮住。
+    // 连线。窄屏整段跳过（理由见 LINKS 的声明）。这里不重排缩进，是为了让改动只有插入的两行。
+    if (LINKS) {
     ctx.lineWidth = 1;
     ctx.strokeStyle = LINK_COLOR;
     for (var a = 0; a < ps.length; a++) {
@@ -250,6 +272,8 @@ const blogParticlesScript = `
           ctx.stroke();
         }
       }
+    }
+
     }
 
     for (var k = 0; k < ps.length; k++) {
