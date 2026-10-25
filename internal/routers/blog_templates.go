@@ -493,20 +493,20 @@ var blogHomeTmpl = template.Must(template.New("blog-home").Parse(`<!DOCTYPE html
       山用一条连续脊线（不是两个分开的 M），漫游用竖 S，活跃用页面上那块热力图自己的语言。 -->
 <div class="dock" id="fns-dock" role="group" aria-label="首页入口" data-slot="0">
   <span class="dock-thumb" aria-hidden="true"></span>
-  <button type="button" class="dock-b" data-i="0" id="dock-hot" aria-label="热门" aria-expanded="false">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 17.6 9 12.5l3.1 3.1L19.7 7.7"/><path d="M15.3 7.7h4.4v4.4"/></svg>
-  </button>
-  <button type="button" class="dock-b" data-i="1" id="dock-ask" aria-label="问道 · 向知识库提问" aria-expanded="false" data-ask-open>
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8.9 9.4a3.15 3.15 0 1 1 4.5 3.05c-.85.4-1.3 1.05-1.3 1.95"/><circle cx="12.1" cy="18.2" r=".82"/></svg>
-  </button>
-  <button type="button" class="dock-b" data-i="2" id="dock-nav" aria-label="目录" aria-expanded="false">
+  <button type="button" class="dock-b" data-i="0" id="dock-nav" aria-label="目录" aria-expanded="false">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.4 19.5 9.4 7.8l3.2 6.1 2.6-3 5.4 8.6"/></svg>
   </button>
-  <button type="button" class="dock-b" data-i="3" id="dock-walk" aria-label="漫游 · 随机打开一篇笔记">
+  <button type="button" class="dock-b" data-i="1" id="dock-hot" aria-label="热门" aria-expanded="false">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 17.6 9 12.5l3.1 3.1L19.7 7.7"/><path d="M15.3 7.7h4.4v4.4"/></svg>
+  </button>
+  <button type="button" class="dock-b" data-i="2" id="dock-walk" aria-label="漫游 · 随机打开一篇笔记">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="15.4" cy="8.6" r="1.45"/><path d="M6.2 11.4 10.2 9.4l3.4 2.9-1.5 1.9"/><path d="M3.4 17c1.6 0 1.6-1.2 3.2-1.2s1.6 1.2 3.2 1.2 1.6-1.2 3.2-1.2 1.6 1.2 3.2 1.2 1.6-1.2 2.8-1.2"/></svg>
   </button>
-  <button type="button" class="dock-b" data-i="4" id="dock-live" aria-label="活跃度" aria-expanded="false">
+  <button type="button" class="dock-b" data-i="3" id="dock-live" aria-label="活跃度" aria-expanded="false">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4.6" y="4.6" width="6" height="6" rx="1.5"/><rect x="13.4" y="4.6" width="6" height="6" rx="1.5"/><rect x="4.6" y="13.4" width="6" height="6" rx="1.5"/><rect x="13.4" y="13.4" width="6" height="6" rx="1.5" fill="currentColor" fill-opacity=".2"/></svg>
+  </button>
+  <button type="button" class="dock-b" data-i="4" id="dock-ask" aria-label="问道 · 向知识库提问" aria-expanded="false" data-ask-open>
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8.9 9.4a3.15 3.15 0 1 1 4.5 3.05c-.85.4-1.3 1.05-1.3 1.95"/><circle cx="12.1" cy="18.2" r=".82"/></svg>
   </button>
 </div>
 <script>
@@ -532,6 +532,17 @@ var blogHomeTmpl = template.Must(template.New("blog-home").Parse(`<!DOCTYPE html
   // 否则「点了没反应」那 300ms 会让人再点一次。
   var SLIDE = 300;
   var DRAWERS = { nav: 'drawer-nav', hot: 'drawer-hot', live: 'drawer-live' };
+  // 跨页进来时让胶囊自己重组一次：读者因此知道这一条的顺序与上一页不同。
+  // 只在站内导航时播；首屏进入网站不播，那会显得页面一直在加载。
+  (function () {
+    var ref = document.referrer || '';
+    var sameSite = ref && ref.indexOf(location.protocol + '//' + location.host) === 0;
+    var samePage = ref.indexOf(location.pathname) !== -1;
+    var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (!sameSite || samePage || reduce) { return; }
+    dock.classList.add('is-in');
+    setTimeout(function () { dock.classList.remove('is-in'); }, 900);
+  })();
   var open = null;
 
   function slide(i) {
@@ -582,11 +593,11 @@ var blogHomeTmpl = template.Must(template.New("blog-home").Parse(`<!DOCTYPE html
     });
   }
 
-  bind('dock-hot', 0, function () { toggle('hot'); });
-  bind('dock-nav', 2, function () { toggle('nav'); });
-  bind('dock-live', 4, function () { toggle('live'); });
+  bind('dock-hot', 1, function () { toggle('hot'); });
+  bind('dock-nav', 0, function () { toggle('nav'); });
+  bind('dock-live', 3, function () { toggle('live'); });
   // 问道的点击由 ask 脚本上的 data-ask-open 接管，这里只管滑块与震动。
-  bind('dock-ask', 1, null);
+  bind('dock-ask', 4, null);
 
   // ── 漫游：从已渲染的卡片里随机挑一篇 ────────────────────────────────
   function walk() {
@@ -598,7 +609,7 @@ var blogHomeTmpl = template.Must(template.New("blog-home").Parse(`<!DOCTYPE html
     setTimeout(function () { location.href = href; }, SLIDE);
     return true;
   }
-  bind('dock-walk', 3, walk);
+  bind('dock-walk', 2, walk);
 
   if (scrim) { scrim.addEventListener('click', function () { setDrawer(null); }); }
   var panel = document.querySelector('.layout-home .aside');
@@ -911,11 +922,11 @@ var blogPostTmpl = template.Must(template.New("blog-post").Parse(`<!DOCTYPE html
     <button type="button" class="dock-b" data-i="1" id="dock-graph" aria-label="知识图谱">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="5.6" r="1.9"/><circle cx="5.6" cy="18" r="1.9"/><circle cx="18.4" cy="18" r="1.9"/><path d="M11.1 7.4 6.7 16.2"/><path d="M12.9 7.4l4.4 8.8"/><path d="M7.5 18h9"/></svg>
     </button>
-    <button type="button" class="dock-b" data-i="2" id="dock-home" aria-label="回首页">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.6 10.4 12 4.2l7.4 6.2V19.7H4.6z"/></svg>
-    </button>
-    <button type="button" class="dock-b" data-i="3" id="dock-walk" aria-label="漫游 · 随机打开一篇笔记">
+    <button type="button" class="dock-b" data-i="2" id="dock-walk" aria-label="漫游 · 随机打开一篇笔记">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="15.4" cy="8.6" r="1.45"/><path d="M6.2 11.4 10.2 9.4l3.4 2.9-1.5 1.9"/><path d="M3.4 17c1.6 0 1.6-1.2 3.2-1.2s1.6 1.2 3.2 1.2 1.6-1.2 3.2-1.2 1.6 1.2 3.2 1.2 1.6-1.2 2.8-1.2"/></svg>
+    </button>
+    <button type="button" class="dock-b" data-i="3" id="dock-home" aria-label="回首页">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.6 10.4 12 4.2l7.4 6.2V19.7H4.6z"/></svg>
     </button>
     <button type="button" class="dock-b" data-i="4" id="dock-ask" aria-label="问道 · 向知识库提问" aria-expanded="false" data-ask-open>
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8.9 9.4a3.15 3.15 0 1 1 4.5 3.05c-.85.4-1.3 1.05-1.3 1.95"/><circle cx="12.1" cy="18.2" r=".82"/></svg>
@@ -941,6 +952,17 @@ var blogPostTmpl = template.Must(template.New("blog-post").Parse(`<!DOCTYPE html
     if (!tabToc || !scrim || !dock) return;
 
     var NAV = 'drawer-nav', TOC = 'drawer-toc';
+    // 跨页进来时让胶囊自己重组一次：读者因此知道这一条的顺序与上一页不同。
+    // 只在站内导航时播；首屏进入网站不播，那会显得页面一直在加载。
+    (function () {
+      var ref = document.referrer || '';
+      var sameSite = ref && ref.indexOf(location.protocol + '//' + location.host) === 0;
+      var samePage = ref.indexOf(location.pathname) !== -1;
+      var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      if (!sameSite || samePage || reduce) { return; }
+      dock.classList.add('is-in');
+      setTimeout(function () { dock.classList.remove('is-in'); }, 900);
+    })();
     var SLIDE = 300;
 
     function set(mode) {
@@ -973,11 +995,11 @@ var blogPostTmpl = template.Must(template.New("blog-post").Parse(`<!DOCTYPE html
       var fab = document.getElementById('graph-fab');
       if (fab) fab.click();
     });
-    bind('dock-home', 2, function () {
+    bind('dock-home', 3, function () {
       prefetch('/blog');
       setTimeout(function () { location.href = '/blog'; }, SLIDE);
     });
-    bind('dock-walk', 3, function () {
+    bind('dock-walk', 2, function () {
       prefetch('/blog');
       setTimeout(function () { location.href = '/blog#walk'; }, SLIDE);
     });
@@ -1217,6 +1239,17 @@ var blogPageTmpl = template.Must(template.New("blog-page").Parse(`<!DOCTYPE html
     var TOC = 'drawer-toc';
     var dock = document.getElementById('fns-dock');
     var SLIDE = 300;
+    // 跨页进来时让胶囊自己重组一次：读者因此知道这一条的顺序与上一页不同。
+    // 只在站内导航时播；首屏进入网站不播，那会显得页面一直在加载。
+    (function () {
+      var ref = document.referrer || '';
+      var sameSite = ref && ref.indexOf(location.protocol + '//' + location.host) === 0;
+      var samePage = ref.indexOf(location.pathname) !== -1;
+      var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      if (!sameSite || samePage || reduce) { return; }
+      dock.classList.add('is-in');
+      setTimeout(function () { dock.classList.remove('is-in'); }, 900);
+    })();
 
     function slide(i) { if (dock) { dock.style.setProperty('--slot', i); } }
     function hum(ms) { if (navigator.vibrate) { try { navigator.vibrate(ms); } catch (e) {} } }

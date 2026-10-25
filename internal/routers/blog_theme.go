@@ -663,6 +663,26 @@ svg:not(.graph-svg) .g-node:hover text{opacity:1}
   /* 某一格正处于打开状态时，它的图标与滑块同为全亮。 */
   .dock-b[aria-expanded="true"]{opacity:1}
 
+  /* 跨页进来时，胶囊把自己重组一次。
+     三个页面共用两个锚点位置的键（漫游在正中、问道在最右），但中间两格换人；
+     没有这一下的话，读者会觉得"底部那条东西被换掉了"而不是"换了两格"。
+     逐格错开 50ms 落位 —— 顺序是看出来的，不是猜出来的。
+     动画结束由脚本把 class 摘掉，否则 both 会把 opacity 锁死在 .55，hover 就亮不起来。 */
+  .dock.is-in .dock-b{animation:dockIn .34s cubic-bezier(.22,1,.36,1) both}
+  .dock.is-in .dock-b[data-i="1"]{animation-delay:50ms}
+  .dock.is-in .dock-b[data-i="2"]{animation-delay:100ms}
+  .dock.is-in .dock-b[data-i="3"]{animation-delay:150ms}
+  .dock.is-in .dock-b[data-i="4"]{animation-delay:200ms}
+  .dock.is-in .dock-thumb{animation:thumbIn .42s cubic-bezier(.34,1.4,.44,1) both}
+  @keyframes dockIn{
+    from{opacity:0;transform:translateY(6px) scale(.9)}
+    to{opacity:.55;transform:none}
+  }
+  @keyframes thumbIn{
+    from{opacity:0;transform:translateX(calc(var(--slot) * var(--slot-w))) scale(.6)}
+    to{opacity:1;transform:translateX(calc(var(--slot) * var(--slot-w))) scale(1)}
+  }
+
   /* .layout-home 自己只有 z-index:1，而顶栏是 30 —— 抽屉的 58 只在那块层叠上下文里有效，
      整块仍是 1，于是顶栏会盖住抽屉顶部那一截。打开抽屉时把整块抬到顶栏之上。 */
   body.drawer-nav .layout-home,
