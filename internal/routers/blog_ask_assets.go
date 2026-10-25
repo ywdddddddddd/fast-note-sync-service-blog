@@ -211,6 +211,24 @@ function broadcastOpen(who) {
 
   function syncViewport() {
     if (!OPEN || !viewport) return;
+    // 微信里这条路整条不走。
+    //
+    // 交接 06 §2.3 早就写了「微信拿不到键盘高度，fixed 也不跟随」，并且配了 CSS
+    // （html.is-wx .ask-panel 压到 60vh / 聚焦时 46vh）。但这里从未加守卫 ——
+    // 于是那段 CSS 被内联的 top/height/bottom 整条盖掉，微信里跑的是「按 visualViewport 钉」
+    // 这条本来就对微信不适用的路。
+    //
+    // 表现因此按 visualViewport 返回什么而分裂成三种：
+    //   visH 返回 0      -> h 算成负数 -> 面板塌成一条（截图一：只剩顶部一条白线）
+    //   visH 返回全高    -> h≈771     -> 输入框落在键盘后面（截图二）
+    //   offsetTop 异常   -> top 被推走 -> 面板整体错位（截图三）
+    // 同一个 bug，三种长相 —— 而 CSS 里那份正确答案一次都没被执行过。
+    if (inWeChat) {
+      panel.style.top = '';
+      panel.style.height = '';
+      panel.style.bottom = '';
+      return;
+    }
     if (viewportRaf) return;
     viewportRaf = requestAnimationFrame(function () {
       viewportRaf = 0;
@@ -309,7 +327,8 @@ function broadcastOpen(who) {
   function setWeChatTyping(on) {
     if (!inWeChat) return;
     document.documentElement.classList.toggle('is-wx-typing', !!on);
-    syncViewport();
+    // 不调 syncViewport()：微信下它什么都不做（见该函数开头的守卫），
+    // 高度改由 CSS 的 is-wx-typing 规则接住。
   }
 
   input.addEventListener('focus', function () {
