@@ -1177,6 +1177,10 @@ html.ask-inline .ask-fab{display:none}
   display:flex;align-items:center;gap:.75rem;
   padding:.85rem 1rem;border-bottom:1px solid var(--border);
   background:color-mix(in srgb,var(--muted) 35%,transparent);
+  /* 面板是 flex 列，被压矮时默认所有子项一起缩 —— 头尾都是固定内容（标题、输入框），
+     缩它们等于把功能挤没。实测键盘弹起时 header 高度归零，整个标题栏消失。
+     头尾一律不缩，只让中间的 .ask-body 让出空间。 */
+  flex:0 0 auto;
 }
 .ask-title{display:flex;align-items:center;gap:.5rem;font-size:.9375rem;font-weight:700;min-width:0}
 .ask-sub{font-size:.75rem;font-weight:500;color:var(--muted-foreground);white-space:nowrap;
@@ -1191,7 +1195,7 @@ html.ask-inline .ask-fab{display:none}
 .ask-close:hover{background:var(--accent);color:var(--foreground)}
 .ask-close svg{width:1rem;height:1rem}
 
-.ask-body{flex:1;overflow-y:auto;padding:1rem;display:flex;flex-direction:column;gap:.9rem;
+.ask-body{flex:1 1 auto;min-height:0;overflow-y:auto;padding:1rem;display:flex;flex-direction:column;gap:.9rem;
   overscroll-behavior:contain;scrollbar-width:thin}
 
 .ask-intro{padding:.4rem .1rem}
@@ -1394,7 +1398,9 @@ html.ask-inline .ask-fab{display:none}
 
 /* 输入区 */
 .ask-form{border-top:1px solid var(--border);padding:.7rem .8rem .55rem;
-  background:color-mix(in srgb,var(--muted) 24%,transparent)}
+  background:color-mix(in srgb,var(--muted) 24%,transparent);
+  /* 同理不可缩：输入框是这一页唯一的操作面。 */
+  flex:0 0 auto;}
 .ask-field{display:flex;align-items:flex-end;gap:.5rem;
   border:1px solid var(--border);border-radius:.95rem;background:var(--card);
   padding:.35rem .35rem .35rem .7rem;
@@ -2404,10 +2410,20 @@ body.is-reader{overflow:hidden}
    （iPhone 键盘约占 40% 屏高）。面板本身始终 fixed，页面不发生任何滚动。
    把面板放回文档流是错的：面板一打开就 focus 输入框，那会让「点入口」变成「滚到页尾」。 */
 html.is-wx .ask-panel{
-  top:0;bottom:auto;height:60vh;
-  transition:height .28s cubic-bezier(.22,1,.36,1),opacity .34s ease,transform .44s cubic-bezier(.22,1,.36,1);
+  top:0;bottom:auto;
+  /* 高度跟内容走，不是写死的 60vh。
+     空态只有几个 chip 时 60vh 会得到一片空白（实测截图里中间全空），
+     而聊起来后高度又不够。这里让面板自己量：内容少就矮，内容多长到 60vh 封顶。
+     max-content 会被 .ask-body 的 overflow 撑成无穷大，所以上限用 clamp 压在 60vh。
+     配合 .ask-body 的 min-height:0，超出的部分进入滚动。 */
+  height:auto;
+  min-height:9rem;
+  max-height:60vh;
+  transition:max-height .28s cubic-bezier(.22,1,.36,1),opacity .34s ease,transform .44s cubic-bezier(.22,1,.36,1);
 }
-html.is-wx.is-wx-typing .ask-panel{height:46vh}
+/* 打字时上限降到 46vh：iPhone 键盘约占屏高 40%，46vh 让输入框稳定落在键盘上方。
+   注意这里改的是 max-height —— 内容本来就矮时面板不会为了凑高度而变高。 */
+html.is-wx.is-wx-typing .ask-panel{max-height:46vh}
 html.is-wx .ask-panel{left:.45rem;right:.45rem;width:auto}
 
 @media (max-width:860px){
