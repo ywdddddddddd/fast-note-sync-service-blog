@@ -1,283 +1,615 @@
-# Fast Note Sync Service · 博客魔改版
+# 问道漫步 · Obsidian 笔记直出博客
 
-> 这是 [`haierkeys/fast-note-sync-service`](https://github.com/haierkeys/fast-note-sync-service) 的个人魔改分支备份。
-> **官方文档、安装说明、上游更新请直接看官方仓库** —— 本文件只讲魔改了什么。
+在 Obsidian 里写，浏览器里看。服务端把笔记直接渲染成一整套静态感很强的站点——**没有前端框架、没有构建步骤、没有一行外部 CDN**，所有模板、样式、脚本都编译进那一个二进制。
 
-官方的 WebSocket 同步、REST API、MCP 通道、认证与存储后端**全部保留未动**。这个分支只在一个地方生长:**在服务端直接渲染出一整套博客**，不依赖任何前端框架，不引用任何外部 CDN —— 所有模板、样式、脚本都内联在 Go 源码里，编译进那一个二进制。
+这是 [`haierkeys/fast-note-sync-service`](https://github.com/haierkeys/fast-note-sync-service) 的个人分支。上游的 WebSocket 同步、REST API、MCP 通道、认证与存储后端全部原样保留，只在旁边长出了一层博客。
 
-配套的插件改动在 [`obsidian-fast-note-sync-blog`](https://github.com/ywdddddddddd/obsidian-fast-note-sync-blog)。
+配套的 Obsidian 插件在 [`obsidian-fast-note-sync-blog`](https://github.com/ywdddddddddd/obsidian-fast-note-sync-blog)。
 
 ---
 
-## 一、博客是什么形态
+## 目录
 
-访问 `/blog` 得到一个静态感很强的多页站点:
+- [它长什么样](#它长什么样)
+- [三分钟跑起来](#三分钟跑起来)
+- [发布第一篇文章](#发布第一篇文章)
+- [frontmatter 支持哪些键](#frontmatter-支持哪些键)
+- [博客功能总览](#博客功能总览)
+- [写作语法对照](#写作语法对照)
+- [简历页怎么写](#简历页怎么写)
+- [资料书架怎么配](#资料书架怎么配)
+- [AI 问答怎么配](#ai-问答怎么配)
+- [配置项全表](#配置项全表)
+- [移动端](#移动端)
+- [日常运维](#日常运维)
+- [设计说明](#设计说明)
+- [已知限制](#已知限制)
 
-| 路由 | 内容 |
+---
+
+## 它长什么样
+
+访问 `/blog` 是一个多页站点：
+
+| 地址 | 内容 |
 | --- | --- |
-| `/blog` | 首页:7 项仪表盘 + 全部笔记列表 + 目录树 + 活跃度日历 + 热门榜 + 关于我 |
-| `/blog/<slug>` | 文章页:正文 + 本页目录 + 点赞/点踩/分享 |
-| `/blog/about` | 简历页(由带 `page: about` 的笔记渲染) |
-| `/blog/feed.xml` | RSS |
-| `/api/share/file?id=<id>&share_token=<t>` | 附件(图片/音视频/PDF) |
+| `/blog` | 首页：7 项仪表盘 + 目录树 + 文章列表 + 活跃度日历 + 标签云 + 热门榜 |
+| `/blog/<slug>` | 文章页：正文 + 本页目录 + 局部知识图谱 + 点赞/点踩/分享 |
+| `/blog/about` | 简历页（由带 `page: about` 的笔记渲染） |
+| `/blog/shelf` | 资料书架：封面墙，点进去逐页读 PDF |
+| `/blog/shelf/<id>` | 阅读器：单页栅格化阅读，前端拿不到原 PDF |
+| `/blog/graph` | 全站知识图谱 |
+| `/blog/rss.xml` | RSS 2.0 |
 
-`slug` 形如 `1.17-4567610782`(`<uid>.<share_id>-<hmac10>`),不是数据库里存的值，而是现算的。
-
-**只渲染已发布的笔记。** 未发布的笔记不会泄漏到博客的任何位置 —— 这一条在转写、图谱、热门、搜索里各校验一次。
-
----
-
-## 二、渲染管线
-
-`renderNoteBody` 是唯一的正文渲染入口。**顺序是约定，不是随手排的**:
-
-```
-1. frontmatter            剥掉 YAML 头
-2. expandTransclusions    ![[笔记]] → 目标正文(深度 3，防环)
-3. rewriteWikiLinks       [[笔记]] → /blog/<slug>；残留 ![[x]] → 纯文本
-4. preprocessMath         数学公式
-5. preprocessDynamicBlocks dataview / js 块
-6. preprocessCallouts     > [!note] 折叠块
-7. 页面容器                 ::: profile-head / profile-meta / timeline / links
-8. goldmark               Markdown → HTML
-```
-
-### 为什么是这个顺序
-
-`expandTransclusions` 必须第一个跑:它消费 `![[Note]]` 这种语法，任何在它之前跑的步骤都可能改写或删掉那些括号。它插入的是 **Markdown 源码** 而不是 HTML，所以后续每一步都会把被嵌入的笔记当成"这篇笔记自己的文字"来处理 —— 行为因此天然一致。
-
-`rewriteWikiLinks` 会**无条件**把残留的 `![[x]]` 变成纯文本。对笔记嵌入这是对的(第 2 步没能展开，说明目标未发布)；对**文件**则错了。所以附件重写必须在它之前完成 —— 见下一节。
-
-### 附件重写
-
-`![[图片.png]]` 与 `![](路径)` 走两条不同的路:
-
-- 分享页经 `GetSharedNote` → `resolveSharedNoteFiles` → 附件重写，两者都能出图
-- 页面路径(RenderBlogPage)原本**直接调 renderNoteBody**，绕过了那一步，于是 `![[图片]]` 落进 `rewriteWikiLinks` 手里变成文件名文字
-
-现在页面路径也走那三步:解析短链 → 签发分享 token → 取回重写后的正文。**新增任何"页面类"渲染入口时，附件重写不会自动发生。**
-
-### 标题 id
-
-goldmark 内置的 id 生成器会丢弃所有多字节字符，中文标题全部塌成 `heading`、`heading-1`。现在用自建生成器，并且**目录与锚点在同一次遍历里编号**为 `s-N`，两者不可能对不上。
-
-早期试过"中文标题转 id"，结果 `href="#1-%e7%89%99..."` 与 `id="1-牙发育异常..."` 永远不相等 —— `html/template` 在属性上下文里会 percent-encode 非 ASCII，`template.URL` 也挡不住。
+**只渲染已发布的笔记。** 没分享出去的笔记不会以任何形式出现在博客里——文章列表、目录树、标签云、图谱、全文检索各校验一次。
 
 ---
 
-## 三、Markdown 方言
+## 三分钟跑起来
 
-判据是"Obsidian 里怎么写，博客就怎么显示"。
+### 1. 依赖
+
+只有 Go。健康检查、SQLite 驱动、模板全部在标准库里，`CGO_ENABLED=0` 可以静态编译。
+
+资料书架需要服务器上装 `poppler-utils`（提供 `pdftoppm`/`pdfinfo`）——这是整套东西唯一的外部依赖，且只在用书架时需要。
+
+```bash
+apt-get install -y poppler-utils
+```
+
+### 2. 编译
+
+```bash
+export GOPROXY=https://goproxy.cn,direct
+export GOSUMDB=sum.golang.google.cn
+
+CGO_ENABLED=0 go build -o fast-note-sync-service .
+```
+
+注意是 `.`，不是 `./...`——后者会连 `cmd/` 下的生成器一起编，在低配机器上容易 OOM。
+
+### 3. 最小配置
+
+`config/config.yaml`：
+
+```yaml
+server:
+  http-port: ":9000"
+
+blog:
+  enabled: true
+  title: 问道漫步
+  uid: 0            # 0 = 第一个用户(uid=1)，即发布谁的分享
+  indexable: true   # 允许搜索引擎收录
+  show-index: true  # 首页列出文章
+```
+
+`uid` 决定博客展示哪个用户的分享。单用户部署填 `0` 就行。
+
+### 4. 启动与验证
+
+```bash
+./fast-note-sync-service -c config/config.yaml
+```
+
+```bash
+curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:9000/blog   # 200
+curl -s http://127.0.0.1:9000/api/health
+```
+
+### 5. 反代与域名
+
+博客是纯 HTTP，任何反代都能用。两个必须注意的点：
+
+```nginx
+location / {
+    proxy_pass http://127.0.0.1:9000;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_read_timeout 300s;   # AI 问答是 SSE 长连接，默认 60s 会断
+}
+```
+
+`X-Forwarded-For` 必须透传：问答接口按真实客户端地址做限流，不传就所有人都算成 `127.0.0.1`，一个人提问全体被限。
+
+---
+
+## 发布第一篇文章
+
+博客没有"新建文章"按钮，也不需要——**「分享」就是「发布」**。
+
+### 发布流程
+
+1. 在 Obsidian 里写好一篇笔记，正常同步到服务端
+2. 对这篇笔记创建分享（Obsidian 插件里点分享，或在 Web GUI 的分享页新建）
+3. 刷新 `/blog`，文章就出现在列表里
+
+数据上，文件落在 `db_user_share_1.sqlite3` 的 `user_share` 表，博客查的就是 `res_type='note' AND status=1` 的行。
+
+### 文章的地址是怎么来的
+
+```
+/blog/<uid>.<share_id>-<hmac10>        形如 /blog/1.136-98a7a75922
+```
+
+`share_id` 是分享记录的 id，`hmac10` 由服务端密钥派生。整个 slug 是**每次请求现算的**，数据库里不存。
+
+> **重新分享会换一个 `share_id`，slug 随之改变，旧链接立即失效。** 已经发出去的链接会 404。
+> 想让链接稳定，就别删了重发——直接改笔记内容，分享本身不动。
+
+### 文章标题从哪来
+
+**文章标题 = 文件名去掉 `.md`。**
+
+frontmatter 里写 `title:` 不会改变文章标题（只有简历页会用它，见下文）。这样设计是为了避免"改一个 frontmatter 就把整站标题全换掉"，作者想要什么标题，改文件名就好。
+
+### 草稿
+
+没有草稿概念。**没分享 = 草稿**——笔记留在库里同步，只是不进博客。
+
+### 排序
+
+按源文件的创建时间倒序。想置顶就把日期往前调（改笔记的时间属性，或直接改 `created`）。
+
+---
+
+## frontmatter 支持哪些键
+
+键都在笔记开头那段 `---` 里：
+
+```markdown
+---
+title: 关于我
+page: about
+avatar: 我的头像.png
+tags: [口腔, 笔记]
+---
+```
+
+| 键 | 作用 | 用在哪 |
+| --- | --- | --- |
+| `page` | 声明这是一张**独立页面**而不是文章 | 目前只认 `about` |
+| `title` | 页面标题 | **仅页面生效**，文章标题用文件名 |
+| `avatar` | 头像图片路径（相对 vault） | 页面（简历页） |
+| `tags` | `[a, b]` 或 `a, b` 都行 | 标签云、文章标签 |
+
+**标签还有第二种来源**：正文里的 `#标签`。两种会合并去重。
+
+纯数字和纯标点的"标签"会被丢掉——这个库里笔记常用 `10.热牙胶` 这种编号，不拦的话标签云会被数字塞满。标签至少含一个字母（汉字算字母）才保留。
+
+---
+
+## 博客功能总览
+
+### 首页 `/blog`
+
+**7 项仪表盘**，数据全部来自已发布的笔记：
+
+| 指标 | 含义 |
+| --- | --- |
+| 公开笔记 | 已分享的篇数 |
+| 总字数 | 所有已发布笔记的字符数 |
+| 双链 | 已发布笔记之间的 wiki 链接总数 |
+| 标签 | 去重后的标签种数 |
+| 目录 | 来源笔记所在的目录数 |
+| 篇均 | 总字数 ÷ 篇数 |
+| 更新 | 最近一次源文件变更时间 |
+
+**目录树**按笔记在 vault 里的真实目录层级渲染，可折叠，当前文章所在分支自动展开。
+
+**活跃度日历**是 GitHub 那种格子图，按天统计"当天有几篇笔记有改动"，5 级深浅。
+
+**标签云**按出现次数排序，点进去是筛选后的文章列表。
+
+**热门榜**取点赞前 5。点赞都是 0 时整块不渲染，而不是留一个空标题。
+
+**全屏粒子场**是可选的装饰：节点数就是"公开笔记"那个数字，两处不可能对不上。连线距离按粒子数算出来，不是固定值。
+
+### 文章页 `/blog/<slug>`
+
+正文之外有四块：
+
+**本页目录**（右侧/移动端抽屉）由标题自动生成，锚点用 `s-N` 编号，目录和锚点在同一次遍历里产生，不会对不上。
+
+**局部知识图谱**（文章底部或浮动面板）画当前笔记的邻居，深度 1–3 可调。**没有邻居的文章没有图谱入口**——这是数据决定的，不是坏了。
+
+**点赞 / 点踩**存在 `storage/logs/blog-reactions.json`，一把互斥锁包住整个读-改-写，落盘用临时文件 + rename，并发点赞不丢写。前端用 localStorage 记住本设备的偏好，做得刻意：跨设备去重需要账号体系，这里没有。
+
+**图片灯箱**：正文图片点开放大，支持双指缩放、拖动、双击回弹。图片懒加载带骨架占位。
+
+### 简历页 `/blog/about`
+
+由带 `page: about` 的笔记渲染，走独立模板（不是文章页）。详见[简历页怎么写](#简历页怎么写)。
+
+### 资料书架 `/blog/shelf`
+
+封面墙 + 逐页阅读器。**核心约束是 PDF 原始文件不进浏览器**：服务端用 `pdftoppm` 把页面栅格化成 JPEG，前端一次只拿当前页。
+
+访客点开一本 20MB 的书，看 3 页大约 300–400KB，网络面板里没有任何 PDF。省流量和防下载是同一个动作的结果。
+
+诚实的边界：截图、录屏拦不住；一页页翻完整本，总流量仍会接近原文件（只是拆成很多次请求）。这套设计去掉的是「一键下载」和「每次访问都付整本的钱」。
+
+### 全站知识图谱 `/blog/graph`
+
+d3-force 物理布局 + 拖拽 + 缩放，不是手写的。节点大小由度数决定，已发布节点可点击跳转。
+
+`graph-scope: shared` 只画已发布的笔记；`graph-scope: all` 把未发布的也画成匿名小点——能看出连接关系，但不泄露标题。
+
+### AI 问答
+
+右下角（移动端在底部胶囊）的「问道」打开问答面板，基于已发布笔记做检索增强生成。详见[AI 问答怎么配](#ai-问答怎么配)。
+
+### RSS
+
+```
+/blog/rss.xml
+```
+
+只包含已发布笔记。`indexable: false` 时页面加 `noindex`，但 RSS 照常输出。
+
+---
+
+## 写作语法对照
+
+判据只有一条：**Obsidian 里怎么写，博客就怎么显示。**
 
 | 语法 | 处理 |
 | --- | --- |
-| `==高亮==` | 自建 mark 扩展(goldmark v1.8.6 没有)。**定界符最小长度 2** |
-| 单换行 | `html.WithHardWraps()` — 单换行渲染为 `<br>`，与 Obsidian 默认一致 |
-| `![[笔记]]` | 转写目标正文，仅已发布，深度 3，防环 |
-| `![[图片]]` / `![](路径)` | 改写为 `/api/share/file?id=...` |
-| `> [!note]` | callout |
-| `$...$` / `$$...$$` | 数学公式 |
-| ` ```dataview ` | 动态块 |
-| `::: profile-head` 等 | 页面容器(仅页面笔记) |
+| `==高亮==` | `<mark>`，定界符最少 2 个（单个 `=` 是普通字符，见下） |
+| 单换行 | 渲染成 `<br>`，与 Obsidian 默认一致 |
+| `![[笔记]]` | 内嵌目标正文，深度 3，防循环 |
+| `![[图片.png]]` | 改写为附件地址 |
+| `![](路径)` | 同上 |
+| `[[笔记]]` / `[[笔记\|别名]]` | 变站内链接 |
+| `> [!note]` | 折叠块（callout） |
+| `$x$` / `$$x$$` | 数学公式 |
+| `dataview` / `js` 代码块 | 动态块 |
+| `::: profile-head` 等 | 页面容器（仅简历页） |
+| `#标签` | 归入标签云 |
 
-### 两个曾经的真实缺陷
+### 两个真实踩过的坑
 
-**单个 `=` 触发高亮。** `ScanDelimiter(line, before, 1, ...)` 的第三个参数是最小连续长度，原本传 `1`，于是单个等号就是合法定界符。一行里出现两个 —— 而正文里到处是(`头部=颅部+面部`、`替牙间隙 =（Ⅲ+Ⅳ+Ⅴ）－（3+4+5）`)—— 就被配成一对，中间整段渲染成 `<mark>`。实测这个仓库里 **15 篇**笔记含孤立等号、**0 篇**含 `==`，所以高亮功能不是"没被使用"，而是在普通文本上持续误触发。改成 `2` 之后 `=` 回归普通字符，`==` 仍然高亮。
+**单个 `=` 曾经触发高亮。** 定界符最小长度传了 1，于是 `头部=颅部+面部`、`替牙间隙=（Ⅲ+Ⅳ+Ⅴ）－（3+4+5）` 这类行里出现两个等号就被配成一对，中间整段变成 `<mark>`。这个库里 15 篇笔记含孤立等号、0 篇含 `==`——也就是说高亮功能不是"没人用"，而是在普通文本上持续误触发。改成最小 2 个后 `=` 回归普通字符。
 
-**单换行折叠成空格。** CommonMark 规定单换行不产生新段落，而 Obsidian 的默认行为恰恰相反。实测 **114 篇里有 69 篇**用单换行书写，最严重的一篇有 192 处 —— 也就是说博客的大多数文章都在整篇挤成一块。启用 `WithHardWraps` 之后与 Obsidian 一致。
+**单换行曾经被折叠成空格。** CommonMark 规定单换行不产生新段落，而 Obsidian 恰恰相反。实测 114 篇里 69 篇用单换行书写，最严重的一篇有 192 处——大多数文章都在整篇挤成一块。现在启用了 `WithHardWraps`。
 
----
+### 中文标题的锚点
 
-## 四、页面容器
-
-带 `page: about` frontmatter 的笔记会被渲染成独立页面，可用四个区块:
-
-```
-::: profile-head      姓名与一句话
-::: profile-meta      基本信息(两列网格，窄屏一列)
-::: timeline          时间线
-::: links             联系方式
-```
-
-机制:标记先以 **HTML 注释** 的形态穿过 Markdown 渲染，渲染完成后换成真正的 `<div class="pc pc-xxx">`。不能直接写 `<div>` —— goldmark 把原始 HTML 块视为"直到空行才结束"，紧跟着的列表会被吞成 HTML 而不是变成 `<ul>`。
-
-不在白名单里的名字**原样保留**在输出里，不是被静默丢弃:写错名字的人应当在页面上看到那些标记，而不是纳闷内容去哪了。
+目录和锚点都用 `s-N` 形式的 ASCII id，不用标题原文。早期试过"中文标题转 id"，结果是 `href="#1-%e7%89%99..."` 和 `id="1-牙发育异常..."` 永远不相等——`html/template` 在属性上下文里会把非 ASCII percent-encode，`template.URL` 也挡不住。
 
 ---
 
-## 五、互动
+## 简历页怎么写
 
-### 点赞 / 点踩 / 访问次数
+建一篇笔记，frontmatter 声明 `page: about`：
 
-存在 `storage/logs/blog-reactions.json`:
+```markdown
+---
+title: 关于我
+page: about
+avatar: assets/头像.png
+---
+
+::: profile-head
+## 你的名字
+一句话介绍自己
+:::
+
+::: profile-meta
+- 坐标：城市
+- 职业：职业
+- 邮箱：you@example.com
+:::
+
+::: timeline
+- 2024 年 · 某件事
+- 2022 年 · 另一件事
+:::
+
+::: links
+- [GitHub](https://github.com/you)
+- [邮箱](mailto:you@example.com)
+:::
+```
+
+四个容器：
+
+| 容器 | 版式 |
+| --- | --- |
+| `profile-head` | 头像 + 姓名 + 一句话 |
+| `profile-meta` | 两列网格（窄屏一列） |
+| `timeline` | 时间线 |
+| `links` | 联系方式 |
+
+有三点要知道：
+
+**容器标记先以 HTML 注释的形态穿过 Markdown 渲染**，渲染完再换成 `<div class="pc pc-xxx">`。不能直接写 `<div>`——goldmark 把原始 HTML 块视为"直到空行才结束"，紧跟着的列表会被吞成 HTML 而不是变成 `<ul>`。
+
+**不在白名单里的名字原样保留**，不是被静默丢弃。写错名字的人应该在页面上看见那些标记，而不是纳闷内容去哪了。
+
+**`page:` 只认 `about`**。别名白名单是唯一的，因为"有路由但过滤器不认"会导致笔记从文章列表消失、同时读者无处可去。要加新页面得同时改路由和白名单。
+
+---
+
+## 资料书架怎么配
+
+### 目录结构
+
+```
+storage/blog-shelf/
+  shelf.json                          书目（唯一需要手写的文件）
+  books/<id>.pdf                      原始 PDF —— 私有，不经任何路由暴露
+  cache/<id>/p<页>-<dpi>-<参数>-<戳>.jpg   按需渲染的页图
+  covers/<id>-<参数>-<戳>.jpg             封面
+```
+
+### shelf.json
 
 ```json
-{ "visits": 216, "notes": { "<slug>": { "like": 3, "dislike": 0 } } }
+{
+  "books": [
+    {
+      "id": "oral-histology",
+      "title": "口腔组织胚胎学",
+      "author": "作者",
+      "note": "一句话简介",
+      "pages": 242
+    }
+  ]
+}
 ```
 
-并发正确性靠**一把互斥锁包住整个读-改-写**，落盘用临时文件 + rename。文件损坏时保留一份 `.corrupt` 再重置，不静默丢数据。
+把 PDF 放到 `books/<id>.pdf`，`shelf.json` 里登记同一个 `id` 即可。首屏封面由第 1 页自动生成，想手做封面就放 `covers/<id>.jpg`。
 
-**不加表**的理由:这张数据每次点赞都要写，而点赞是博客上最热的写操作；用一张表意味着每个赞一行事务，而它总量只是"几百个计数"。代价是不能 SQL 查询 —— 而这里从来不需要。
+### 注意
 
-`visits` 是**单调计数器**，每次成功渲染 +1，不是从访问日志求和。它叫「访问次数」而不是「阅读量」，因为它把刷新和爬虫也算进去了 —— 名字应当诚实。
+`pages` 要和实际页数一致；不一致时阅读器翻到最后一页会拿到 404。
 
-`POST /blog/react` **公开**，因为博客本身公开。返回权威计数，所以两个标签页点同一个赞结果一致。`kind` 校验，`delta` 钳在 ±1。前端用 localStorage 记"这台设备的偏好"，**刻意不做跨设备去重** —— 那需要账号体系。
-
-### 热门榜
-
-纯点赞数，取前 5，点赞相同时新的在前。**点赞为 0 时整块不渲染**，而不是显示一个空标题。
+PDF 文件名即 `id`，改名等于换一本书，缓存会重建。
 
 ---
 
-## 六、首页动效
+## AI 问答怎么配
 
-### 全屏粒子场
+问答是可选功能，关掉不影响博客其余部分。
 
-节点数 = 仪表盘「公开笔记」那同一个数，所以两处不可能在"有多少篇笔记"上互相矛盾 —— 它们不是两个接近的值，而是同一个值。
+```yaml
+ai:
+  enabled: true
+  top-k: 8                      # 检索返回条数
+  max-context-chars: 14000      # 送进模型的上下文上限
+  cache-ttl: 5m                 # 语料缓存；调小能缩短"改完笔记立刻提问"的陈旧窗口
+  max-question-chars: 500
+  routes:
+    - name: main
+      base-url: https://api.siliconflow.cn/v1
+      model: Qwen/Qwen3.5-4B
+      api-key: sk-xxx
+      min-interval: 10s
+      timeout: 420s
+      max-tokens: 3000
+      enable-thinking: false
+      retries: 1
+  embedding:                    # 向量通道；关掉退化为 BM25 + 重排
+    enabled: true
+    base-url: https://api.siliconflow.cn/v1
+    model: BAAI/bge-m3
+    api-key: sk-xxx
+    batch-size: 32
+    chunk-chars: 1800           # bge-m3 硬上限 8192 token，12000 字符会 400
+    chunk-overlap: 200
+    candidate-limit: 60
+  rerank:                       # 精排；关掉退化为 BM25
+    enabled: true
+    base-url: https://api.siliconflow.cn/v1
+    model: BAAI/bge-reranker-v2-m3
+    api-key: sk-xxx
+    top-n: 8
+    doc-chars: 1200
+```
 
-两个非显然的决定:
+三级降级，缺哪级就退化到下一级：向量召回 → BM25 → 精排。只配一个 `routes` 也能用。
 
-**连线距离由数据算**:`clamp(sqrt(w*h/COUNT)*1.5, 90, 190)`。参照配置写的固定 `100` 是按 200 个粒子调的；112 个粒子在 1440×950 上平均最近邻间距约 110px，**比范围还大**，几乎画不出连线，整片场看起来像散落的灰尘。固定值在两端都会坏(165px 在 112 时刚好，400 时成实心网)。
+检索范围是**已发布的笔记**，与博客一致。
 
-**初始分布用抖动网格而非随机**:完全随机会留团块与空斑，读起来是"随机"而不是"一片场"；间距均匀才让连线读成一张网。
-
-硬上限 **220**(连线是 O(n²)，超过之后文章列表会开始卡)，封顶时在控制台说明一句。
-
-### 星域穿越
-
-点「关于我」卡片时播放星域推进(`z -= 4` 投影，300 颗星)再进入简历页。这是**跨文档过渡**(先播放再跳转)，不是客户端换页 —— 因此后退按钮、地址栏、直接访问走的都是真实路径。一次性 `sessionStorage` 标记；Ctrl/⌘/Shift/Alt/中键点击不劫持。
-
-### 加载动画
-
-纯 CSS `nth-child` 延迟，无 JS、无闪烁。延迟在 12 项处封顶 —— 112 篇 × 38ms 是 4 秒，那是加载而不是动画。
-
----
-
-## 七、知识图谱
-
-d3-force 物理 + d3-drag 拖动 + d3-zoom 缩放，不是手写的。入口在右下(桌面)/ 顶部左(移动端)。
-
-- **局部图谱**:当前笔记的邻居，深度可调(1–3)，节点上限 400
-- **全局图谱**:浮层，可全屏
-
-图谱是**条件渲染**的 —— 一篇没有邻居的笔记没有图谱入口。这是数据决定的，不是缺陷。
-
-`frontend/static/js/d3-graph.min.js` 是构建产物，用 `?v=<sha256[:12]>` 做内容指纹。**它原地覆盖，所以没有指纹时每个读者会一直用首次访问缓存的那一份。**
-
----
-
-## 八、移动端
-
-全站只有一个断点:**860px**。
-
-阅读页(`.is-post` / `.is-page`):
-
-- **顶栏让位** —— 隐藏品牌与面包屑。窄到只能容下一行时，「你在哪」不如「能去哪」重要，而面包屑在文章标题上方已经重复了一次
-- **顶部操作区** —— 左图谱、右问答，两个圆形磨砂按钮。没有包裹容器:它们各自是 `fixed` 且只有自身大小，之间的空白天然可滑
-- **边缘书签** —— 贴在屏幕垂直中线，左=全局目录、右=本页目录。点开滑出抽屉，遮罩覆盖正文，被点那侧的书签隐藏、另一侧保持可见
-
-**首页不参与** —— 它的侧栏是内容本身(目录树、日历、热门)，不是阅读时可以临时让开的东西。
-
-三个踩过的坑写在这里，因为它们会再犯:
-
-1. **侧栏由 CSS 直接变成抽屉，不复制内容** —— 那些内容服务端已经渲染了一份
-2. **书签 z-index 59 > 抽屉 58 > 遮罩 57**，书签必须在遮罩之上，否则"打开一个再点另一个切换"没有入口
-3. **同一个 z-index 数字在两个堆叠上下文里不可比** —— `.shell` 带 `z-index:1`，它的子元素设 58 只在内部有意义；而遮罩挂在 `body` 下、57，比较的是根上下文，57 > 1，于是遮罩把整个 `.shell`(连同抽屉)一起压住。**数字没写错，是它们不在同一个上下文里。** 遮罩必须和抽屉同级(都放在 `.layout` 内)
+接口有两道闸：按客户端地址限频，以及同一客户端同时只能有一条回答在流。都用真实 IP 而不是可伪造的头（所以反代必须透传 `X-Forwarded-For`）。
 
 ---
 
-## 九、数据存储
+## 配置项全表
 
-**全部在 `storage/`。这是数据，不是产物。**
+`blog:` 段：
+
+| 键 | 默认 | 说明 |
+| --- | --- | --- |
+| `enabled` | `false` | 博客总开关 |
+| `title` | `Notes` | 站点标题，出现在浏览器标题与页头 |
+| `uid` | `0` | 发布哪个用户的分享，`0` = 第一个用户 |
+| `indexable` | `true` | 是否允许搜索引擎收录（关掉则输出 `noindex`） |
+| `show-index` | `true` | 首页是否列出文章 |
+| `graph-scope` | `shared` | `shared` 只画已发布；`all` 把未发布画成匿名点 |
+| `max-graph-nodes` | `120` | 全站图谱节点上限，防布局算太久 |
+| `show-graph` | `false` | 首页是否显示图谱 |
+| `local-graph-depth` | `1` | 文章内图谱的初始深度（1–3） |
+| `particle-count` | `150` | 点赞粒子数，范围 30–400 |
+| `dislike-burst` | `true` | 点踩是否也喷粒子 |
+
+> **配置里只能有一个 `blog:` 段。** 这个文件在历史上出现过两个同名段（一个缩进四格、一个顶格），只有一个生效，改错不报错、只表现为"配置不生效"。手改前先 `grep -n '^blog:'` 确认只有一处。
+
+---
+
+## 移动端
+
+全站只有一个断点：**860px**。
+
+### 阅读页的取舍
+
+**顶栏让位** —— 隐藏品牌与面包屑。窄到只能容下一行时，「你在哪」不如「能去哪」重要，而面包屑在文章标题上方已经重复过一次。
+
+**边缘书签** —— 贴在屏幕垂直中线，点开滑出抽屉。被点那侧的书签隐藏、另一侧保持可见，所以"打开左抽屉再切右抽屉"有入口。
+
+**首页不参与** —— 它的侧栏是内容本身（目录树、日历、热门），不是阅读时可以临时让开的东西。
+
+### 底部胶囊
+
+每个页面底部有一枚五格胶囊，滑块跟着手指走：
+
+| 页面 | 五格 |
+| --- | --- |
+| 首页 | 导航 · 热门 · 漫游 · 活跃 · 问答 |
+| 文章 | 导航 · 图谱 · 漫游 · 首页 · 问答 |
+| 独立页 | 首页 · 漫游 · 问答 |
+
+「漫游」是随机跳到一篇已发布笔记。图谱、问答、抽屉三者互斥：任何一方打开都会广播一条事件，其余两方收到就关自己——只靠一条消息，不共享全局变量，所以三个脚本可以任意顺序加载。
+
+### 软键盘
+
+问答面板在手机上要处理软键盘。这里有一条不能省的经验：**`position: fixed` 不跟随键盘**，而不同内核给出的信号不一样——iOS 只有 `visualViewport.height` 会变小，Android 连 `innerHeight` 一起变小，Windows 微信则两个都不变但两者之间本来就有几百像素的静态差。
+
+所以判据是「每个信号相对**自己初始值**的下降量，取较大值」，而不是两个信号互相比。互相比会在 Android 上恒为 0（两个一起缩），也会在 Windows 微信上误判成"键盘吃了 548px"——后者的表现是面板被推到一个虚构的高度，下面露出一大截模糊正文。
+
+---
+
+## 日常运维
+
+### 交叉编译并部署
+
+```bash
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -p 2 -ldflags="-s -w" -o fns .
+scp fns root@<host>:/opt/fns/fns.new
+
+ssh root@<host> '
+  set -e
+  systemctl stop fns; sleep 2
+  fuser /opt/fns/fns && echo "file busy, abort" && exit 1 || true
+  TS=$(date +%Y%m%d_%H%M%S)
+  mkdir -p /opt/fns/backup/bin_$TS && cp /opt/fns/fns /opt/fns/backup/bin_$TS/fns
+  chmod +x /opt/fns/fns.new
+  sync; mv -f /opt/fns/fns.new /opt/fns/fns; sync
+  systemctl start fns; sleep 8
+  systemctl is-active fns
+  systemctl show fns -p NRestarts --value
+'
+```
+
+`fuser` 那一行不是形式主义：scp 断在传输中途会留下一个 `sftp-server` 进程持有写句柄，此时 `mv` 报 `Text file busy`，服务起不来。
+
+### 回滚
+
+```bash
+systemctl stop fns
+cp /opt/fns/backup/bin_<时间戳>/fns /opt/fns/fns
+systemctl start fns
+```
+
+### 看状态
+
+```bash
+systemctl status fns
+curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:9000/blog
+awk '/VmRSS/{printf "%.1f MB\n",$2/1024}' /proc/$(systemctl show fns -p MainPID --value)/status
+```
+
+### 已发布多少篇
+
+```bash
+python3 -c "import sqlite3;c=sqlite3.connect('file:/opt/fns/storage/database/db_user_share_1.sqlite3?mode=ro',uri=True);print(c.execute(\"select count(*) from user_share where res_type='note' and status=1\").fetchone()[0])"
+```
+
+### 数据在哪
+
+**全部在 `storage/`。这是数据，不是产物，备份它。**
 
 ```
 storage/
   database/
-    db.sqlite3                      user / auth_token / auth_token_log
-    db_user_1.sqlite3               note(元数据，正文不在这里)
+    db.sqlite3                      user / auth_token
+    db_user_1.sqlite3               note（元数据）
     db_user_share_1.sqlite3         user_share
-    db_user_file_1.sqlite3          file(附件元数据)
-    db_user_sync_log_1.sqlite3      同步日志
+    db_user_file_1.sqlite3          file（附件元数据）
   vault/u_<uid>/note/n_<id>/
-    content.txt                     正文(权威)
-    snapshot.txt                    客户端快照
-  vault/u_<uid>/file/f_<id>/file.dat 附件二进制
-  logs/blog-reactions.json          点赞/点踩/访问计数
+    content.txt                     正文（权威）
+    snapshot.txt                    客户端当前快照
+  vault/u_<uid>/file/f_<id>/file.dat  附件二进制
+  blog-shelf/                       资料书架（PDF + 缓存）
+  logs/blog-reactions.json          点赞 / 点踩 / 访问计数
 ```
 
-三条必须知道的约定:
+三条必须知道的约定：
 
-1. **笔记正文不在数据库里。** `note.content` 恒为空串，正文在 `content.txt`。判断内容是否同步，永远看 `content.txt`
-2. **附件二进制在 `f_<fileID>/file.dat`。** `file.save_path` 那一列**永远是空的** —— 路径在读取时由 `GetFileFolderPath` 惰性算出。看到 `save_path` 为空**不是**附件丢了
-3. **`snapshot.txt` 不是"上一版"，是客户端当前快照**
+`note.content` 列恒为空串，正文在 `content.txt`。判断内容是否同步，永远看 `content.txt`。
+
+`file.save_path` 列恒为空，附件路径在读取时惰性算出。看到它为空**不是**附件丢了。
+
+`snapshot.txt` 不是"上一版"，是客户端当前快照。
+
+### 静态资源缓存
+
+`/blog/ask.js`、`/blog/lightbox.js`、`/blog/reader.js` 都带 `?v=<进程启动时刻>`。这是必要的：源站发的是 `no-cache`，但微信 webview 和部分代理并不总遵守，部署后客户端仍在跑旧脚本，表现就是「明明改好了，页面一点变化都没有」。URL 一变，任何缓存层都绕不过去。
 
 ---
 
-## 十、构建与运行
+## 设计说明
+
+想改代码的人看这几条，都是踩出来的。
+
+**渲染顺序是约定。** `frontmatter → 展开内嵌 → 改写 wiki 链接 → 数学 → 动态块 → callout → 页面容器 → goldmark`。内嵌必须第一个跑：它消费 `![[...]]` 语法，任何在它之前跑的步骤都可能改写那些括号。它插入的是 **Markdown 源码**而不是 HTML，所以后续每一步都会把被嵌入的内容当成"这篇笔记自己的文字"处理，行为天然一致。
+
+**附件重写必须在 wiki 链接重写之前。** `rewriteWikiLinks` 会无条件把残留的 `![[x]]` 变成纯文本——对笔记内嵌这是对的（没展开说明目标未发布），对图片就错了。**新增任何"页面类"渲染入口时，附件重写不会自动发生。**
+
+**图谱是条件渲染的。** 一篇没有邻居的笔记没有图谱入口，这是数据决定的。
+
+**`d3-graph.min.js` 是构建产物**，改完必须重新生成资源指纹，否则读者永远用首次访问缓存的那份。
+
+**移动端 z-index 有个坑要记住**：同一个 z-index 数字在两个堆叠上下文里不可比。`.shell` 带 `z-index:1`，它的子元素设 58 只在内部有意义；而遮罩挂在 `body` 下、57，比较的是根上下文，57 > 1，于是遮罩会把整个 `.shell`（连同抽屉）一起压住。数字没写错，是它们不在同一个上下文里。遮罩必须和抽屉同级。
+
+---
+
+## 已知限制
+
+**没有评论系统。** 没有内嵌评论、邮件通知、Webhook。
+
+**没有自定义 CSS/HTML 注入。** 想要就改模板重编译。
+
+**没有协作者权限。** 单用户模型，`uid` 决定发布谁的内容。
+
+**没有账号系统。** 点赞去重靠 localStorage，换设备就是新访客。
+
+**重新分享会换链接。** 见上文。
+
+**窗口很矮时侧栏可能与浮动按钮重叠。** `.rail{padding-bottom:6rem}` 是固定值。
+
+**`indexable: true` 时 RSS 和页面都会对搜索引擎开放。** 不想被收录就关掉。
+
+---
+
+## 与上游的关系
 
 ```bash
-# 依赖
-export GOPROXY=https://goproxy.cn,direct
-export GOSUMDB=sum.golang.google.cn
-
-# 编译(注意是 . 而不是 ./...)
-go build -o fast-note-sync-service .
-
-# 运行
-./fast-note-sync-service -c config/config.yaml
+git remote add upstream https://github.com/haierkeys/fast-note-sync-service
+git fetch upstream
+git log --oneline upstream/master ^HEAD    # 看上游多了什么
+git merge upstream/master
 ```
 
-健康检查:`GET /api/health`。
+改动集中在两类文件，合并冲突基本可预期：
 
-### 重建 d3 包
+新增：`internal/routers/blog_*.go`、`internal/service/blog_*.go`、`internal/config/blog.go`、`internal/dto/blog_dto.go`
 
-`frontend/static/js/d3-graph.min.js` 是 d3-force / d3-drag / d3-zoom 的最小打包。改完之后必须**重新生成资源指纹**(`blog_assets_gen.go` 里的 `d3GraphAssetVersion`),否则读者永远用缓存里那份。
+修改的上游文件：`share_service.go`（最多）、`router_api.go`、`dao/note_repository.go`、`middleware/access_log.go`
 
----
-
-## 十一、测试
+测试：
 
 ```bash
 go test ./internal/routers/ ./internal/service/
 ```
 
-`internal/routers` 全绿。`internal/service` 有一条**预存在的失败**:`TestGitSyncService_UpdateConfig_InvalidatesCache` —— 与本分支的改动无关，长期未修。
-
-有价值的测试集中在:
-
-- `mark_extension_test.go` — 锁住 `=` 不触发、`==` 仍高亮、`===` 被拒、未闭合不吞后文、hardWrap 不破坏块级结构
-- `blog_reaction_test.go` — 含 200 goroutine 并发点赞不丢写
-- `blog_page_*_test.go`、`blog_heading_ids_test.go`、`blog_transclusion_test.go`
-
----
-
-## 十二、与上游的关系
-
-本仓库 `origin` 指向这份备份，`upstream` 指向官方:
-
-```bash
-git fetch upstream
-git log --oneline upstream/master ^HEAD   # 看上游多了什么
-git merge upstream/master                 # 合并
-```
-
-魔改集中在两类文件里，合并冲突基本可预期:
-
-- **新增文件**:`internal/routers/blog_*.go`、`internal/service/blog_*.go`、`internal/config/blog.go`、`internal/dto/blog_dto.go`
-- **修改的上游文件**:`share_service.go`(最大)、`router_api.go`、`dao/note_repository.go`、`middleware/access_log.go`
-
----
-
-## 十三、已知问题
-
-1. **`config.yaml` 有两个 `blog:` 段** —— 一个四空格缩进(死的)、一个顶格(生效的)。改错不会报错，只表现为"配置不生效"。建议合并
-2. **`home.Nav.Pages` 为空的原因未查明** —— 首页顶栏原本想放「关于」入口，`len(.Pages)==0` 而 `len(.Nav)==3`。绕过做法是改调 `GetBlogNav(...).Pages`。功能正常，但这个空值将来可能以别的形式再冒出来
-3. **`TestGitSyncService_UpdateConfig_InvalidatesCache`** 长期失败，与博客无关
-4. **附件数触到 `attachmentSyncLimit=500`** —— vault 2 的 `file_count` 正好 500，新的附件元数据会登记但可能排不进同步队列。附件二进制本身正常
-5. **窗口很矮时侧栏仍可能与浮动按钮重叠** —— `.rail{padding-bottom:6rem}` 是固定值
+`internal/service` 里有一条预存在的失败 `TestGitSyncService_UpdateConfig_InvalidatesCache`，与博客无关，长期未修。
 
 ---
 
 ## 许可
 
-与上游一致(见 `LICENSE`)。本仓库是个人备份，未向上游提 PR。
+与上游一致，见 `LICENSE`。本仓库是个人分支，未向上游提 PR。
