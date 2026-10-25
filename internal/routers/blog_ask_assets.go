@@ -227,7 +227,25 @@ function broadcastOpen(who) {
     panel.style.top = '';
     panel.style.height = '';
     panel.style.bottom = '';
+    panel.style.paddingBottom = '';
   }
+
+  // 面板比可视高度多铺这么多，多出来的部分一定是被键盘盖住的。
+  //
+  // 为什么需要这一段：visualViewport.height 在 iOS 微信里比 webview 真实可见区
+  // 少算一截（实测 iPhone 14 上约 27px），于是按它定高的面板底边会悬在键盘上方，
+  // 露出下面一条模糊正文 —— 看起来就是「留了一节」。
+  // 那个差值拿不到，也不该去猜：换个写法让它变得无害 ——
+  //   面板照可视高度铺，再往下多铺 40px；
+  //   同时给面板补 40px 底部内边距，把 input 顶回原来的位置。
+  // 于是无论这 40px 里有多少真的被键盘吃掉：
+  //   算得准时，40px 全在键盘后面，输入框正好贴着键盘；
+  //   少算 27px 时，多出的 13px 是面板自己的底色，不是露出来的正文。
+  // 两种都比「悬空露背景」好，而且不需要知道那 27px 究竟是什么。
+  //
+  // 桌面端不接管，Safari 的 visualViewport 本来就是准的 —— 那边多出的 40px
+  // 同样落在键盘后面，看不见，所以不需要按内核分开。
+  var PANEL_SLACK = 40;
 
   function syncViewport() {
     if (!OPEN) return;
@@ -259,7 +277,8 @@ function broadcastOpen(who) {
       // 面板底边就是键盘顶边，输入框贴着键盘上方，和豆包那种聊天窗一致。
       if (!(h > 160)) { clearPanelGeometry(); return; }
       panel.style.top = Math.max(0, Math.round(visT)) + 'px';
-      panel.style.height = Math.round(h) + 'px';
+      panel.style.height = Math.round(h + PANEL_SLACK) + 'px';
+      panel.style.paddingBottom = PANEL_SLACK + 'px';
       panel.style.bottom = 'auto';
     });
   }
