@@ -955,6 +955,10 @@ const blogGraphEngineJS string = `import { forceSimulation, forceManyBody, force
       // 卡片在此刻之前是 display:none，量到 0x0，什么都画不出来。现在它已布局，构建它。
       if (!cardMount) { mountCard(); }
     }); });
+    // 告诉问答与抽屉：我开了。它们各自收自己，不需要知道我是谁。
+    try {
+      document.dispatchEvent(new CustomEvent('fns:panel-open', { detail: { who: 'graph' } }));
+    } catch (e) {}
   }
 
   function closePanel() {
@@ -978,9 +982,17 @@ const blogGraphEngineJS string = `import { forceSimulation, forceManyBody, force
     panel.addEventListener('transitionend', done);
   }
 
-  fab.addEventListener('click', openPanel);
+  fab.addEventListener('click', function () { if (OPEN) { closePanel(); } else { openPanel(); } });
   if (collapseBtn) { collapseBtn.addEventListener('click', closePanel); }
   if (backdrop) { backdrop.addEventListener('click', closePanel); }
+
+  // 与问答、抽屉互斥：任一方开都广播 fns:panel-open，这里收到就收自己。
+  // 与「二次点击收回」是同一条需求的两面 —— 都要有一个明确的「谁现在开着」。
+  document.addEventListener('fns:panel-open', function (ev) {
+    var who = ev && ev.detail ? ev.detail.who : '';
+    if (who === 'graph') { return; }
+    if (OPEN) { closePanel(); }
+  });
 
   // One Escape handler for both layers, in priority order.
   //

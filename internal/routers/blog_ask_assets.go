@@ -40,6 +40,18 @@ const blogAskScript = `
   if (inWeChat) document.documentElement.classList.add('is-wx');
   var OPEN = false, BUSY = false, CTRL = null;
 
+// ── 三方互斥的唯一约定 ──────────────────────────────────────────────────────
+// 图谱、问答、抽屉是三个独立脚本，各自维护自己的开关状态。它们之间只需要一条消息：
+// 「我开了」。谁开都广播同一个事件，其余各方收到就关自己 —— 谁也不需要知道别人叫什么。
+//
+// 为什么不用共享的全局变量：那要求三个脚本按固定顺序加载，且有初始化先后的硬依赖。
+// 一个事件没有顺序问题，没人在听也不报错。
+function broadcastOpen(who) {
+  try {
+    document.dispatchEvent(new CustomEvent('fns:panel-open', { detail: { who: who } }));
+  } catch (e) {}
+}
+
 
   // ── Build the shell ────────────────────────────────────────────────────────
   host.innerHTML =
@@ -97,22 +109,27 @@ const blogAskScript = `
   var closeBtn = host.querySelector('.ask-close');
 
   // ── 外部入口 ────────────────────────────────────────────────────────────────
-  // 首页窄屏的入口在模板里（底部那条 dock 的三个点：爻路／目录／问道），不在这个脚本里。
-  // 这里只提供一条通用约定：任何带 data-ask-open 的元素都能打开面板。
-  // 于是入口可以是按钮、可以是链接，脚本不必知道它在哪、长什么样 ——
-  // 之前这里动态造过一个悬浮钮，并在首页把它塞进顶栏；顶栏是拇指最难够到的位置，
-  // 而底部那条三点已经给了问答一个合适的地方。
+  // 底部胶囊那一格（以及任何带 data-ask-open 的元素）都能开合面板。
+  // 这里发布约定，脚本不必知道入口在哪、长什么样。
   //
-  // The home page's entry now lives in the template. This script only publishes the contract:
-  // any element carrying data-ask-open opens the panel.
+  // 开关是 toggle 而不是 open：同一个键按第二下必须收回去。只绑 open 时，
+  // 打开之后底部那一格就再没有作用 —— 实测点击前后 className 都是 ask-on ask-in。
+  //
+  // 互斥同样在这里：打开时广播 fns:panel-open，图谱与抽屉各自收到就关自己。
+  // 不共享闭包变量，因为三方分别定义在三个脚本里，共享变量意味着其中一个必须先存在。
   var openers = document.querySelectorAll('[data-ask-open]');
   Array.prototype.forEach.call(openers, function (el) {
     el.addEventListener('click', function (e) {
       e.preventDefault();
-      open();
-      el.setAttribute('aria-expanded', 'true');
+      if (OPEN) { close(); } else { open(); }
     });
   });
+  // 面板自己关掉时把 aria 同步回去（多个入口时逐个复位）。
+  function syncOpeners() {
+    Array.prototype.forEach.call(openers, function (el) {
+      el.setAttribute('aria-expanded', OPEN ? 'true' : 'false');
+    });
+  }
 
   // ── Open / close ───────────────────────────────────────────────────────────
   function open() {
@@ -121,7 +138,10 @@ const blogAskScript = `
     backdrop.hidden = false;
     panel.hidden = false;
     fab.setAttribute('aria-expanded', 'true');
+    syncOpeners();
     host.classList.add('ask-on');
+    // 告诉图谱与抽屉：我开了。它们各自收自己，不需要知道我是谁。
+    broadcastOpen('ask');
     bindViewport();
     syncViewport();
     // Two frames so the element is laid out before the transition starts.
@@ -147,7 +167,7 @@ const blogAskScript = `
       unbindViewport();
       panel.hidden = true; backdrop.hidden = true; host.classList.remove('ask-on');
       // 外部入口的展开态也要收回去，否则读屏软件会一直认为面板还开着。
-      Array.prototype.forEach.call(openers, function (el) { el.setAttribute('aria-expanded', 'false'); });
+      syncOpeners();
       panel.removeEventListener('transitionend', done);
     };
     if (reduce) { done(); return; }
@@ -157,6 +177,13 @@ const blogAskScript = `
   fab.addEventListener('click', function () { OPEN ? close() : open(); });
   closeBtn.addEventListener('click', close);
   backdrop.addEventListener('click', close);
+  // 别人打开了，我收自己。延迟 0 让它排在对方那轮同步代码之后 ——
+  // 否则我在对方「已经打开但还没稳定」的中间态里执行关闭，动画会打架。
+  document.addEventListener('fns:panel-open', function (ev) {
+    var who = ev && ev.detail ? ev.detail.who : '';
+    if (who === 'ask') { return; }
+    if (OPEN) { close(); }
+  });
   document.addEventListener('keydown', function (e) {
     if (e.key === 'Escape' && OPEN) close();
   });
@@ -209,7 +236,17 @@ const blogAskScript = `
       // panel's bottom edge sitting behind the keyboard.
       var visH = viewport ? viewport.height : window.innerHeight;
       var visT = viewport ? viewport.offsetTop : 0;
-      var h = Math.min(visH, window.innerHeight);
+      // 底部要给常驻胶囊留出一条：它压在面板之上（z-index 61），
+      // 面板若铺到屏幕底，输入框就落在胶囊后面 —— 实测 elementFromPoint 在胶囊中心
+      // 取到的是 ask-field。这个值必须与 CSS 里 body .dock 的底边距 + 高度一致，
+      // 所以从胶囊自身量出来，而不是再抄一个常数。
+      var dockEl = document.getElementById('fns-dock');
+      var gap = 0;
+      if (dockEl) {
+        var dr = dockEl.getBoundingClientRect();
+        gap = Math.max(0, Math.round(window.innerHeight - dr.top + 10));
+      }
+      var h = Math.min(visH, window.innerHeight) - gap;
       panel.style.top = Math.max(0, Math.round(visT)) + 'px';
       panel.style.height = Math.round(h) + 'px';
       panel.style.bottom = 'auto';

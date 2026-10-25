@@ -568,6 +568,10 @@ var blogHomeTmpl = template.Must(template.New("blog-home").Parse(`<!DOCTYPE html
       scrim.hidden = true;
     }
     open = name;
+    // 告诉问答与图谱：我开了。它们各自收自己，不需要知道我是谁。
+    if (name) {
+      try { document.dispatchEvent(new CustomEvent('fns:panel-open', { detail: { who: 'drawer' } })); } catch (e) {}
+    }
     ['hot', 'nav', 'live'].forEach(function (k) {
       var b = document.getElementById('dock-' + k);
       if (b) { b.setAttribute('aria-expanded', name === k ? 'true' : 'false'); }
@@ -611,6 +615,12 @@ var blogHomeTmpl = template.Must(template.New("blog-home").Parse(`<!DOCTYPE html
   }
   bind('dock-walk', 2, walk);
 
+  // 别人打开了，我收自己。
+  document.addEventListener('fns:panel-open', function (ev) {
+    var who = ev && ev.detail ? ev.detail.who : '';
+    if (who === 'drawer') { return; }
+    if (open) { setDrawer(null); }
+  });
   if (scrim) { scrim.addEventListener('click', function () { setDrawer(null); }); }
   var panel = document.querySelector('.layout-home .aside');
   if (panel) {
@@ -975,6 +985,10 @@ var blogPostTmpl = template.Must(template.New("blog-post").Parse(`<!DOCTYPE html
       // 抽屉打开时锁住身后页面。否则在遮罩上滑动会滚动下面的正文，
       // 看起来像抽屉在滑，而不是页面停在原地。
       b.style.overflow = mode ? 'hidden' : '';
+      // 告诉问答与图谱：我开了。
+      if (mode) {
+        try { document.dispatchEvent(new CustomEvent('fns:panel-open', { detail: { who: 'drawer' } })); } catch (e) {}
+      }
     }
     function slide(i) { dock.style.setProperty('--slot', i); }
     function hum(ms) { if (navigator.vibrate) { try { navigator.vibrate(ms); } catch (e) {} } }
@@ -1009,6 +1023,12 @@ var blogPostTmpl = template.Must(template.New("blog-post").Parse(`<!DOCTYPE html
     tabToc.addEventListener('click', function () {
       set(b.classList.contains(TOC) ? null : TOC);
     });
+  // 别人打开了，我收自己。
+  document.addEventListener('fns:panel-open', function (ev) {
+    var who = ev && ev.detail ? ev.detail.who : '';
+    if (who === 'drawer') { return; }
+    if (b.classList.contains('drawer-toc') || b.classList.contains('drawer-nav')) { set(null); }
+  });
     scrim.addEventListener('click', function () { set(null); });
     document.addEventListener('keydown', function (e) {
       if (e.key === 'Escape') set(null);
@@ -1288,11 +1308,21 @@ var blogPageTmpl = template.Must(template.New("blog-page").Parse(`<!DOCTYPE html
       // 抽屉打开时锁住身后的页面。否则在遮罩上滑动会滚动下面的正文,
       // 看起来像抽屉在滑,而不是页面停在原地。
       b.style.overflow = open ? 'hidden' : '';
+      // 告诉问答与图谱：我开了。
+      if (open) {
+        try { document.dispatchEvent(new CustomEvent('fns:panel-open', { detail: { who: 'drawer' } })); } catch (e) {}
+      }
     }
 
     tabToc.addEventListener('click', function () {
       set(!b.classList.contains(TOC));
     });
+  // 别人打开了，我收自己。
+  document.addEventListener('fns:panel-open', function (ev) {
+    var who = ev && ev.detail ? ev.detail.who : '';
+    if (who === 'drawer') { return; }
+    if (b.classList.contains('drawer-toc') || b.classList.contains('drawer-nav')) { set(null); }
+  });
     scrim.addEventListener('click', function () { set(null); });
 
     // Escape closes. A drawer that covers the page and ignores the keyboard is a trap.

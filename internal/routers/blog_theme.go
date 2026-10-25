@@ -1437,6 +1437,25 @@ html.ask-inline .ask-fab{display:none}
     transition:opacity .34s ease,transform .44s cubic-bezier(.22,1,.36,1),
       height .2s ease,bottom .2s ease;
   }
+  /* 胶囊是收起面板的唯一常驻入口，所以它必须始终在面板之上，并且不被面板盖住。
+     抬到 61：面板 60、它的遮罩 59、抽屉 58、书签 59 —— 胶囊要压过这一切。
+     同时面板底边让出胶囊的高度（60px + 1.05rem 底边距 ≈ 77px），
+     否则输入框会落在胶囊后面：实测 elementFromPoint 在胶囊中心取到的是 ask-field。 */
+  body .dock{z-index:61}
+  body.is-home .ask-panel,
+  body.is-post .ask-panel,
+  body.is-page .ask-panel{
+    bottom:calc(4.6rem + env(safe-area-inset-bottom,0px));
+    height:min(88vh,calc(100dvh - 4.6rem - env(safe-area-inset-bottom,0px)));
+    border-radius:1.25rem;
+  }
+  /* 遮罩不能盖住胶囊，否则「点遮罩关闭」会吃掉对胶囊的点击。
+     用 clip-path 把底部一条挖掉，而不是改 z-index —— 遮罩必须继续压住正文。 */
+  body.is-home .ask-backdrop,
+  body.is-post .ask-backdrop,
+  body.is-page .ask-backdrop{
+    clip-path:inset(0 0 calc(4.6rem + env(safe-area-inset-bottom,0px)) 0);
+  }
   .ask-body{padding:.85rem}
   .ask-form{padding-bottom:calc(.55rem + env(safe-area-inset-bottom,0px))}
   .ask-backdrop{background:color-mix(in srgb,var(--foreground) 30%,transparent)}
@@ -1959,9 +1978,11 @@ html.fns-arrived .shell{animation:fns-arrive-fade .62s cubic-bezier(.22,1,.36,1)
   /* ── 正文占满全宽,顶部留出操作区 ───────────────────────────────── */
   body.is-post .layout,body.is-page .layout{
     grid-template-columns:minmax(0,1fr);
-    /* 顶栏已经不在了,但操作区的两个按钮仍在顶部:给它们让出一条高度,
-       否则正文第一行会被压在按钮下面。 */
-    padding:calc(3.5rem + env(safe-area-inset-top,0px)) .9rem 3rem;
+    /* 顶部只留一点呼吸，不再给悬浮钮让位。
+       3.5rem 是「顶部有两个圆形按钮」时期的通行费；钮搬进底部胶囊之后，
+       这 56px 从顶到底全是空的（实测 layoutPadTop=56、标题也从 56 开始）。
+       1.5rem 够放下标题与屏幕边缘的间距，安全区照旧。 */
+    padding:calc(1.5rem + env(safe-area-inset-top,0px)) .9rem 3rem;
   }
 
   /* ── 顶部操作区:左图谱、右问答,透明 ───────────────────────────── */
