@@ -2405,19 +2405,20 @@ body.is-reader{overflow:hidden}
 }
 @keyframes reader-hint-in{from{opacity:0;transform:translate(-50%,6px)}to{opacity:1;transform:translate(-50%,0)}}
 
-/* 微信内置浏览器（以及一切移动内核）：面板底边贴住键盘顶边，输入框就在键盘正上方。
-   这就是豆包/微信自己的聊天窗那种形态 —— 消息区从顶部铺到键盘顶，输入框压在最下面。
+/* 微信里没有「半高浮层」这个状态 —— 点开就是整块对话窗，和豆包一样。
 
-   具体怎么做到的：不靠 CSS 猜，靠 visualViewport ——
-   键盘弹起时它变小，top 与 height 就按它写内联样式（见 blog_ask_assets.go 的
-   syncViewport）。这条逻辑本来就是对的，微信里也走这条路。
+   注意这一条对**所有**微信都生效，包括 Windows 微信的网页窗口：
+   那里没有软键盘，面板就该老实铺满一屏，不该留一条背景。
+   高度用 calc(100% - 4.6rem) 明确算出来，而不是 top+bottom+height:auto 让浏览器求解 ——
+   后者在包含块不确定时会算出比预期小一截的高度，表现就是「面板悬在半空」。
+   4.6rem 是底部胶囊占位，面板底边正好停在它上方。
 
-   下面这些规则只在 **JS 没跑 / 读到无效值时** 生效，是兜底，不是主力：
-   兜底态贴顶定高，至少输入框不会被键盘盖住。
-   注意绝不能给 min-height —— 它会压过 JS 写的内联 height，把面板底边顶到键盘下面去。 */
+   有软键盘时由 JS 接管并覆盖这三个属性（见 blog_ask_assets.go 的 syncViewport）。
+   注意不能写 min-height：它会压过 JS 写的内联 height，把底边顶到键盘下面去。 */
 html.is-wx .ask-panel{
-  top:0;bottom:auto;
-  height:56vh;
+  top:0;
+  bottom:auto;
+  height:calc(100% - 4.6rem);
   min-height:0;
   max-height:none;
 }

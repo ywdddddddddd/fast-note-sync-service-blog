@@ -209,18 +209,30 @@ function broadcastOpen(who) {
   var viewportRaf = 0;
   var narrowQuery = window.matchMedia ? window.matchMedia('(max-width:860px)') : null;
 
-  // 关键的基准：**没有键盘时**的布局视口高度。
+  // 「键盘弹起」的判据：每个信号各自相对**自己的初始值**下降了多少。
   //
-  // 需要的判据是「键盘吃掉多少屏」，而不同内核给出的信号不一样：
-  //   iOS WKWebView（含微信）：innerHeight 不变，只有 visualViewport.height 变小；
-  //   Android X5：两者一起变小（innerHeight 自己就缩了）。
-  // 所以不能拿 innerHeight 和 visH 相减 —— 在 Android 上那是 0，接管永远不触发。
-  // 只能拿「当前可视高度」和「曾经见过的最大 innerHeight」相减：
-  // 键盘只会让可视区变小，所以基准只增不减，键盘弹起期间不会被自己污染。
-  var BASE_H = window.innerHeight || 0;
-  function noteBaseHeight() {
+  // 这是这一块最容易写错的地方，两种错法都踩过：
+  //
+  //   错法一：拿 innerHeight 和 visualViewport.height 相减。
+  //     Android X5 上两者一起变小，差值恒为 0，接管永不触发。
+  //
+  //   错法二：拿当前可视高度和「曾经见过的最大 innerHeight」相减。
+  //     Windows 微信的网页窗口里 innerHeight=1108 而 visualViewport.height=560，
+  //     这个几百像素的差是**静态的**（窗口结构），跟键盘无关，
+  //     于是被当成「键盘吃了 548px」，面板按一个虚构的可视高度被推到半空。
+  //
+  // 正确做法是各比各的：键盘弹起只会让某个信号比它刚加载时更小。
+  //   iOS：visualViewport 下降 300 多，innerHeight 不动；
+  //   Android：两者都下降；
+  //   Windows 微信：两者都不下降（那 548 的差是常量）→ 干净地不接管。
+  // 取两个下降量的较大值，任一侧能反映键盘就够了。
+  var BASE_IH = window.innerHeight || 0;
+  var BASE_VV = viewport && viewport.height > 0 ? viewport.height : BASE_IH;
+  function noteBaseHeights() {
     var ih = window.innerHeight || 0;
-    if (ih > BASE_H) BASE_H = ih;
+    if (ih > BASE_IH) BASE_IH = ih;
+    var vh = viewport && viewport.height > 0 ? viewport.height : 0;
+    if (vh > BASE_VV) BASE_VV = vh;
   }
 
   function clearPanelGeometry() {
@@ -253,13 +265,13 @@ function broadcastOpen(who) {
     viewportRaf = requestAnimationFrame(function () {
       viewportRaf = 0;
       if (!OPEN) return;
-      // 桌面端永不接管：桌面没有软键盘，CSS 那份定位就够了。
+      // 桌面宽屏永不接管：那里没有软键盘，CSS 那份定位就够了。
       if (narrowQuery && !narrowQuery.matches) { clearPanelGeometry(); return; }
 
       // 当前真正看得见的高度：取两者较小值。
       // 键盘升降过程中 visualViewport 与 innerHeight 会短暂不同步，
       // 用较大的那个就会把面板底部撑到键盘下面去。
-      noteBaseHeight();
+      noteBaseHeights();
       var visH = viewport ? viewport.height : window.innerHeight;
       var visT = viewport ? viewport.offsetTop : 0;
       // 有效性守卫：页面刚加载、面板刚插入时 visualViewport.height 可能还是 0 或 undefined。
@@ -268,9 +280,13 @@ function broadcastOpen(who) {
       if (!(visH > 200)) { clearPanelGeometry(); return; }
       var h = Math.min(visH, window.innerHeight);
 
-      // 键盘吃掉的高度。60px 以下不算键盘：地址栏/工具栏收缩也会让这些数字抖几十像素，
-      // 为那点抖动接管几何会让面板无缘无故跳一下。
-      if (!(BASE_H - h >= 60)) { clearPanelGeometry(); return; }
+      // 键盘吃掉的高度，按各信号相对自己初始值的下降量取最大。
+      // 阈值 150：iOS/Android 的软键盘都会吃掉 250px 以上，而地址栏、工具栏的
+      // 收缩在 120px 以内 —— 用 150 把两者分开，避免浏览地址栏就把面板跳一下。
+      var dropIH = BASE_IH - (window.innerHeight || 0);
+      var dropVV = BASE_VV - visH;
+      var kb = Math.max(dropIH, dropVV);
+      if (!(kb >= 150)) { clearPanelGeometry(); return; }
 
       // 键盘弹起时胶囊（position:fixed，不跟随键盘）也被盖在键盘后面了，
       // 所以这里不再给它让位 —— 让了就是在输入框和键盘之间凭空塞一条空白。
@@ -302,11 +318,12 @@ function broadcastOpen(who) {
     if (pollTimer) { clearInterval(pollTimer); pollTimer = 0; }
   }
 
-  // 横竖屏切换后基准整个失效（844 → 390 会被当成「键盘吃掉了 454」），
+  // 横竖屏切换后两个基准都失效（844 → 390 会被当成「键盘吃掉了 454」），
   // 必须重取。等一拍再取，内核这会儿还在改尺寸。
   function onOrientation() {
     setTimeout(function () {
-      BASE_H = window.innerHeight || 0;
+      BASE_IH = window.innerHeight || 0;
+      BASE_VV = viewport && viewport.height > 0 ? viewport.height : BASE_IH;
       syncViewport();
     }, 260);
   }

@@ -5,10 +5,25 @@ import (
 	"html/template"
 	"math"
 	"regexp"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/haierkeys/fast-note-sync-service/internal/dto"
 )
+
+// 静态脚本的版本号：进程启动时刻，36 进制。
+//
+// 为什么必须让 URL 变化：/blog/ask.js 与 /blog/lightbox.js 走的是「no-cache + 无验证器」，
+// 按规范浏览器每次都要重新请求，但微信的 webview（以及部分代理）并不总遵守这一点，
+// 部署之后客户端仍在跑旧脚本 —— 表现就是「明明改好了，页面上一点变化都没有」。
+// URL 一变，任何缓存层都绕不过去。代价只是每次重启多发一个 query。
+var blogAssetVer = strconv.FormatInt(time.Now().Unix(), 36)
+
+// blogAssetFuncs 供模板把版本号拼进 src 属性。
+var blogAssetFuncs = template.FuncMap{
+	"assetVer": func() string { return blogAssetVer },
+}
 
 // Blog templates. Everything is rendered on the server, so the pages work with JavaScript
 // disabled and are indexable — the opposite trade-off from the native share page, which is a
@@ -328,7 +343,7 @@ const blogNavPartial = `
 })();
 </script>`
 
-var blogHomeTmpl = template.Must(template.New("blog-home").Parse(`<!DOCTYPE html>
+var blogHomeTmpl = template.Must(template.New("blog-home").Funcs(blogAssetFuncs).Parse(`<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
@@ -677,14 +692,14 @@ var blogHomeTmpl = template.Must(template.New("blog-home").Parse(`<!DOCTYPE html
 </script>
 {{if .AskEnabled}}
 <div id="ask-root"></div>
-<script src="/blog/ask.js" defer></script>
+<script src="/blog/ask.js?v={{assetVer}}" defer></script>
 {{end}}
-<script src="/blog/lightbox.js" defer></script>
+<script src="/blog/lightbox.js?v={{assetVer}}" defer></script>
 </body>
 </html>
 {{define "nav"}}` + blogNavPartial + `{{end}}` + blogNavTree + blogTopNav))
 
-var blogPostTmpl = template.Must(template.New("blog-post").Parse(`<!DOCTYPE html>
+var blogPostTmpl = template.Must(template.New("blog-post").Funcs(blogAssetFuncs).Parse(`<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
@@ -898,9 +913,9 @@ var blogPostTmpl = template.Must(template.New("blog-post").Parse(`<!DOCTYPE html
 </script>
 {{if .AskEnabled}}
 <div id="ask-root"></div>
-<script src="/blog/ask.js" defer></script>
+<script src="/blog/ask.js?v={{assetVer}}" defer></script>
 {{end}}
-<script src="/blog/lightbox.js" defer></script>
+<script src="/blog/lightbox.js?v={{assetVer}}" defer></script>
 
   <!-- Mobile edge tabs and their drawers.
        Only rendered on reading pages: the home page has no in-page outline, and its side columns
@@ -1111,7 +1126,7 @@ type blogPageView struct {
 //  1. 不调用 "nav" 模板，因此没有目录树，宽度归中栏。目录树是通往文章的入口，
 //     而页面是读者专程来读一件事的地方。
 //  2. 中栏带 .layout-page，打印样式表以此为据去掉页面家具、把内容按文档排版。
-var blogPageTmpl = template.Must(template.New("blog-page").Parse(`<!DOCTYPE html>
+var blogPageTmpl = template.Must(template.New("blog-page").Funcs(blogAssetFuncs).Parse(`<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
@@ -1209,9 +1224,9 @@ var blogPageTmpl = template.Must(template.New("blog-page").Parse(`<!DOCTYPE html
 </script>{{end}}
 {{if .AskEnabled}}
 <div id="ask-root"></div>
-<script src="/blog/ask.js" defer></script>
+<script src="/blog/ask.js?v={{assetVer}}" defer></script>
 {{end}}
-<script src="/blog/lightbox.js" defer></script>
+<script src="/blog/lightbox.js?v={{assetVer}}" defer></script>
 
   <!-- Mobile edge tabs and their drawers.
        Only rendered on reading pages: the home page has no in-page outline, and its side columns
@@ -1367,7 +1382,7 @@ type blogErrorView struct {
 //
 // blogErrorTmpl 渲染公共错误页。骨架与首页、文章页模板相同（点阵背景 / 顶栏 / 页脚，
 // 同一套设计令牌），使失效链接落在一个仍然像本站的页面上，而不是一行裸文本。
-var blogErrorTmpl = template.Must(template.New("blog-error").Parse(`<!DOCTYPE html>
+var blogErrorTmpl = template.Must(template.New("blog-error").Funcs(blogAssetFuncs).Parse(`<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
