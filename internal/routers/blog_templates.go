@@ -556,9 +556,18 @@ var blogHomeTmpl = template.Must(template.New("blog-home").Funcs(blogAssetFuncs)
   (function () {
     var ref = document.referrer || '';
     var sameSite = ref && ref.indexOf(location.protocol + '//' + location.host) === 0;
-    var samePage = ref.indexOf(location.pathname) !== -1;
+    /* 必须比 pathname 全等，不能用子串包含：
+       从 /blog/about 回 /blog 时，referrer 里同样含 "/blog"，
+       子串判断会把这次真实跨页当成"同页刷新"，整段动画不播。
+       （/blog 是 /blog/about 的前缀，任何这种前缀关系都会误判。） */
+    var samePage = false;
+    try { samePage = new URL(ref).pathname === location.pathname; } catch (e) { samePage = false; }
     var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     if (!sameSite || samePage || reduce) { return; }
+    /* 先量出自然宽度，再交给动画当终点。
+       量的时候 --dock-w 还没写，.dock 的宽度是 auto，量到的就是真实值；
+       先写再量会把宽度锁成上一次的值。 */
+    dock.style.setProperty('--dock-w', dock.offsetWidth + 'px');
     dock.classList.add('is-in');
     setTimeout(function () { dock.classList.remove('is-in'); }, 900);
   })();
@@ -1020,9 +1029,18 @@ var blogPostTmpl = template.Must(template.New("blog-post").Funcs(blogAssetFuncs)
     (function () {
       var ref = document.referrer || '';
       var sameSite = ref && ref.indexOf(location.protocol + '//' + location.host) === 0;
-      var samePage = ref.indexOf(location.pathname) !== -1;
+      /* 必须比 pathname 全等，不能用子串包含：
+       从 /blog/about 回 /blog 时，referrer 里同样含 "/blog"，
+       子串判断会把这次真实跨页当成"同页刷新"，整段动画不播。
+       （/blog 是 /blog/about 的前缀，任何这种前缀关系都会误判。） */
+    var samePage = false;
+    try { samePage = new URL(ref).pathname === location.pathname; } catch (e) { samePage = false; }
       var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
       if (!sameSite || samePage || reduce) { return; }
+      /* 先量出自然宽度，再交给动画当终点。
+         量的时候 --dock-w 还没写，.dock 的宽度是 auto，量到的就是真实值；
+         先写再量会把宽度锁成上一次的值。 */
+      dock.style.setProperty('--dock-w', dock.offsetWidth + 'px');
       dock.classList.add('is-in');
       setTimeout(function () { dock.classList.remove('is-in'); }, 900);
     })();
@@ -1321,9 +1339,18 @@ var blogPageTmpl = template.Must(template.New("blog-page").Funcs(blogAssetFuncs)
     (function () {
       var ref = document.referrer || '';
       var sameSite = ref && ref.indexOf(location.protocol + '//' + location.host) === 0;
-      var samePage = ref.indexOf(location.pathname) !== -1;
+      /* 必须比 pathname 全等，不能用子串包含：
+       从 /blog/about 回 /blog 时，referrer 里同样含 "/blog"，
+       子串判断会把这次真实跨页当成"同页刷新"，整段动画不播。
+       （/blog 是 /blog/about 的前缀，任何这种前缀关系都会误判。） */
+    var samePage = false;
+    try { samePage = new URL(ref).pathname === location.pathname; } catch (e) { samePage = false; }
       var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
       if (!sameSite || samePage || reduce) { return; }
+      /* 先量出自然宽度，再交给动画当终点。
+         量的时候 --dock-w 还没写，.dock 的宽度是 auto，量到的就是真实值；
+         先写再量会把宽度锁成上一次的值。 */
+      dock.style.setProperty('--dock-w', dock.offsetWidth + 'px');
       dock.classList.add('is-in');
       setTimeout(function () { dock.classList.remove('is-in'); }, 900);
     })();

@@ -651,6 +651,8 @@ svg:not(.graph-svg) .g-node:hover text{opacity:1}
   .dock-b{
     position:relative;z-index:1;
     display:inline-flex;align-items:center;justify-content:center;
+    /* 不参与压缩：容器变窄时图标应被裁掉，而不是被挤扁。 */
+    flex:0 0 auto;
     width:var(--slot-w);height:var(--slot-w);padding:0;
     border:0;border-radius:50%;background:transparent;
     color:var(--foreground);cursor:pointer;opacity:.58;
@@ -675,6 +677,7 @@ svg:not(.graph-svg) .g-node:hover text{opacity:1}
   .dock-thumb.is-live{
     box-shadow:0 0 0 0 color-mix(in srgb,var(--primary) 40%,transparent);
     animation:dockRipple 1s cubic-bezier(.22,1,.36,1) 2;
+  }
   .dock-thumb.is-live::before,
   .dock-thumb.is-live::after{
     content:"";position:absolute;inset:0;border-radius:inherit;
@@ -699,20 +702,32 @@ svg:not(.graph-svg) .g-node:hover text{opacity:1}
      滑块从最左弹到自己的槽位，键在它经过时依次亮起，视线跟着走一遍就记住了新顺序。
      所以延迟按 data-i 递增（路径顺序），而不是按距离乱序 —— 前者可预期，后者像随机闪。
      动画结束由脚本把 class 摘掉，否则 both 会把 opacity 锁死，hover 就亮不起来。 */
-  .dock.is-in .dock-b{animation:dockIn .42s cubic-bezier(.22,1,.36,1) both}
-  .dock.is-in .dock-b[data-i="1"]{animation-delay:45ms}
-  .dock.is-in .dock-b[data-i="2"]{animation-delay:90ms}
-  .dock.is-in .dock-b[data-i="3"]{animation-delay:135ms}
-  .dock.is-in .dock-b[data-i="4"]{animation-delay:180ms}
-  .dock.is-in .dock-thumb{animation:thumbIn .55s cubic-bezier(.34,1.4,.44,1) both}
-  @keyframes dockIn{
-    from{opacity:0;transform:translateY(8px) scale(.8)}
-    to{opacity:.58;transform:none}
+  /* 跨页时胶囊先收成一枚圆，再展开成完整的条 —— 与 loading-247 同一个意思：
+     宽度从 1 个槽位变到全长，圆角始终是 999px。
+     --dock-w 由脚本测量后写入；写死任何一个宽度都不行，因为三个页面的槽位数不同
+     （首页/阅读页 5 格、页面笔记 3 格），终点必须跟着实际槽位数走。
+
+     溢出裁切只在动画期间打开：常开会把选中波纹（扩散 14px）一起切掉。 */
+  .dock.is-in{
+    overflow:hidden;
+    animation:dockMorph .66s cubic-bezier(.22,1,.36,1) both;
   }
-  @keyframes thumbIn{
-    0%{opacity:0;transform:translateX(0) scale(.35)}
-    60%{opacity:1}
-    100%{opacity:1;transform:translateX(calc(var(--slot) * var(--slot-w))) scale(1)}
+  .dock.is-in .dock-b{animation:dockIn .34s ease both}
+  .dock.is-in .dock-b[data-i="1"]{animation-delay:40ms}
+  .dock.is-in .dock-b[data-i="2"]{animation-delay:80ms}
+  .dock.is-in .dock-b[data-i="3"]{animation-delay:120ms}
+  .dock.is-in .dock-b[data-i="4"]{animation-delay:160ms}
+
+  @keyframes dockMorph{
+    0%{width:calc(var(--slot-w) + 10px)}
+    58%{width:calc(var(--dock-w, 202px) * 1.04)}
+    100%{width:var(--dock-w, 202px)}
+  }
+  /* 只淡入，不带位移与缩放：图标由容器「展开」这个动作带出来，
+     再各自上浮一次会变成两套动作打架。 */
+  @keyframes dockIn{
+    from{opacity:0}
+    to{opacity:.58}
   }
 
   /* .layout-home 自己只有 z-index:1，而顶栏是 30 —— 抽屉的 58 只在那块层叠上下文里有效，
