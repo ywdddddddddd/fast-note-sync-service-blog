@@ -613,8 +613,9 @@ svg:not(.graph-svg) .g-node:hover text{opacity:1}
   /* 位置贴底居中，留一个安全区的距离。
      形态：一条药丸容器 + 一个滑块。滑块就是「五段式开关」里那块东西 ——
      它停在哪，说明刚才动了哪一格；位置本身是反馈，不需要再给选中项加一套样式。
-     静止时图标 .46，指到或按下转为完全不透明并轻微放大。
-     尺寸：按钮 34px、图标 20px，五个键挤在 390px 宽里仍然留得下。 */
+     静止时图标 .58，指到或按下转为完全不透明并轻微放大。
+     尺寸：按钮 38px、图标 21px。比 34/20 大一档 —— 34px 在 390 宽里放得下，
+     但相邻两键的命中区正好贴在一起，手指点在缝上会点错；38 之后每个键有 3px 余量。 */
   .dock{
     position:fixed;left:50%;transform:translateX(-50%);
     bottom:calc(1.05rem + env(safe-area-inset-bottom,0px));
@@ -636,7 +637,7 @@ svg:not(.graph-svg) .g-node:hover text{opacity:1}
        用变量而不是给每个键各写一条 transform：键的数量还会变（文章页那套与首页不同），
        而滑块永远只有一块。 */
     --slot:0;
-    --slot-w:34px;
+    --slot-w:38px;
   }
   .dock-thumb{
     position:absolute;top:5px;left:5px;
@@ -652,35 +653,62 @@ svg:not(.graph-svg) .g-node:hover text{opacity:1}
     display:inline-flex;align-items:center;justify-content:center;
     width:var(--slot-w);height:var(--slot-w);padding:0;
     border:0;border-radius:50%;background:transparent;
-    color:var(--foreground);cursor:pointer;opacity:.55;
+    color:var(--foreground);cursor:pointer;opacity:.58;
     -webkit-appearance:none;appearance:none;
     transition:opacity .2s ease,transform .26s cubic-bezier(.22,1,.36,1);
   }
-  .dock-b svg{width:20px;height:20px;display:block}
+  .dock-b svg{width:21px;height:21px;display:block}
   .dock-b:hover,.dock-b:focus-visible{opacity:.9;transform:scale(1.06)}
   .dock-b:active{opacity:1;transform:scale(.94)}
   .dock-b:focus-visible{outline:2px solid var(--primary);outline-offset:2px}
   /* 某一格正处于打开状态时，它的图标与滑块同为全亮。 */
   .dock-b[aria-expanded="true"]{opacity:1}
 
+  /* 滑块同时是「球」：图标底下那一圈圈荡开的波纹，就是 loading-42 那段。
+     只动 box-shadow，不碰 transform —— 滑块的 transform 正在负责槽位位移，
+     动画若也写 transform 会把它整个覆盖掉，滑块就再也不动了。
+     波纹只在某个键真正起作用时才启（脚本加 .is-live）：
+     常驻波纹等于整条胶囊一直在动，反而看不出哪一格是新的。 */
+  .dock-thumb.is-live{
+    box-shadow:0 0 0 0 color-mix(in srgb,var(--primary) 40%,transparent);
+    animation:dockRipple 1.9s cubic-bezier(.22,1,.36,1) infinite;
+  }
+  .dock-thumb.is-live::before,
+  .dock-thumb.is-live::after{
+    content:"";position:absolute;inset:0;border-radius:inherit;
+    box-shadow:0 0 0 0 color-mix(in srgb,var(--primary) 40%,transparent);
+    animation:dockRipple 1.9s cubic-bezier(.22,1,.36,1) infinite;
+  }
+  .dock-thumb.is-live::before{animation-delay:-.63s}
+  .dock-thumb.is-live::after{animation-delay:-1.27s}
+  @keyframes dockRipple{
+    0%{box-shadow:0 0 0 0 color-mix(in srgb,var(--primary) 40%,transparent)}
+    72%{box-shadow:0 0 0 24px transparent}
+    100%{box-shadow:0 0 0 0 transparent}
+  }
+
   /* 跨页进来时，胶囊把自己重组一次。
      三个页面共用两个锚点位置的键（漫游在正中、问道在最右），但中间两格换人；
      没有这一下的话，读者会觉得"底部那条东西被换掉了"而不是"换了两格"。
-     逐格错开 50ms 落位 —— 顺序是看出来的，不是猜出来的。
-     动画结束由脚本把 class 摘掉，否则 both 会把 opacity 锁死在 .55，hover 就亮不起来。 */
-  .dock.is-in .dock-b{animation:dockIn .34s cubic-bezier(.22,1,.36,1) both}
-  .dock.is-in .dock-b[data-i="1"]{animation-delay:50ms}
-  .dock.is-in .dock-b[data-i="2"]{animation-delay:100ms}
-  .dock.is-in .dock-b[data-i="3"]{animation-delay:150ms}
-  .dock.is-in .dock-b[data-i="4"]{animation-delay:200ms}
-  .dock.is-in .dock-thumb{animation:thumbIn .42s cubic-bezier(.34,1.4,.44,1) both}
+
+     顺序变化用「滑块带路」而不是「逐格淡入」：
+     滑块从最左弹到自己的槽位，键在它经过时依次亮起，视线跟着走一遍就记住了新顺序。
+     所以延迟按 data-i 递增（路径顺序），而不是按距离乱序 —— 前者可预期，后者像随机闪。
+     动画结束由脚本把 class 摘掉，否则 both 会把 opacity 锁死，hover 就亮不起来。 */
+  .dock.is-in .dock-b{animation:dockIn .42s cubic-bezier(.22,1,.36,1) both}
+  .dock.is-in .dock-b[data-i="1"]{animation-delay:45ms}
+  .dock.is-in .dock-b[data-i="2"]{animation-delay:90ms}
+  .dock.is-in .dock-b[data-i="3"]{animation-delay:135ms}
+  .dock.is-in .dock-b[data-i="4"]{animation-delay:180ms}
+  .dock.is-in .dock-thumb{animation:thumbIn .55s cubic-bezier(.34,1.4,.44,1) both}
   @keyframes dockIn{
-    from{opacity:0;transform:translateY(6px) scale(.9)}
-    to{opacity:.55;transform:none}
+    from{opacity:0;transform:translateY(8px) scale(.8)}
+    to{opacity:.58;transform:none}
   }
   @keyframes thumbIn{
-    from{opacity:0;transform:translateX(calc(var(--slot) * var(--slot-w))) scale(.6)}
-    to{opacity:1;transform:translateX(calc(var(--slot) * var(--slot-w))) scale(1)}
+    0%{opacity:0;transform:translateX(0) scale(.35)}
+    60%{opacity:1}
+    100%{opacity:1;transform:translateX(calc(var(--slot) * var(--slot-w))) scale(1)}
   }
 
   /* .layout-home 自己只有 z-index:1，而顶栏是 30 —— 抽屉的 58 只在那块层叠上下文里有效，
@@ -1218,11 +1246,13 @@ html.ask-inline .ask-fab{display:none}
   font-size:.9375rem;line-height:1.6;word-break:break-word}
 .ask-bubble{max-width:100%}
 .ask-answer{font-size:.9375rem;line-height:1.8;color:color-mix(in srgb,var(--foreground) 92%,transparent)}
-/* 回答按短语分块落定：每块播放一次短促的上浮淡入，像琴键依次按下。
-   正在接收的尾块不播动画，否则每个 delta 都会把它抖一下。 */
-.ask-blk{animation:ask-blk-in .58s cubic-bezier(.22,1,.36,1) backwards}
-.ask-blk-live{animation:none;opacity:1}
-@keyframes ask-blk-in{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+/* 回答是真流式追加，所以块**没有入场动画**。
+   上一版每块播一次上浮淡入，配合「按短语切块」的伪流式，看起来像一段段被塞进来；
+   换成 append-only 之后动画就成了噪音：文字本来就该在最末端自然长出来。
+   尾块（.ask-blk-live）与普通块样式一致 —— 它只是"还没闭合、不解析 markdown"的标记，
+   不应在视觉上与已提交部分有差别，否则读者会看到一处明暗分界在不停移动。 */
+.ask-blk{display:inline}
+.ask-blk-live{display:inline}
 .ask-answer p{margin:.4rem 0}
 .ask-answer ul,.ask-answer ol{margin:.4rem 0;padding-left:1.25rem}
 .ask-answer li{margin:.22rem 0}
@@ -1237,8 +1267,15 @@ html.ask-inline .ask-fab{display:none}
 /* 检索过程的可视化。节奏刻意放缓：原来图标持续旋转、底部还有一条来回扫的光带，
    两者叠加让每一步都像被硬切进来。现在改为静态图标 + 逐行柔和淡入。 */
 .ask-trace{border:1px solid var(--border);border-radius:.85rem;
-  background:color-mix(in srgb,var(--muted) 22%,transparent);padding:.65rem .75rem;
-  display:flex;flex-direction:column;gap:.5rem}
+  background:color-mix(in srgb,var(--muted) 22%,transparent);padding:.42rem .6rem;
+  display:flex;flex-direction:column;gap:0}
+/* 摘要行：整个生成过程中唯一可见的一行。高度写死，不随内容多少变化 —— 零 CLS 的关键。 */
+.ask-trace-sum{
+  display:flex;align-items:center;gap:.42rem;width:100%;
+  height:1.65em;
+  padding:0;border:0;background:transparent;cursor:pointer;
+  font:inherit;font-size:.8125rem;font-weight:600;color:var(--foreground);text-align:left}
+.ask-sum-t{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .ask-steps{display:flex;flex-direction:column;gap:.32rem}
 .ask-step{display:flex;align-items:flex-start;gap:.45rem;
   font-size:.8125rem;line-height:1.65;color:var(--muted-foreground);
@@ -1254,28 +1291,23 @@ html.ask-inline .ask-fab{display:none}
 
 .ask-sources{display:flex;flex-direction:column;gap:.3rem}
 
-/* 模型的推理流（思考模型）。限高 + 底部渐隐：推理可达数千字，
-   全量铺开会把回答挤出视野；点标题可展开回看。 */
+/* 推理状态条：固定一行高，不展开、不铺内容。
+   上一版是一张装着推理全文的大卡片（限 1400 字 + 渐隐），推理结束时瞬间塌成一行，
+   正文同时上顶 —— 实测纵向跳动数十像素，正在读数的人会完全失去焦点。
+   现在它从头到尾只占一行（高度恒定 1.65em），字数只在右侧滚动更新，
+   容器高度不变，因此推理开始与结束都不产生任何布局位移。 */
 .ask-thought{
-  border:1px dashed var(--border);border-radius:.75rem;
-  padding:.5rem .6rem;background:color-mix(in srgb,var(--muted) 16%,transparent);
-  animation:ask-line-in .5s cubic-bezier(.22,1,.36,1) backwards}
-.ask-thought-h{
-  display:flex;align-items:center;gap:.4rem;width:100%;
-  border:0;background:transparent;padding:0;cursor:pointer;
-  font:inherit;font-size:.75rem;font-weight:600;color:var(--muted-foreground);text-align:left}
+  display:flex;align-items:center;gap:.4rem;
+  height:1.65em;                 /* 恒定行高 —— 这是「零 CLS」的全部秘密 */
+  padding:0 .1rem;
+  font-size:.75rem;font-weight:600;color:var(--muted-foreground);
+  animation:ask-line-in .4s cubic-bezier(.22,1,.36,1) backwards}
 .ask-thought-ico{display:inline-flex;width:.9rem;height:.9rem;flex:0 0 .9rem;color:var(--primary)}
 .ask-thought-ico svg{width:100%;height:100%}
 .ask-thought.is-done .ask-thought-ico{color:color-mix(in srgb,var(--primary) 55%,var(--c4))}
-.ask-thought-t{flex:1}
-.ask-thought-n{font-size:.6875rem;font-weight:500;color:var(--c4)}
-.ask-thought-b{
-  margin:.4rem 0 0;font-size:.75rem;line-height:1.72;
-  color:var(--muted-foreground);white-space:pre-wrap;word-break:break-word;
-  max-height:7.5rem;overflow:hidden;
-  -webkit-mask-image:linear-gradient(180deg,#000 55%,transparent);
-  mask-image:linear-gradient(180deg,#000 55%,transparent)}
-.ask-thought.is-open .ask-thought-b{max-height:none;mask-image:none;-webkit-mask-image:none}
+.ask-thought-t{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ask-thought-n{font-size:.6875rem;font-weight:500;color:var(--c4);
+  font-variant-numeric:tabular-nums;  /* 数字等宽，计数跳动时不要左右抖 */}
 /* 检索明细：默认收起的过程信息，字号刻意小于正文与引文，避免与回答争夺注意力。 */
 /* 来源清单是步骤流里的一条，不是旁支容器。 */
 .ask-src{display:flex;flex-direction:column;gap:.14rem}
@@ -1328,7 +1360,10 @@ html.ask-inline .ask-fab{display:none}
 .ask-fold{overflow:hidden;max-height:1600px;
   transition:max-height .34s cubic-bezier(.22,1,.36,1)}
 .ask-fold>.ask-sources{margin-top:.5rem}
-.ask-trace.is-min:not(.is-open) .ask-fold{max-height:0}
+/* 明细默认收起 —— 以前是"先铺开 8 行、900ms 后再折成一行"，
+   那一折就是几十到几百像素的高度变化，正文被顶上去，正在读数的人直接失焦。
+   现在从头就收起，可见区只有上面那一行摘要，全程高度不变。 */
+.ask-trace:not(.is-open) .ask-fold{max-height:0}
 
 /* 回答里的引用角标 */
 .ask-cite{
@@ -1342,7 +1377,11 @@ html.ask-inline .ask-fab{display:none}
 .ask-cite:hover{background:color-mix(in srgb,var(--primary) 26%,transparent);transform:translateY(-1px)}
 
 /* 末尾引文卡片 */
-.ask-cites{border-top:1px dashed var(--border);padding-top:.6rem;display:flex;flex-direction:column;gap:.35rem}
+.ask-cites{border-top:1px dashed var(--border);padding-top:.6rem;display:flex;flex-direction:column;gap:.35rem;
+  /* 从答案一开始就存在（内容是空的），避免生成结束后突然长出一块把上文顶走。
+     高度增长发生在读者视线下方；配合 FOLLOW 的滚动跟随，读起来是「内容向下延伸」。 */
+  min-height:0}
+.ask-cites[hidden]{display:none}
 .ask-cites-head{display:flex;align-items:center;gap:.35rem;font-size:.6875rem;font-weight:700;
   letter-spacing:.06em;text-transform:uppercase;color:var(--muted-foreground);margin-bottom:.1rem}
 .ask-cites-head svg{width:.85rem;height:.85rem}

@@ -436,6 +436,13 @@ function broadcastOpen(who) {
     el.className = 'ask-msg ask-bot';
     el.innerHTML =
       '<div class="ask-trace" hidden>' +
+        // 摘要行常驻：它显示"当前走到哪一步"，永远占一行。明细收在它下面。
+        // 这样可见高度自始至终是 1.65em，不存在折叠时的纵向跳动。
+        '<button type="button" class="ask-trace-sum" aria-expanded="false">' +
+          '<span class="ask-sum-ico" aria-hidden="true"></span>' +
+          '<span class="ask-sum-t"></span>' +
+          '<span class="ask-sum-x">明细</span>' +
+        '</button>' +
         '<div class="ask-fold">' +
           '<div class="ask-steps"></div>' +
           '<div class="ask-sources"></div>' +
@@ -504,58 +511,86 @@ function broadcastOpen(who) {
   //
   // One consistent line set: 24×24, 1.8 stroke, round caps, stroke-only. The previous mix
   // (a chain glyph next to a filled-circle face) read as two different icon families.
-  function ico(d) {
-    return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" ' +
-           'stroke-linecap="round" stroke-linejoin="round">' + d + '</svg>';
+  // 步骤图标：Primer Octicons，16 网格、fill、单色。
+  // 上一版是自绘的 24 网格线性图标，各有各的造型语言（三角脊线、实心圆眼、分叉圆点），
+  // 并排放着像几套东西拼起来的；用户反馈「太抽象，看不懂」。
+  // Octicons 是 GitHub 自己那套，形状直白、笔画干净，同一 family 里不会有风格冲突。
+  function oct(d) {
+    return '<svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">' + d + '</svg>';
   }
   var STAGE_ICON = {
-    // 问号 —— 先弄清楚问的是什么
-    question: ico('<circle cx="12" cy="12" r="9"/><path d="M9.2 9.4a2.9 2.9 0 1 1 3.9 2.7c-.7.3-1.1.9-1.1 1.6v.3"/><path d="M12 17.2v.1"/>'),
-    // 放大镜 —— 翻箱倒柜地找
-    search:   ico('<circle cx="10.5" cy="10.5" r="6.5"/><path d="m20 20-4.7-4.7"/>'),
-    // 灯泡 —— 想怎么讲
-    idea:     ico('<path d="M9 18.5h6"/><path d="M10 21.5h4"/><path d="M12 2.5a6.5 6.5 0 0 0-3.9 11.7c.5.4.9.9.9 1.5v.8h6v-.8c0-.6.4-1.1.9-1.5A6.5 6.5 0 0 0 12 2.5z"/>'),
-    // 漏斗 —— 从一堆里筛出几篇
-    funnel:   ico('<path d="M4 5h16l-6.2 7.3v6.2L10.2 20v-7.7z"/>'),
-    // 眼镜 —— 正在看这几篇
-    eye:      ico('<circle cx="6.5" cy="14.5" r="3.5"/><circle cx="17.5" cy="14.5" r="3.5"/><path d="M10 14.5h4"/><path d="M3.2 11.6 4.8 7.6"/><path d="M20.8 11.6 19.2 7.6"/>'),
-    // 铅笔 —— 开始写
-    pencil:   ico('<path d="M4 20h3.6L20 7.6a2.5 2.5 0 0 0-3.6-3.6L4 16.4z"/><path d="m14.4 5.6 4 4"/>'),
-    // 闪电 —— 由谁接手（保留原造型）
-    bolt:     ico('<path d="M13 2 3 14h7l-1 8 10-12h-7l1-8z"/>'),
-    // 分叉 —— 换一条路
-    fork:     ico('<circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="12" r="2"/><path d="M8 5h4a4 4 0 0 1 4 4v1"/><path d="M8 19h4a4 4 0 0 0 4-4v-1"/>'),
-    // 火焰 —— 正在努力烧烤
-    flame:    ico('<path d="M12 21c3.6 0 6-2.4 6-5.8 0-4.3-3.8-6.2-3.8-10.4-2.9 1.9-4.3 4.3-4.3 6.7 0-1-.7-1.9-1.4-2.9C7.3 10.1 6 12.4 5.8 15.2 5.8 18.6 8.4 21 12 21z"/>'),
-    // 眩晕 —— 被知识砸晕
-    dizzy:    ico('<circle cx="12" cy="12" r="9"/><path d="M8.6 10.2h.01"/><path d="M15.4 10.2h.01"/><path d="M8.2 15.4c1.4-1.2 2.9-1.2 4.2 0 1.3 1.2 2.8 1.2 4.2 0"/>'),
-    // 生气 —— 被拖下工作台
-    angry:    ico('<circle cx="12" cy="12" r="9"/><path d="M8.3 9.1 10 10.5"/><path d="M15.7 9.1 14 10.5"/><path d="M9.2 16.2c1.7-1.4 3.9-1.4 5.6 0"/>'),
-    // 叹号 —— 出岔子
-    alert:    ico('<circle cx="12" cy="12" r="9"/><path d="M12 7.5v5.5"/><path d="M12 16.6v.1"/>'),
-    think:    ico('<path d="M9 18.5h6"/><path d="M10 21.5h4"/><path d="M12 2.5a6.5 6.5 0 0 0-3.9 11.7c.5.4.9.9.9 1.5v.8h6v-.8c0-.6.4-1.1.9-1.5A6.5 6.5 0 0 0 12 2.5z"/>'),
-    link:     ico('<path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"/>'),
-    route:    ico('<path d="M13 2 3 14h7l-1 8 10-12h-7l1-8z"/>')
+    question: oct('<path d="M0 8a8 8 0 1 1 16 0A8 8 0 0 1 0 8Zm8-6.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13ZM6.92 6.085h.001a.749.749 0 1 1-1.342-.67c.169-.339.436-.701.849-.977C6.845 4.16 7.369 4 8 4a2.756 2.756 0 0 1 1.637.525c.503.377.863.965.863 1.725 0 .448-.115.83-.329 1.15-.205.307-.47.513-.692.662-.109.072-.22.138-.313.195l-.006.004a6.24 6.24 0 0 0-.26.16.952.952 0 0 0-.276.245.75.75 0 0 1-1.248-.832c.184-.264.42-.489.692-.661.103-.067.207-.132.313-.195l.007-.004c.1-.061.182-.11.258-.161a.969.969 0 0 0 .277-.245C8.96 6.514 9 6.427 9 6.25a.612.612 0 0 0-.262-.525A1.27 1.27 0 0 0 8 5.5c-.369 0-.595.09-.74.187a1.01 1.01 0 0 0-.34.398ZM9 11a1 1 0 1 1-2 0 1 1 0 0 1 2 0Z"></path>'),
+    search: oct('<path d="M10.68 11.74a6 6 0 0 1-7.922-8.982 6 6 0 0 1 8.982 7.922l3.04 3.04a.749.749 0 0 1-.326 1.275.749.749 0 0 1-.734-.215ZM11.5 7a4.499 4.499 0 1 0-8.997 0A4.499 4.499 0 0 0 11.5 7Z"></path>'),
+    idea: oct('<path d="M8 1.5c-2.363 0-4 1.69-4 3.75 0 .984.424 1.625.984 2.304l.214.253c.223.264.47.556.673.848.284.411.537.896.621 1.49a.75.75 0 0 1-1.484.211c-.04-.282-.163-.547-.37-.847a8.456 8.456 0 0 0-.542-.68c-.084-.1-.173-.205-.268-.32C3.201 7.75 2.5 6.766 2.5 5.25 2.5 2.31 4.863 0 8 0s5.5 2.31 5.5 5.25c0 1.516-.701 2.5-1.328 3.259-.095.115-.184.22-.268.319-.207.245-.383.453-.541.681-.208.3-.33.565-.37.847a.751.751 0 0 1-1.485-.212c.084-.593.337-1.078.621-1.489.203-.292.45-.584.673-.848.075-.088.147-.173.213-.253.561-.679.985-1.32.985-2.304 0-2.06-1.637-3.75-4-3.75ZM5.75 12h4.5a.75.75 0 0 1 0 1.5h-4.5a.75.75 0 0 1 0-1.5ZM6 15.25a.75.75 0 0 1 .75-.75h2.5a.75.75 0 0 1 0 1.5h-2.5a.75.75 0 0 1-.75-.75Z"></path>'),
+    funnel: oct('<path d="M5.75 2.5h8.5a.75.75 0 0 1 0 1.5h-8.5a.75.75 0 0 1 0-1.5Zm0 5h8.5a.75.75 0 0 1 0 1.5h-8.5a.75.75 0 0 1 0-1.5Zm0 5h8.5a.75.75 0 0 1 0 1.5h-8.5a.75.75 0 0 1 0-1.5ZM2 14a1 1 0 1 1 0-2 1 1 0 0 1 0 2Zm1-6a1 1 0 1 1-2 0 1 1 0 0 1 2 0ZM2 4a1 1 0 1 1 0-2 1 1 0 0 1 0 2Z"></path>'),
+    eye: oct('<path d="M8 2c1.981 0 3.671.992 4.933 2.078 1.27 1.091 2.187 2.345 2.637 3.023a1.62 1.62 0 0 1 0 1.798c-.45.678-1.367 1.932-2.637 3.023C11.67 13.008 9.981 14 8 14c-1.981 0-3.671-.992-4.933-2.078C1.797 10.83.88 9.576.43 8.898a1.62 1.62 0 0 1 0-1.798c.45-.677 1.367-1.931 2.637-3.022C4.33 2.992 6.019 2 8 2ZM1.679 7.932a.12.12 0 0 0 0 .136c.411.622 1.241 1.75 2.366 2.717C5.176 11.758 6.527 12.5 8 12.5c1.473 0 2.825-.742 3.955-1.715 1.124-.967 1.954-2.096 2.366-2.717a.12.12 0 0 0 0-.136c-.412-.621-1.242-1.75-2.366-2.717C10.824 4.242 9.473 3.5 8 3.5c-1.473 0-2.825.742-3.955 1.715-1.124.967-1.954 2.096-2.366 2.717ZM8 10a2 2 0 1 1-.001-3.999A2 2 0 0 1 8 10Z"></path>'),
+    pencil: oct('<path d="M11.013 1.427a1.75 1.75 0 0 1 2.474 0l1.086 1.086a1.75 1.75 0 0 1 0 2.474l-8.61 8.61c-.21.21-.47.364-.756.445l-3.251.93a.75.75 0 0 1-.927-.928l.929-3.25c.081-.286.235-.547.445-.758l8.61-8.61Zm.176 4.823L9.75 4.81l-6.286 6.287a.253.253 0 0 0-.064.108l-.558 1.953 1.953-.558a.253.253 0 0 0 .108-.064Zm1.238-3.763a.25.25 0 0 0-.354 0L10.811 3.75l1.439 1.44 1.263-1.263a.25.25 0 0 0 0-.354Z"></path>'),
+    bolt: oct('<path d="M9.504.43a1.516 1.516 0 0 1 2.437 1.713L10.415 5.5h2.123c1.57 0 2.346 1.909 1.22 3.004l-7.34 7.142a1.249 1.249 0 0 1-.871.354h-.302a1.25 1.25 0 0 1-1.157-1.723L5.633 10.5H3.462c-1.57 0-2.346-1.909-1.22-3.004L9.503.429Zm1.047 1.074L3.286 8.571A.25.25 0 0 0 3.462 9H6.75a.75.75 0 0 1 .694 1.034l-1.713 4.188 6.982-6.793A.25.25 0 0 0 12.538 7H9.25a.75.75 0 0 1-.683-1.06l2.008-4.418.003-.006a.036.036 0 0 0-.004-.009l-.006-.006-.008-.001c-.003 0-.006.002-.009.004Z"></path>'),
+    fork: oct('<path d="M9.5 3.25a2.25 2.25 0 1 1 3 2.122V6A2.5 2.5 0 0 1 10 8.5H6a1 1 0 0 0-1 1v1.128a2.251 2.251 0 1 1-1.5 0V5.372a2.25 2.25 0 1 1 1.5 0v1.836A2.493 2.493 0 0 1 6 7h4a1 1 0 0 0 1-1v-.628A2.25 2.25 0 0 1 9.5 3.25Zm-6 0a.75.75 0 1 0 1.5 0 .75.75 0 0 0-1.5 0Zm8.25-.75a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5ZM4.25 12a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Z"></path>'),
+    flame: oct('<path d="M9.533.753V.752c.217 2.385 1.463 3.626 2.653 4.81C13.37 6.74 14.498 7.863 14.498 10c0 3.5-3 6-6.5 6S1.5 13.512 1.5 10c0-1.298.536-2.56 1.425-3.286.376-.308.862 0 1.035.454C4.46 8.487 5.581 8.419 6 8c.282-.282.341-.811-.003-1.5C4.34 3.187 7.035.75 8.77.146c.39-.137.726.194.763.607ZM7.998 14.5c2.832 0 5-1.98 5-4.5 0-1.463-.68-2.19-1.879-3.383l-.036-.037c-1.013-1.008-2.3-2.29-2.834-4.434-.322.256-.63.579-.864.953-.432.696-.621 1.58-.046 2.73.473.947.67 2.284-.278 3.232-.61.61-1.545.84-2.403.633a2.79 2.79 0 0 1-1.436-.874A3.198 3.198 0 0 0 3 10c0 2.53 2.164 4.5 4.998 4.5Z"></path>'),
+    dizzy: oct('<path d="M1.896 4.559a6.25 6.25 0 0 1 8.839 0 .75.75 0 0 1-1.06 1.061 4.75 4.75 0 1 0 0 6.717L13.03 8.98l-1.553-1.554A.25.25 0 0 1 11.654 7h4.096a.25.25 0 0 1 .25.25v4.096a.25.25 0 0 1-.427.177l-1.482-1.482-3.356 3.356a6.25 6.25 0 0 1-8.839-8.838Z"></path>'),
+    angry: oct('<path d="M0 8a8 8 0 0 1 16 0v5.25a.75.75 0 0 1-1.5 0V8a6.5 6.5 0 1 0-13 0v5.25a.75.75 0 0 1-1.5 0Zm3-1.25C3 5.784 3.784 5 4.75 5h6.5c.966 0 1.75.784 1.75 1.75v1.5A1.75 1.75 0 0 1 11.25 10h-6.5A1.75 1.75 0 0 1 3 8.25Zm1.47-.53a.75.75 0 0 0 0 1.06l1.5 1.5a.75.75 0 0 0 1.06 0L8 7.81l.97.97a.75.75 0 0 0 1.06 0l1.5-1.5a.749.749 0 0 0-.326-1.275.749.749 0 0 0-.734.215l-.97.97-.97-.97a.75.75 0 0 0-1.06 0l-.97.97-.97-.97a.75.75 0 0 0-1.06 0Zm1.03 6.03a.75.75 0 0 1 .75-.75h3.5a.75.75 0 0 1 0 1.5h-3.5a.75.75 0 0 1-.75-.75Z"></path>'),
+    alert: oct('<path d="M6.457 1.047c.659-1.234 2.427-1.234 3.086 0l6.082 11.378A1.75 1.75 0 0 1 14.082 15H1.918a1.75 1.75 0 0 1-1.543-2.575Zm1.763.707a.25.25 0 0 0-.44 0L1.698 13.132a.25.25 0 0 0 .22.368h12.164a.25.25 0 0 0 .22-.368Zm.53 3.996v2.5a.75.75 0 0 1-1.5 0v-2.5a.75.75 0 0 1 1.5 0ZM9 11a1 1 0 1 1-2 0 1 1 0 0 1 2 0Z"></path>'),
+    think: oct('<path d="M8 1.5c-2.363 0-4 1.69-4 3.75 0 .984.424 1.625.984 2.304l.214.253c.223.264.47.556.673.848.284.411.537.896.621 1.49a.75.75 0 0 1-1.484.211c-.04-.282-.163-.547-.37-.847a8.456 8.456 0 0 0-.542-.68c-.084-.1-.173-.205-.268-.32C3.201 7.75 2.5 6.766 2.5 5.25 2.5 2.31 4.863 0 8 0s5.5 2.31 5.5 5.25c0 1.516-.701 2.5-1.328 3.259-.095.115-.184.22-.268.319-.207.245-.383.453-.541.681-.208.3-.33.565-.37.847a.751.751 0 0 1-1.485-.212c.084-.593.337-1.078.621-1.489.203-.292.45-.584.673-.848.075-.088.147-.173.213-.253.561-.679.985-1.32.985-2.304 0-2.06-1.637-3.75-4-3.75ZM5.75 12h4.5a.75.75 0 0 1 0 1.5h-4.5a.75.75 0 0 1 0-1.5ZM6 15.25a.75.75 0 0 1 .75-.75h2.5a.75.75 0 0 1 0 1.5h-2.5a.75.75 0 0 1-.75-.75Z"></path>'),
+    link: oct('<path d="M2.75 3.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h2a.75.75 0 0 1 .75.75v2.19l2.72-2.72a.749.749 0 0 1 .53-.22h4.5a.25.25 0 0 0 .25-.25v-2.5a.75.75 0 0 1 1.5 0v2.5A1.75 1.75 0 0 1 13.25 13H9.06l-2.573 2.573A1.458 1.458 0 0 1 4 14.543V13H2.75A1.75 1.75 0 0 1 1 11.25v-7.5C1 2.784 1.784 2 2.75 2h5.5a.75.75 0 0 1 0 1.5ZM16 1.25v4.146a.25.25 0 0 1-.427.177L14.03 4.03l-3.75 3.75a.749.749 0 0 1-1.275-.326.749.749 0 0 1 .215-.734l3.75-3.75-1.543-1.543A.25.25 0 0 1 11.604 1h4.146a.25.25 0 0 1 .25.25Z"></path>'),
+    route: oct('<path d="M3.75 6.5a.25.25 0 0 0-.25.25v6.5c0 .138.112.25.25.25h8.5a.25.25 0 0 0 .25-.25v-6.5a.25.25 0 0 0-.25-.25h-1a.75.75 0 0 1 0-1.5h1c.966 0 1.75.784 1.75 1.75v6.5A1.75 1.75 0 0 1 12.25 15h-8.5A1.75 1.75 0 0 1 2 13.25v-6.5C2 5.784 2.784 5 3.75 5h1a.75.75 0 0 1 0 1.5ZM7.823.177a.25.25 0 0 1 .354 0l2.896 2.896a.25.25 0 0 1-.177.427H8.75v5.75a.75.75 0 0 1-1.5 0V3.5H5.104a.25.25 0 0 1-.177-.427Z"></path>')
   };
+  // 摘要行点击 = 展开明细。展开是读者主动的行为，那一刻的位移是可接受的；
+  // 不展开时它恒定一行，所以整个生成过程不产生任何布局位移。
+  document.addEventListener('click', function (e) {
+    var sum = e.target.closest && e.target.closest('.ask-trace-sum');
+    if (!sum) return;
+    var trace = sum.parentNode;
+    var open = trace.classList.toggle('is-open');
+    sum.setAttribute('aria-expanded', open ? 'true' : 'false');
+    var x = sum.querySelector('.ask-sum-x');
+    if (x) x.textContent = open ? '收起' : '明细';
+  });
+
+  // 步骤只向前走，且同一条文案不重复出现。
+  //
+  // 修的是录屏里那个「想一下怎么讲你才听得懂…」出现两次的问题：
+  // 它由两条独立路径产生 —— 后端 stage 事件，以及前端 1.4 秒无输出时的本地兜底计时器。
+  // 两条都触发时就会写两条一模一样的行。判重按**文案**而不是按来源，
+  // 因为读者看到的是文案；至于它是谁发的，对读者没有意义。
+  //
+  // 另外：已经 done 的步骤不再获得 is-live，所以任何时刻最多只有一条带光标的行 ——
+  // 上一版某个 delta 到达后仍有一条 live 残留，看起来像两个阶段同时在跑。
+  var STEP_SEEN = null;
   function step(trace, kind, text) {
     trace.hidden = false;
     var steps = trace.querySelector('.ask-steps');
+    var key = String(text).trim();
+    // 上一条文案相同：只把它重新标成 live，不新建节点。
+    var last = steps.lastElementChild;
+    if (last && STEP_SEEN === key) {
+      var liveOld = steps.querySelector('.ask-step.is-live');
+      if (liveOld && liveOld !== last) {
+        liveOld.classList.remove('is-live');
+        liveOld.classList.add('is-done');
+      }
+      last.classList.remove('is-done');
+      last.classList.add('is-live');
+      return last;
+    }
     var prev = steps.querySelector('.ask-step.is-live');
     if (prev) { prev.classList.remove('is-live'); prev.classList.add('is-done'); }
     var el = document.createElement('div');
     el.className = 'ask-step is-live';
-    // 后端几十毫秒内就能把八步全推过来，而每条入场动画只有 .55s——
-    // 不加错峰，八条会同时刷出，读者根本看不清过程。按插入序号递增延迟，
-    // 配合已有的 animation-fill-mode: backwards（延迟期间不可见），就是依次出现。
-    //
-    // The server pushes every step within tens of milliseconds while each entrance animation
-    // is only .55s, so without staggering they all flash in at once. Delay by insertion order;
-    // combined with the existing backwards fill mode, they appear one after another.
-    var idx = steps.children.length;
-    if (!reduce) el.style.animationDelay = (idx * 110) + 'ms';
     el.innerHTML = '<span class="ask-step-ico">' + (STAGE_ICON[kind] || STAGE_ICON.think) + '</span>' +
                    '<span class="ask-step-t">' + esc(text) + '</span>';
     steps.appendChild(el);
+    STEP_SEEN = key;
+
+    // 摘要行跟着换字：它是唯一可见的那一行。
+    // 图标也一起换 —— 摘要图标如果固定不动，读者就看不出阶段真的在推进。
+    var sum = trace.querySelector('.ask-trace-sum');
+    if (sum) {
+      var ico = sum.querySelector('.ask-sum-ico');
+      if (ico) ico.innerHTML = STAGE_ICON[kind] || STAGE_ICON.think;
+      var t = sum.querySelector('.ask-sum-t');
+      if (t) t.textContent = key;
+    }
     scroll();
     return el;
   }
@@ -582,27 +617,14 @@ function broadcastOpen(who) {
     var thoughtState = { buf: '' };
     var failed = false;
 
-    // If the model takes a while to produce its first token, say so rather than looking stuck.
+    // 不再有本地「还在想」兜底计时器。
     //
-    // Guard on thoughtState.buf: once reasoning has started streaming, the thought block is
-    // already the progress signal and this line would be a second, competing "still thinking".
-    // It also fired spuriously on thinking routes — first answer token now lands around 6.6s,
-    // far beyond the 1.4s threshold, so without this guard every such answer gains a bogus
-    // "想一下怎么讲你才听得懂…" step that reads like a repeated stage.
-    //
-    // 若模型迟迟不出首个 token，说一句，而不是让面板看起来卡住。
-    //
-    // 用 thoughtState.buf 兜住：推理一旦开始流式输出，推理块本身就是进度信号，
-    // 这一行会变成与之竞争的第二个「还在想」。它在思考型线路上还会误报——
-    // 首个回答 token 现在约 6.6 秒才到，远超 1.4 秒阈值，
-    // 没有这道闸时每个回答都会多出一条假的「想一下怎么讲你才听得懂…」，读起来像重复步骤。
-    function armThinkTimer() {
-      clearTimeout(thinkAt);
-      thinkAt = setTimeout(function () {
-        if (raw || thoughtState.buf) return;
-        curStep = step(trace, 'idea', '想一下怎么讲你才听得懂…');
-      }, 1400);
-    }
+    // 它曾经存在的理由是「模型迟迟不出首 token 时让面板看起来不像卡住」。
+    // 但它和后端的 stage 事件是两条独立来源，会写出同一条文案两次 ——
+    // 录屏里那句「想一下怎么讲你才听得懂…」前后各出现一次，正是这个原因。
+    // 后端在每个真实阶段都会发 stage，已经覆盖了「让用户知道在动」这件事；
+    // 前端再补一条纯属重复。等待态的确定性由 step() 的文案判重保证。
+    function armThinkTimer() { /* 保留空壳：调用点较多，逐处删改风险大于收益 */ }
 
     CTRL = new AbortController();
     showActions(bot, question, 'streaming');
@@ -740,81 +762,81 @@ function broadcastOpen(who) {
     }
   }
 
-  // Once answer text starts arriving, collapse the trace to a single summary line.
-  // The steps and the source list together run to several hundred pixels, which pushed the
-  // answer itself below the fold — the one thing the reader is actually waiting for.
-  // 折叠推迟到步骤播完：八步各延迟 110ms、入场 .55s，最后一条大约在 1.3s 落定。
-  // 生成一开始就折叠，等于把刚铺垫的过程全收走，这一步白做。
+  // 生成开始时把还亮着的步骤收尾。
   //
-  // Delay the collapse until the staggered steps have landed (last one ~1.3s). Collapsing the
-  // instant generation starts throws away the sequence that was just set up.
+  // 这里曾经做的是"把几百像素的步骤列表折叠成一行摘要"，那一下折叠是整个面板里
+  // 最明显的一次布局跳动 —— 正文被顶上去几十像素，正在读数的人直接失焦。
+  // 现在摘要行从 addBot 起就在（见 addBot 的注释），步骤明细从一开始就收在它下面，
+  // 所以这里只剩下"把最后一条 live 标记成 done"这一件事，不产生任何高度变化。
   var minimizeTimer = 0;
   function scheduleMinimize(trace) {
     if (minimizeTimer) clearTimeout(minimizeTimer);
     minimizeTimer = setTimeout(function () {
       minimizeTimer = 0;
-      minimizeTrace(trace, sourceCount);
+      var live = trace.querySelector('.ask-step.is-live');
+      if (live) { live.classList.remove('is-live'); live.classList.add('is-done'); }
     }, reduce ? 0 : 900);
   }
 
-  function minimizeTrace(trace, n) {
-    trace.classList.add('is-min');
-    var sum = document.createElement('button');
-    sum.type = 'button';
-    sum.className = 'ask-trace-sum';
-    sum.setAttribute('aria-expanded', 'false');
-    sum.innerHTML =
-      '<span class="ask-sum-ico" aria-hidden="true">' + STAGE_ICON.flame + '</span>' +
-      '<span class="ask-sum-t">wendao 正在努力烧烤</span>' +
-      '<span class="ask-sum-x">火</span>';
-    sum.addEventListener('click', function () {
-      var open = trace.classList.toggle('is-open');
-      sum.setAttribute('aria-expanded', open ? 'true' : 'false');
-      sum.querySelector('.ask-sum-x').textContent = open ? '收' : '火';
-    });
-    trace.insertBefore(sum, trace.firstChild);
-    var live = trace.querySelector('.ask-step.is-live');
-    if (live) { live.classList.remove('is-live'); live.classList.add('is-done'); }
+  // ── Answer streaming: append-only, stable-prefix commit ────────────────────
+  //
+  // 流式渲染只做一件事：把已确认的文本追加进 DOM，永不回头改已经渲染过的部分。
+  //
+  // 上一版按「短语边界」切块、每块单独 render，产生了两类可见故障：
+  //   ① 一个块可能正好切在列表项中间，于是孤立的 "- xxx" 被当成一条完整列表渲染；
+  //      等后文补齐，整块重排 —— 读者看到「先打出一行错的，下一秒又被抹掉归位」。
+  //   ② 每块都有入场动画，加上短语边界本身要等标点，正文像被一段段塞进来。
+  //
+  // 现在的切分点是「最后一个绝对安全的位置」：
+  //   只在一个段落真正闭合之后提交（遇到空行），或遇到明确的行内结束符。
+  //   未闭合的尾部（可能还有下文）单独留在 tail 节点里，但**不做 markdown 列表/标题解析** ——
+  //   它只是一段纯文本，等闭合后一次性升格成正式块。
+  //   这样既保证「一个字都不重绘」，也不会把半截列表渲染成成品。
+  //
+  // 另一层保障：整篇文本永远只有一次 render 结果参与排版，没有幽灵底字。
+  // 尾块天然最多一个段落：commitBoundary 只在段落级安全位置提交，
+  // 所以不需要"尾部长了就强切"的兜底。曾经按空格强切，会切在 "## " / "- " 这类
+  // 标记内部的空格上，切出只剩标记的碎片，render 成一个空标题，那段文字凭空消失。
+
+  // 尾块的显示文本：只剥块级标记，不动行内标记。
+  function tailDisplay(s) {
+    var t = s
+      .replace(/^[ \t]*#{1,6}[ \t]+/gm, '')
+      .replace(/^[ \t]*[-*+][ \t]+/gm, '')
+      .replace(/^[ \t]*\d+[.)][ \t]+/gm, '');
+    // 末尾只剩一个残缺的块标记（"#" / "##" / "-" / "1."）：这一帧先不显示它。
+    // 标记是一个字符一个字到达的，"#" 先到、"## " 后到，中间那帧会把字面的 # 露出来，
+    // 下一帧又被剥掉 —— 读者看到的就是一个符号闪了一下。等空格到齐再显示内容。
+    return t.replace(/(^|\n)[ \t]*(?:#{1,6}|[-*+]|\d+[.)])$/, '$1');
   }
 
-  // ── Answer streaming: commit the text one phrase at a time ─────────────────
-  // Re-rendering the whole answer on every delta made new text appear instantly in one lump,
-  // which reads as a hard cut. Instead the text is committed in phrase-sized blocks, each of
-  // which plays its own short entrance, so the answer settles in piece by piece.
-  //
-  // 回答流式渲染：按短语逐块提交。
-  // 每个 delta 都整段重绘会让新文字一次性跳出来，观感是硬切。改为按短语大小的块提交，
-  // 每块播放自己的入场动画，于是回答是一段一段落定的。
-  function blockBoundary(text, from) {
-    var MIN = 10;
-    for (var i = from + MIN; i < text.length; i++) {
-      var ch = text[i];
-      if (ch === '\n') return i + 1;
-      if ('。！？；'.indexOf(ch) >= 0) return i + 1;
-      if (ch === '.' && text[i + 1] === ' ') return i + 1;
-    }
-    // Long unpunctuated run (tables, long clauses): fall back to the next space so blocks
-    // still land instead of stalling until the very end.
-    if (text.length - from > 120) {
-      for (var j = from + 90; j < text.length; j++) {
-        if (/\s/.test(text[j])) return j + 1;
-      }
-    }
-    return from;
+  function commitBoundary(text) {
+    // 段落边界优先：空行之后一定安全。
+    var idx = text.lastIndexOf('\n\n');
+    if (idx >= 0) return idx + 2;
+    // 没有空行时看单行结束符；列表项必须整行结束才算安全（"- xxx" 后面可能还有续行）。
+    var m = /\n(?!\s*[-*+]\s|\s*\d+[.)]\s|\s*#{1,6}\s)/.exec(text);
+    if (m) return m.index + 1;
+    return -1;
   }
 
   function feedAnswer(answer, st, raw) {
-    var end = blockBoundary(raw, st.committed);
-    while (end > st.committed) {
-      var seg = raw.slice(st.committed, end);
+    var cut = commitBoundary(raw);
+    if (cut > st.committed) {
+      var seg = raw.slice(st.committed, cut);
       if (seg.replace(/\s/g, '')) {
         var el = document.createElement('span');
         el.className = 'ask-blk';
         el.innerHTML = render(seg);
-        answer.appendChild(el);
+        // 必须插在尾块**之前**。
+        //
+        // 尾块是常驻节点，装的是"还没闭合、更靠后"的文字。新提交的块若用 appendChild，
+        // 就会落到尾块后面 —— 屏幕上先出现后文（尾块），再把前文塞到它下面。
+        // 视觉表现正是用户指出的「先凭空冒出一行后文的列表项，下一秒又被抹掉归位」。
+        // insertBefore 让提交顺序与文本顺序一致，这才是 chunk 乱序的根因。
+        if (st.tail) { answer.insertBefore(el, st.tail); } else { answer.appendChild(el); }
       }
-      st.committed = end;
-      end = blockBoundary(raw, st.committed);
+      st.committed = cut;
     }
     var tail = raw.slice(st.committed);
     if (tail) {
@@ -823,65 +845,45 @@ function broadcastOpen(who) {
         st.tail.className = 'ask-blk ask-blk-live';
         answer.appendChild(st.tail);
       }
-      st.tail.innerHTML = render(tail);
+      // 尾部只当纯文本显示，不解析成节点 ——
+      // 半截语法一旦被解析成元素，补齐时必然重排，那正是"先打错再覆写"的来源。
+      // 但块级标记要剥掉：否则读者会在流式过程中看到字面的 "## 标题" 和 "- 条文"。
+      // 只剥块级（标题前缀、列表前缀），行内标记（** / 反引号）保留 ——
+      // 行内标记被剥掉再补回来，会看到明显的加粗闪动。
+      st.tail.textContent = tailDisplay(tail);
     } else if (st.tail) {
       st.tail.remove();
       st.tail = null;
     }
   }
 
-  // ── Model reasoning stream (thinking models) ───────────────────────────────
-  // Reasoning can run to thousands of characters, so only a tail window is kept in the DOM and
-  // the block is capped in height with a fade. The point is to show that the model is working,
-  // not to reproduce its entire internal monologue.
+  // ── Model reasoning: a status line, not a transcript ───────────────────────
+  // 推理链默认不展示内容。
   //
-  // 模型推理流（思考模型）。
-  // 推理内容可达数千字，因此只在 DOM 里保留尾部窗口，并限高加渐隐。
-  // 目的是表明模型确实在推理，而不是复现它完整的内心独白。
-  var THOUGHT_KEEP = 1400;
-
+  // 上一版把推理全文（限 1400 字）铺进一个可展开的大卡片里，字数实时跳动；
+  // 推理结束时这个巨大容器瞬间塌成单行，正文同时上顶 —— 实测页面纵向跳动数十像素，
+  // 读数跳到一半的人完全失去焦点。这是 CLS 的典型来源，而且收益很小：
+  // 读者真正想看的是答案，不是模型的内心独白。
+  //
+  // 现在只有一行固定高度（1.65em）的状态条：左侧一个字数的滚动计数。
+  // 它从头到尾不改高度、不插入大块内容，所以视口不会因为推理开始或结束而移动。
+  // 想留痕就给「过程」一个可展开入口，展开是读者主动的行为，那时的位移可接受。
   function feedThought(trace, st, text, total) {
     var box = trace.querySelector('.ask-thought');
     if (!box) {
       box = document.createElement('div');
       box.className = 'ask-thought';
       box.innerHTML =
-        '<button type="button" class="ask-thought-h">' +
-          '<span class="ask-thought-ico" aria-hidden="true">' +
-            '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 3a7 7 0 0 1 7 7c0 2-1 3-1 3l1 4h-5a7 7 0 1 1-2-14z"/><circle cx="9.5" cy="10" r=".9" fill="currentColor" stroke="none"/><circle cx="14.5" cy="10" r=".9" fill="currentColor" stroke="none"/></svg>' +
-          '</span>' +
-          '<span class="ask-thought-t">正在推理</span>' +
-          '<span class="ask-thought-n"></span>' +
-        '</button>' +
-        '<div class="ask-thought-b"></div>';
-      box.querySelector('.ask-thought-h').addEventListener('click', function () {
-        box.classList.toggle('is-open');
-      });
-      // Reasoning sits between the retrieval steps and the answer.
-      //
-      // The anchor is .ask-sources, whose parent is .ask-fold — NOT .ask-trace. Inserting into
-      // trace with that anchor threw "Failed to execute 'insertBefore' on 'Node': The node before
-      // which the new node is to be inserted is not a child of this node", which aborted the
-      // whole handler and left the panel with no answer at all. It went unnoticed until now
-      // because every previous route had thinking disabled, so this branch never ran.
-      //
-      // 推理块插在检索步骤之后、回答之前。
-      //
-      // 锚点是 .ask-sources，而它的父节点是 .ask-fold，不是 .ask-trace。
-      // 拿它当 trace 的锚点会抛 "insertBefore: not a child of this node"，
-      // 整个处理函数中断，面板最后什么答案都没有。
-      // 这段一直没被发现，是因为此前所有线路都关闭了思考，这条分支从未执行过。
+        '<span class="ask-thought-ico" aria-hidden="true">' +
+          '<svg viewBox="0 0 16 16" fill="currentColor"><path d="M8 1.5c-2.363 0-4 1.69-4 3.75 0 .984.424 1.625.984 2.304l.214.253c.223.264.47.556.673.848.284.411.537.896.621 1.49a.75.75 0 0 1-1.484.211c-.04-.282-.163-.547-.37-.847a8.456 8.456 0 0 0-.542-.68c-.084-.1-.173-.205-.268-.32C3.201 7.75 2.5 6.766 2.5 5.25 2.5 2.31 4.863 0 8 0s5.5 2.31 5.5 5.25c0 1.516-.701 2.5-1.328 3.259-.095.115-.184.22-.268.319-.207.245-.383.453-.541.681-.208.3-.33.565-.37.847a.751.751 0 0 1-1.485-.212c.084-.593.337-1.078.621-1.489.203-.292.45-.584.673-.848.075-.088.147-.173.213-.253.561-.679.985-1.32.985-2.304 0-2.06-1.637-3.75-4-3.75ZM5.75 12h4.5a.75.75 0 0 1 0 1.5h-4.5a.75.75 0 0 1 0-1.5ZM6 15.25a.75.75 0 0 1 .75-.75h2.5a.75.75 0 0 1 0 1.5h-2.5a.75.75 0 0 1-.75-.75Z"/></svg>' +
+        '</span>' +
+        '<span class="ask-thought-t">正在推理</span>' +
+        '<span class="ask-thought-n"></span>';
       var fold = trace.querySelector('.ask-fold') || trace;
       fold.insertBefore(box, fold.querySelector('.ask-sources'));
-      st.buf = '';
     }
-    st.buf += text;
-    if (st.buf.length > THOUGHT_KEEP) {
-      st.buf = '…' + st.buf.slice(-THOUGHT_KEEP);
-    }
-    box.querySelector('.ask-thought-b').textContent = st.buf;
-    box.querySelector('.ask-thought-n').textContent = total + ' 字';
-    scroll();
+    // 只更新文字，不追加内容节点：字数变化不会改变行高。
+    box.querySelector('.ask-thought-n').textContent = total ? total + ' 字' : '';
   }
 
   function finishThought(trace) {
@@ -890,6 +892,8 @@ function broadcastOpen(who) {
     box.classList.add('is-done');
     var t = box.querySelector('.ask-thought-t');
     if (t) t.textContent = '推理完成';
+    var n = box.querySelector('.ask-thought-n');
+    if (n && !n.textContent) n.textContent = '';
   }
 
   function renderSources(trace, list) {
@@ -936,8 +940,16 @@ function broadcastOpen(who) {
     });
   }
 
+  // 引用区从答案一开始就存在（空着，占一个极小的下边距），
+  // 而不是等 done 事件到了才 hidden=false。
+  //
+  // 上一版是「全部打完后，8 条引用一条条弹出来」——每一步都带 55ms 延迟入场，
+  // 于是已经滚到底部的回答被强行向下推最多 8 次。读者刚读完最后一句，
+  // 视线就跟着跳。这个现象的根因不是动画，而是**内容在结束时凭空长出来**。
+  // 现在容器始终在场，卡片灌进已有容器，高度增长发生在读者视线下方而不是把上文顶走；
+  // 若 viewport 已贴底，scroll 跟随，视觉上是内容向下延伸。
   function renderCites(box, list) {
-    if (!list.length) return;
+    if (!list.length) { box.hidden = true; return; }
     box.hidden = false;
     box.innerHTML = '<div class="ask-cites-head">' +
         '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>' +
