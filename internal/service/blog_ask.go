@@ -1166,19 +1166,13 @@ func (s *shareService) Ask(ctx context.Context, opts AskOptions, emit func(AskEv
 
 	msgs := askBuildMessages(opts, hits, excerpts)
 
-	// 模型接手前的两幕，只发一次。它们此前被插在下面的 routes 循环里，
-	// 于是每换一条线路就重播一遍（三条线路就是六句），顺序看起来自然是乱的。
+	// 模型接手前原本还有两幕（"被海量知识砸晕" / "被 GPT 小姐拖下工作台"），
+	// 2026-10-26 按用户要求删除：它们是纯粹的垫场拟人，既不代表真实阶段，
+	// 又让状态流转多出两拍，读起来像在等一个不存在的步骤。
+	// 现在从「命中统计」直接到「由 X 接手」，中间不再有虚构动作。
 	//
-	// Two beats before the model takes over, emitted once. They used to sit inside the routes
-	// loop, so every failover replayed them.
-	if err := emit(AskEvent{Type: "stage", Icon: "dizzy",
-		Stage: "wendao 被海量知识砸晕…"}); err != nil {
-		return err
-	}
-	if err := emit(AskEvent{Type: "stage", Icon: "angry",
-		Stage: "wendao 被 GPT 小姐拖下工作台…"}); err != nil {
-		return err
-	}
+	// The two "interlude" beats before the model takes over were removed on request:
+	// they were pure theatre — neither a real stage nor useful information.
 
 	var lastErr error
 	skipped := 0

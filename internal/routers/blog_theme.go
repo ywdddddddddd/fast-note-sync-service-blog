@@ -669,21 +669,25 @@ svg:not(.graph-svg) .g-node:hover text{opacity:1}
      动画若也写 transform 会把它整个覆盖掉，滑块就再也不动了。
      波纹只在某个键真正起作用时才启（脚本加 .is-live）：
      常驻波纹等于整条胶囊一直在动，反而看不出哪一格是新的。 */
+  /* 播一次就停：2 秒。
+     之前是 infinite，整条胶囊一直在荡，既看不出哪一格是刚点的，也一直在耗合成。
+     用户要求「只在新位置更新后播放 2 秒」。 */
   .dock-thumb.is-live{
     box-shadow:0 0 0 0 color-mix(in srgb,var(--primary) 40%,transparent);
-    animation:dockRipple 1.9s cubic-bezier(.22,1,.36,1) infinite;
-  }
+    animation:dockRipple 1s cubic-bezier(.22,1,.36,1) 2;
   .dock-thumb.is-live::before,
   .dock-thumb.is-live::after{
     content:"";position:absolute;inset:0;border-radius:inherit;
     box-shadow:0 0 0 0 color-mix(in srgb,var(--primary) 40%,transparent);
-    animation:dockRipple 1.9s cubic-bezier(.22,1,.36,1) infinite;
+    animation:dockRipple 1s cubic-bezier(.22,1,.36,1) 2;
   }
   .dock-thumb.is-live::before{animation-delay:-.63s}
   .dock-thumb.is-live::after{animation-delay:-1.27s}
   @keyframes dockRipple{
+    /* 扩散半径 14px 而不是 24px：24px 已经漫到相邻两格上，
+       看起来像是"整条在发光"而不是"这一格被选中"。 */
     0%{box-shadow:0 0 0 0 color-mix(in srgb,var(--primary) 40%,transparent)}
-    72%{box-shadow:0 0 0 24px transparent}
+    72%{box-shadow:0 0 0 14px transparent}
     100%{box-shadow:0 0 0 0 transparent}
   }
 
@@ -749,6 +753,22 @@ svg:not(.graph-svg) .g-node:hover text{opacity:1}
     box-shadow:0 12px 40px rgba(0,0,0,.14);
     padding:1rem 1.1rem;
   }
+  /* 收起动画期间保持卡片形态（drawer-hold-*）。
+     热门与活跃只有几行内容，打开时是一张小卡片；但 drawer-hot 类一移除，
+     .rail 立刻退回 height:100dvh 全屏 —— 那块板子先膨胀到整屏、再滑出屏幕。
+     用户看到的"只有一点点内容，收起却是一整个屏幕"就是这一步。
+     下面让 hold 类在 380ms 的滑出动画里维持卡片几何与单面板内容。 */
+  body.drawer-hold-hot .layout-home .rail,
+  body.drawer-hold-live .layout-home .rail{
+    top:calc(1rem + env(safe-area-inset-top,0px));
+    bottom:auto;height:auto;
+    max-height:calc(100dvh - 2rem);
+    border-radius:1rem 0 0 1rem;
+    box-shadow:0 12px 40px rgba(0,0,0,.14);
+    padding:1rem 1.1rem;
+  }
+  body.drawer-hold-hot .layout-home .rail>.panel:not(.hot){display:none}
+  body.drawer-hold-live .layout-home .rail>.panel:not(.act){display:none}
   /* 底部常驻一条，列表最后一项不该被它压住。 */
   body.is-home .layout{padding-bottom:5.5rem}
 }
@@ -1276,6 +1296,11 @@ html.ask-inline .ask-fab{display:none}
   padding:0;border:0;background:transparent;cursor:pointer;
   font:inherit;font-size:.8125rem;font-weight:600;color:var(--foreground);text-align:left}
 .ask-sum-t{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* 换字时的淡出淡入。只过渡 opacity：行高固定，不会因为换字而改变布局。 */
+.ask-trace-sum .ask-sum-ico,.ask-trace-sum .ask-sum-t{
+  transition:opacity .16s ease}
+.ask-trace-sum.is-swap .ask-sum-ico,
+.ask-trace-sum.is-swap .ask-sum-t{opacity:0}
 .ask-steps{display:flex;flex-direction:column;gap:.32rem}
 .ask-step{display:flex;align-items:flex-start;gap:.45rem;
   font-size:.8125rem;line-height:1.65;color:var(--muted-foreground);
@@ -1299,7 +1324,9 @@ html.ask-inline .ask-fab{display:none}
 .ask-thought{
   display:flex;align-items:center;gap:.4rem;
   height:1.65em;                 /* 恒定行高 —— 这是「零 CLS」的全部秘密 */
-  padding:0 .1rem;
+  /* 左右不留内边距：它与 .ask-step 是同一列里的行，缩进必须一致，
+     否则展开明细时"推理完成"会比上面几行缩进浅一档（用户指出的"距离略有差异"）。 */
+  padding:0;
   font-size:.75rem;font-weight:600;color:var(--muted-foreground);
   animation:ask-line-in .4s cubic-bezier(.22,1,.36,1) backwards}
 .ask-thought-ico{display:inline-flex;width:.9rem;height:.9rem;flex:0 0 .9rem;color:var(--primary)}
@@ -1357,9 +1384,13 @@ html.ask-inline .ask-fab{display:none}
    收放都是连续的。子项必须 overflow:hidden，否则 0fr 时内容仍会溢出可视。 */
 /* 折叠用 max-height 而不是 grid-template-rows 0fr：后者要 Chrome 107+/Safari 16+，
    微信的 X5 内核达不到，规则被整条忽略，表现为「点了折叠没反应」。 */
+/* 展开区：子项（步骤列 / 推理行 / 来源列）之间统一 gap，谁都不再自带外边距。
+   之前三处各写各的（steps 的 gap:.32rem、sources 的 margin-top:.5rem、
+   thought 的 padding:.1rem），叠起来就出现了细微的参差。 */
 .ask-fold{overflow:hidden;max-height:1600px;
   transition:max-height .34s cubic-bezier(.22,1,.36,1)}
-.ask-fold>.ask-sources{margin-top:.5rem}
+.ask-fold{display:flex;flex-direction:column;gap:.32rem;padding-top:.15rem}
+.ask-fold>.ask-sources{margin-top:0}
 /* 明细默认收起 —— 以前是"先铺开 8 行、900ms 后再折成一行"，
    那一折就是几十到几百像素的高度变化，正文被顶上去，正在读数的人直接失焦。
    现在从头就收起，可见区只有上面那一行摘要，全程高度不变。 */

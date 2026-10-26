@@ -286,7 +286,7 @@ const blogTopNav = `
 {{define "topnav"}}{{if or .Pages .HasShelf}}<nav class="topnav">{{range .Pages}}<a href="{{.URL}}"{{if eq .Alias "about"}} id="fns-warp"{{end}}>{{.Title}}</a>{{end}}{{if .HasShelf}}<a href="/blog/shelf">资料</a>{{end}}</nav>{{end}}{{end}}`
 
 const blogNavTree = `
-{{define "navnode"}}{{if .Children}}<details class="nav-folder"{{if le .Depth 2}} open{{end}}>
+{{define "navnode"}}{{if .Children}}<details class="nav-folder"{{if le .Depth 1}} open{{end}}>
 <summary class="nav-head">
 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z"/></svg>
 <span class="nav-name">{{.Name}}</span><span class="count">{{.Count}}</span>
@@ -566,15 +566,20 @@ var blogHomeTmpl = template.Must(template.New("blog-home").Funcs(blogAssetFuncs)
 
   function slide(i) {
     dock.style.setProperty('--slot', i);
-
+    ripple();
+  }
   /* 波纹跟着滑块走：这一格刚被点过，它就该是唯一在动的那个。
      不做成常驻，是因为整条胶囊一直在闪就等于没有指示 ——
-     读者反而看不出哪一格是刚动过的。 */
+     读者反而看不出哪一格是刚动过的。
+
+     重播要靠"摘类 → 强制重排 → 挂类"：CSS 动画在类已存在时不会重来，
+     少了这两行，连点第二格时波纹根本不动，看起来像没响应。 */
   function ripple() {
     var thumb = dock && dock.querySelector('.dock-thumb');
-    if (thumb) { thumb.classList.add('is-live'); }
-  }
-    ripple();
+    if (!thumb) { return; }
+    thumb.classList.remove('is-live');
+    void thumb.offsetWidth;
+    thumb.classList.add('is-live');
   }
   function hum(ms) {
     // 震动是加分项：不支持的设备上什么都不发生，功能不依赖它。
@@ -585,7 +590,27 @@ var blogHomeTmpl = template.Must(template.New("blog-home").Funcs(blogAssetFuncs)
     // 服务端若给了 no-store，这里只是白做一次，不会更慢 —— 导航本来也要发这个请求。
     try { fetch(href, { credentials: 'same-origin' }).catch(function () {}); } catch (e) {}
   }
+  var HOLD = 380;   // 与 .rail 的 transform 过渡时长一致
+  var holdTimer = 0;
+  function clearHold() {
+    if (holdTimer) { clearTimeout(holdTimer); holdTimer = 0; }
+    document.body.classList.remove('drawer-hold-hot', 'drawer-hold-live');
+  }
   function setDrawer(name) {
+    // 收起时保持"刚才那一条"的卡片几何与单面板内容，直到滑出动画结束。
+    //
+    // 热门与活跃只有几行内容，打开时是一张小卡片；但 drawer-hot 类一移除，
+    // .rail 立刻退回 height:100dvh —— 板子先膨胀到整屏再滑走，
+    // 用户看到的就是"内容只有一点点，收起却是一整个屏幕"。
+    var prev = open;
+    clearHold();
+    if (!name && (prev === 'hot' || prev === 'live')) {
+      document.body.classList.add('drawer-hold-' + prev);
+      holdTimer = setTimeout(function () {
+        holdTimer = 0;
+        document.body.classList.remove('drawer-hold-hot', 'drawer-hold-live');
+      }, HOLD);
+    }
     for (var k in DRAWERS) {
       if (Object.prototype.hasOwnProperty.call(DRAWERS, k)) { document.body.classList.remove(DRAWERS[k]); }
     }
@@ -958,7 +983,7 @@ var blogPostTmpl = template.Must(template.New("blog-post").Funcs(blogAssetFuncs)
       <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M0 1.75A.75.75 0 0 1 .75 1h4.253c1.227 0 2.317.59 3 1.501A3.743 3.743 0 0 1 11.006 1h4.245a.75.75 0 0 1 .75.75v10.5a.75.75 0 0 1-.75.75h-4.507a2.25 2.25 0 0 0-1.591.659l-.622.621a.75.75 0 0 1-1.06 0l-.622-.621A2.25 2.25 0 0 0 5.258 13H.75a.75.75 0 0 1-.75-.75Zm7.251 10.324.004-5.073-.002-2.253A2.25 2.25 0 0 0 5.003 2.5H1.5v9h3.757a3.75 3.75 0 0 1 1.994.574ZM8.755 4.75l-.004 7.322a3.752 3.752 0 0 1 1.992-.572H14.5v-9h-3.495a2.25 2.25 0 0 0-2.25 2.25Z"/></svg>
     </button>
     <button type="button" class="dock-b" data-i="1" id="dock-graph" aria-label="知识图谱">
-      <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M1.5 1.75V13.5h13.75a.75.75 0 0 1 0 1.5H.75a.75.75 0 0 1-.75-.75V1.75a.75.75 0 0 1 1.5 0Zm14.28 2.53-5.25 5.25a.75.75 0 0 1-1.06 0L7 7.06 4.28 9.78a.751.751 0 0 1-1.042-.018.751.751 0 0 1-.018-1.042l3.25-3.25a.75.75 0 0 1 1.06 0L10 7.94l4.72-4.72a.751.751 0 0 1 1.042.018.751.751 0 0 1 .018 1.042Z"/></svg>
+      <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="m7.775 3.275 1.25-1.25a3.5 3.5 0 1 1 4.95 4.95l-2.5 2.5a3.5 3.5 0 0 1-4.95 0 .751.751 0 0 1 .018-1.042.751.751 0 0 1 1.042-.018 1.998 1.998 0 0 0 2.83 0l2.5-2.5a2.002 2.002 0 0 0-2.83-2.83l-1.25 1.25a.751.751 0 0 1-1.042-.018.751.751 0 0 1-.018-1.042Zm-4.69 9.64a1.998 1.998 0 0 0 2.83 0l1.25-1.25a.751.751 0 0 1 1.042.018.751.751 0 0 1 .018 1.042l-1.25 1.25a3.5 3.5 0 1 1-4.95-4.95l2.5-2.5a3.5 3.5 0 0 1 4.95 0 .751.751 0 0 1-.018 1.042.751.751 0 0 1-1.042.018 1.998 1.998 0 0 0-2.83 0l-2.5 2.5a1.998 1.998 0 0 0 0 2.83Z"/></svg>
     </button>
     <button type="button" class="dock-b" data-i="2" id="dock-walk" aria-label="漫游 · 随机打开一篇笔记">
       <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M13.25 1c.966 0 1.75.784 1.75 1.75v10.5c0 .464-.184.909-.513 1.237A1.746 1.746 0 0 1 13.25 15H2.75c-.464 0-.909-.184-1.237-.513A1.746 1.746 0 0 1 1 13.25V2.75C1 1.784 1.784 1 2.75 1h10.5ZM2.75 2.5a.25.25 0 0 0-.25.25v10.5c0 .138.112.25.25.25h10.5a.25.25 0 0 0 .25-.25V2.75a.25.25 0 0 0-.25-.25H2.75Z"/><path d="M5 12a1 1 0 1 0 0-2 1 1 0 0 0 0 2Zm6-6a1 1 0 1 0 0-2 1 1 0 0 0 0 2ZM8 9a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z"/></svg>

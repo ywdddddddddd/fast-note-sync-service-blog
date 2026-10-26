@@ -519,6 +519,8 @@ function broadcastOpen(who) {
     return '<svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">' + d + '</svg>';
   }
   var STAGE_ICON = {
+    // 结束态：使用者一眼能看出"这次答完了"，不用去读正文最后一句
+    done: oct('<path d="M0 8a8 8 0 1 1 16 0A8 8 0 0 1 0 8Zm1.5 0a6.5 6.5 0 1 0 13 0 6.5 6.5 0 0 0-13 0Zm10.28-1.72-4.5 4.5a.75.75 0 0 1-1.06 0l-2-2a.751.751 0 0 1 .018-1.042.751.751 0 0 1 1.042-.018l1.47 1.47 3.97-3.97a.751.751 0 0 1 1.042.018.751.751 0 0 1 .018 1.042Z"/>'),
     question: oct('<path d="M0 8a8 8 0 1 1 16 0A8 8 0 0 1 0 8Zm8-6.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13ZM6.92 6.085h.001a.749.749 0 1 1-1.342-.67c.169-.339.436-.701.849-.977C6.845 4.16 7.369 4 8 4a2.756 2.756 0 0 1 1.637.525c.503.377.863.965.863 1.725 0 .448-.115.83-.329 1.15-.205.307-.47.513-.692.662-.109.072-.22.138-.313.195l-.006.004a6.24 6.24 0 0 0-.26.16.952.952 0 0 0-.276.245.75.75 0 0 1-1.248-.832c.184-.264.42-.489.692-.661.103-.067.207-.132.313-.195l.007-.004c.1-.061.182-.11.258-.161a.969.969 0 0 0 .277-.245C8.96 6.514 9 6.427 9 6.25a.612.612 0 0 0-.262-.525A1.27 1.27 0 0 0 8 5.5c-.369 0-.595.09-.74.187a1.01 1.01 0 0 0-.34.398ZM9 11a1 1 0 1 1-2 0 1 1 0 0 1 2 0Z"></path>'),
     search: oct('<path d="M10.68 11.74a6 6 0 0 1-7.922-8.982 6 6 0 0 1 8.982 7.922l3.04 3.04a.749.749 0 0 1-.326 1.275.749.749 0 0 1-.734-.215ZM11.5 7a4.499 4.499 0 1 0-8.997 0A4.499 4.499 0 0 0 11.5 7Z"></path>'),
     idea: oct('<path d="M8 1.5c-2.363 0-4 1.69-4 3.75 0 .984.424 1.625.984 2.304l.214.253c.223.264.47.556.673.848.284.411.537.896.621 1.49a.75.75 0 0 1-1.484.211c-.04-.282-.163-.547-.37-.847a8.456 8.456 0 0 0-.542-.68c-.084-.1-.173-.205-.268-.32C3.201 7.75 2.5 6.766 2.5 5.25 2.5 2.31 4.863 0 8 0s5.5 2.31 5.5 5.25c0 1.516-.701 2.5-1.328 3.259-.095.115-.184.22-.268.319-.207.245-.383.453-.541.681-.208.3-.33.565-.37.847a.751.751 0 0 1-1.485-.212c.084-.593.337-1.078.621-1.489.203-.292.45-.584.673-.848.075-.088.147-.173.213-.253.561-.679.985-1.32.985-2.304 0-2.06-1.637-3.75-4-3.75ZM5.75 12h4.5a.75.75 0 0 1 0 1.5h-4.5a.75.75 0 0 1 0-1.5ZM6 15.25a.75.75 0 0 1 .75-.75h2.5a.75.75 0 0 1 0 1.5h-2.5a.75.75 0 0 1-.75-.75Z"></path>'),
@@ -582,15 +584,8 @@ function broadcastOpen(who) {
     steps.appendChild(el);
     STEP_SEEN = key;
 
-    // 摘要行跟着换字：它是唯一可见的那一行。
-    // 图标也一起换 —— 摘要图标如果固定不动，读者就看不出阶段真的在推进。
-    var sum = trace.querySelector('.ask-trace-sum');
-    if (sum) {
-      var ico = sum.querySelector('.ask-sum-ico');
-      if (ico) ico.innerHTML = STAGE_ICON[kind] || STAGE_ICON.think;
-      var t = sum.querySelector('.ask-sum-t');
-      if (t) t.textContent = key;
-    }
+    // 摘要行不在这里改 —— 它由队列按节奏播（见 makeStagePlayer）。
+    // 明细列表是收起的，立即写入不会有人看见，所以不占播放预算。
     scroll();
     return el;
   }
@@ -615,6 +610,7 @@ function broadcastOpen(who) {
     var sourceCount = 0;
     var stream = { committed: 0, tail: null };
     var thoughtState = { buf: '' };
+    var player = makeStagePlayer(trace);
     var failed = false;
 
     // 不再有本地「还在想」兜底计时器。
@@ -696,6 +692,7 @@ function broadcastOpen(who) {
         // 图标由服务端在事件里给出；关键词推断只在老事件上兜底。
         // The icon comes from the event; keyword guessing is only a fallback for old events.
         curStep = step(trace, ev.icon || 'think', ev.stage);
+        player.push(ev.icon || 'think', ev.stage);
         return;
       }
       if (ev.type === 'retrieval') {
@@ -715,11 +712,15 @@ function broadcastOpen(who) {
       if (ev.type === 'thinking') {
         clearTimeout(thinkAt);
         if (!minimized) { minimized = true; scheduleMinimize(trace); }
+        // 推理一开始，检索阶段的队列就过时了：让位给"正在推理 N 字"。
+        if (!trace.__sumThinking) { player.stop(); }
         feedThought(trace, thoughtState, ev.text || '', ev.thoughtChars || 0);
         return;
       }
       if (ev.type === 'delta') {
         clearTimeout(thinkAt);
+        // 正文已经开始，中间那些检索状态再慢慢播就是拖时间了。
+        player.stop();
         if (!minimized) { minimized = true; scheduleMinimize(trace); }
         finishThought(trace);
         raw += ev.text;
@@ -740,13 +741,13 @@ function broadcastOpen(who) {
         return;
       }
       if (ev.type === 'done') {
+        player.stop();
         if (!raw) answer.innerHTML = '<p class="ask-none">没有生成内容。</p>';
-        // Flush any trailing fragment that never hit a boundary, so the last sentence is not
-        // left sitting in the un-animated tail element.
-        if (stream.tail) {
-          stream.tail.classList.remove('ask-blk-live');
-          stream.tail = null;
-        }
+        // 把残余尾块渲染成正式块 —— 否则最后一段永远停在纯文本形态
+        // （没有加粗、没有列表、没有引用角标），表现成"有时能渲染、有时不行"。
+        flushAnswer(answer, stream, raw);
+        // 结束态：读者不必去读正文最后一句才知道答完了。
+        setSum(trace, 'done', raw ? '回答结束 · ' + raw.replace(/\s/g, '').length + ' 字' : '回答结束');
         renderCites(citesBox, cites);
         // 生成结束时平滑落位。此前是直接改 scrollTop，画面一下子「跳」到末尾；
         // 用 smooth 走完最后一段，读者能看清引文是从哪里长出来的。
@@ -760,6 +761,63 @@ function broadcastOpen(who) {
         }
       }
     }
+  }
+
+  // ── 摘要行：串行播放，一次一条 ─────────────────────────────────────────────
+  //
+  // 后端几十毫秒就能把六条 stage 全推过来。直接逐条写进摘要行的话，
+  // 那条字会在一瞬间跳完六个阶段，读者只看到最后一句话 —— 等于没播。
+  // （用户原话：「状态机走得太快了，要一步一步淡入淡出，即使没有真的做过或者不在这步，
+  //   只是一个优雅的动画」。）
+  //
+  // 所以 stage 事件先进队列，前端按固定节奏一条一条放，每条「淡出 → 换字 → 淡入」。
+  // 队列不阻塞正文：一旦有 delta 到达就清空队列直接切「正在写…」，
+  // 因为答案已经开始长出来了，再慢慢播检索过程就是拖时间。
+  var STAGE_HOLD = 620;    // 每条状态停留时间
+  var STAGE_FADE = 150;    // 换字时的淡出/淡入时长
+
+  function setSum(trace, kind, text) {
+    var sum = trace.querySelector('.ask-trace-sum');
+    if (!sum) return;
+    sum.classList.add('is-swap');
+    setTimeout(function () {
+      var ico = sum.querySelector('.ask-sum-ico');
+      if (ico) ico.innerHTML = STAGE_ICON[kind] || STAGE_ICON.think;
+      var t = sum.querySelector('.ask-sum-t');
+      if (t) t.textContent = text;
+      sum.classList.remove('is-swap');
+    }, reduce ? 0 : STAGE_FADE);
+  }
+
+  function makeStagePlayer(trace) {
+    var q = [];
+    var timer = 0;
+    var running = false;
+    var lastText = '';
+    function tick() {
+      timer = 0;
+      if (!q.length) { running = false; return; }
+      var item = q.shift();
+      lastText = item[1];
+      setSum(trace, item[0], item[1]);
+      timer = setTimeout(tick, reduce ? 0 : STAGE_HOLD);
+    }
+    return {
+      push: function (kind, text) {
+        // 同一条文案不连续播两次：重试路径可能重发同一条 stage，
+        // 而摘要行是唯一可见的一行，同一句话出现两遍读起来就是卡住了。
+        if (text === lastText) { return; }
+        if (q.length && q[q.length - 1][1] === text) { return; }
+        q.push([kind, text]);
+        if (!running) { running = true; tick(); }
+      },
+      // 停止播放：清空队列并取消等待中的下一拍。
+      stop: function () {
+        q.length = 0;
+        if (timer) { clearTimeout(timer); timer = 0; }
+        running = false;
+      }
+    };
   }
 
   // 生成开始时把还亮着的步骤收尾。
@@ -857,6 +915,24 @@ function broadcastOpen(who) {
     }
   }
 
+  // 收尾：把还留在尾块里的文字渲染成正式块。
+  //
+  // 这是「最后一段没渲染」的修复。尾块是纯文本（不解析 markdown），
+  // 只为流式过程中不抖动；但 done 之后不再有新文本，它必须升格成正常块，
+  // 否则最后一段永远是白板 —— 没有加粗、没有列表、没有引用角标。
+  // 触发条件是"没有任何段落边界"，所以表现成"有时候能渲染、有时候不行"。
+  function flushAnswer(answer, st, raw) {
+    var tail = raw.slice(st.committed);
+    if (tail && tail.replace(/\s/g, '')) {
+      var el = document.createElement('span');
+      el.className = 'ask-blk';
+      el.innerHTML = render(tail);
+      if (st.tail) { answer.insertBefore(el, st.tail); } else { answer.appendChild(el); }
+    }
+    if (st.tail) { st.tail.remove(); st.tail = null; }
+    st.committed = raw.length;
+  }
+
   // ── Model reasoning: a status line, not a transcript ───────────────────────
   // 推理链默认不展示内容。
   //
@@ -885,15 +961,21 @@ function broadcastOpen(who) {
     // 只更新文字，不追加内容节点：字数变化不会改变行高。
     box.querySelector('.ask-thought-n').textContent = total ? total + ' 字' : '';
     // 摘要行也要跟着动。推理内容本身不展示（那是"隐藏思考链"的要求），
-    // 但"正在推理 N 字"是读者唯一能看到的进度信号 —— 一次回答可能有几百个 thinking 事件、
+    // 但"正在推理 N 字"是读者唯一能看到的进度信号 —— 一次回答可能有上千个 thinking 事件、
     // 首个答案 token 要到 6.9 秒，中间什么都不动会像是卡死。
-    var sum = trace.querySelector('.ask-trace-sum');
-    if (sum) {
-      var ico = sum.querySelector('.ask-sum-ico');
-      if (ico) ico.innerHTML = STAGE_ICON.idea;
-      var t = sum.querySelector('.ask-sum-t');
-      if (t) t.textContent = '正在推理' + (total ? ' · ' + total + ' 字' : '…');
+    //
+    // 这里**不走队列**：字数是实时数值，攒着播就失去意义了。
+    // 推理开始时清掉还没播完的 stage 队列 —— 推理本身就是"正在进行"的最好说明。
+    if (!trace.__sumThinking) {
+      trace.__sumThinking = true;
+      var sum = trace.querySelector('.ask-trace-sum');
+      if (sum) {
+        var ico = sum.querySelector('.ask-sum-ico');
+        if (ico) ico.innerHTML = STAGE_ICON.idea;
+      }
     }
+    var sumT = trace.querySelector('.ask-sum-t');
+    if (sumT) sumT.textContent = '正在推理' + (total ? ' · ' + total + ' 字' : '…');
   }
 
   function finishThought(trace) {
@@ -903,13 +985,7 @@ function broadcastOpen(who) {
     var t = box.querySelector('.ask-thought-t');
     if (t) t.textContent = '推理完成';
     // 摘要行切到"正在写"，这是真正向前推进一步，不是回退。
-    var sum = trace.querySelector('.ask-trace-sum');
-    if (sum) {
-      var ico = sum.querySelector('.ask-sum-ico');
-      if (ico) ico.innerHTML = STAGE_ICON.pencil;
-      var st = sum.querySelector('.ask-sum-t');
-      if (st) st.textContent = '正在写…';
-    }
+    setSum(trace, 'pencil', '正在写…');
   }
 
   function renderSources(trace, list) {
