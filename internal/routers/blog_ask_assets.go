@@ -583,10 +583,24 @@ function broadcastOpen(who) {
     var failed = false;
 
     // If the model takes a while to produce its first token, say so rather than looking stuck.
+    //
+    // Guard on thoughtState.buf: once reasoning has started streaming, the thought block is
+    // already the progress signal and this line would be a second, competing "still thinking".
+    // It also fired spuriously on thinking routes — first answer token now lands around 6.6s,
+    // far beyond the 1.4s threshold, so without this guard every such answer gains a bogus
+    // "想一下怎么讲你才听得懂…" step that reads like a repeated stage.
+    //
+    // 若模型迟迟不出首个 token，说一句，而不是让面板看起来卡住。
+    //
+    // 用 thoughtState.buf 兜住：推理一旦开始流式输出，推理块本身就是进度信号，
+    // 这一行会变成与之竞争的第二个「还在想」。它在思考型线路上还会误报——
+    // 首个回答 token 现在约 6.6 秒才到，远超 1.4 秒阈值，
+    // 没有这道闸时每个回答都会多出一条假的「想一下怎么讲你才听得懂…」，读起来像重复步骤。
     function armThinkTimer() {
       clearTimeout(thinkAt);
       thinkAt = setTimeout(function () {
-        if (!raw) curStep = step(trace, 'idea', '想一下怎么讲你才听得懂…');
+        if (raw || thoughtState.buf) return;
+        curStep = step(trace, 'idea', '想一下怎么讲你才听得懂…');
       }, 1400);
     }
 
@@ -844,8 +858,21 @@ function broadcastOpen(who) {
         box.classList.toggle('is-open');
       });
       // Reasoning sits between the retrieval steps and the answer.
-      var anchor = trace.querySelector('.ask-sources');
-      trace.insertBefore(box, anchor || null);
+      //
+      // The anchor is .ask-sources, whose parent is .ask-fold — NOT .ask-trace. Inserting into
+      // trace with that anchor threw "Failed to execute 'insertBefore' on 'Node': The node before
+      // which the new node is to be inserted is not a child of this node", which aborted the
+      // whole handler and left the panel with no answer at all. It went unnoticed until now
+      // because every previous route had thinking disabled, so this branch never ran.
+      //
+      // 推理块插在检索步骤之后、回答之前。
+      //
+      // 锚点是 .ask-sources，而它的父节点是 .ask-fold，不是 .ask-trace。
+      // 拿它当 trace 的锚点会抛 "insertBefore: not a child of this node"，
+      // 整个处理函数中断，面板最后什么答案都没有。
+      // 这段一直没被发现，是因为此前所有线路都关闭了思考，这条分支从未执行过。
+      var fold = trace.querySelector('.ask-fold') || trace;
+      fold.insertBefore(box, fold.querySelector('.ask-sources'));
       st.buf = '';
     }
     st.buf += text;

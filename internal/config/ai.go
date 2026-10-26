@@ -131,6 +131,18 @@ type AIRouteSetting struct {
 	APIKey  string `yaml:"api-key"`
 	Model   string `yaml:"model"`
 
+	// Headers are extra HTTP headers sent with every request on this route. They exist because
+	// some gateways refuse requests that lack a routing hint: OpenCode Go returns HTTP 400
+	// "Request is missing x-opencode-session and cannot be routed efficiently" (enforced since
+	// 2026-09-06) unless x-opencode-session carries a per-session id. The value supports the
+	// placeholder ${uuid}, replaced with a fresh UUIDv4 on every request.
+	//
+	// Headers 是每条线路额外发送的 HTTP 头。它存在的原因是部分网关会拒绝缺少路由提示的请求：
+	// OpenCode Go 自 2026-09-06 起，若没有 x-opencode-session，直接回 HTTP 400
+	// 「Request is missing x-opencode-session and cannot be routed efficiently」。
+	// 值支持占位符 ${uuid}，每次请求替换为新生成的 UUIDv4。
+	Headers map[string]string `yaml:"headers"`
+
 	// MinInterval is the minimum spacing between two calls on this route (e.g. "6s" for a
 	// 10-requests-per-minute budget). Empty means no client-side pacing.
 	// MinInterval 该线路上两次调用之间的最小间隔（例如每分钟 10 次的预算对应 "6s"）。
@@ -175,6 +187,27 @@ type AIRouteSetting struct {
 	// EnableThinking 在上游支持时开启模型的推理阶段。
 	// 推理内容以 delta.reasoning_content 到达，并与正式回答分开呈现。
 	EnableThinking *bool `yaml:"enable-thinking" default:"false"`
+
+	// ThinkingLevel expresses reasoning depth for upstreams that take a thinking object rather
+	// than a boolean. Empty means "derive it from enable-thinking" (enabled/disabled).
+	// Accepted values match the DeepSeek-style vocabulary: disabled | enabled | low | high | max.
+	//
+	// Measured on OpenCode Go (deepseek-v4.1-flash): a one-line factual question spent 1133 ms
+	// and 17 completion tokens with thinking disabled, 1512 ms / 66 tokens at max. The level
+	// is a ceiling, not a quota — the model stops as soon as it is satisfied, so raising it
+	// does not automatically cost more. It does raise the bound on MaxTokens though: a long
+	// reasoning trace will consume the whole budget and leave content empty with
+	// finish_reason=length. Keep MaxTokens generous whenever this is set above disabled.
+	//
+	// ThinkingLevel 为使用 thinking 对象（而不是布尔开关）的上游表达推理深度。
+	// 留空表示由 enable-thinking 推导（enabled/disabled）。取值沿用 DeepSeek 风格的词汇：
+	// disabled | enabled | low | high | max。
+	//
+	// 在 OpenCode Go（deepseek-v4.1-flash）实测：一个只需一行的常识问题，关闭思考耗时 1133 ms、
+	// 17 个 completion token；max 档 1512 ms、66 个 token。该档位是上限而不是配额——模型满足即停，
+	// 因此调高它不会自动变贵。但它抬高了 MaxTokens 的下界：一次长推理会吃光预算，
+	// 让 content 为空且 finish_reason=length。把它设成 disabled 以上时，MaxTokens 要给足。
+	ThinkingLevel string `yaml:"thinking-level"`
 
 	// Retries is how many extra attempts this route gets on a transport-level failure
 	// (TLS reset, connection dropped mid-stream). Long thinking streams are the most exposed

@@ -228,6 +228,8 @@ func buildAskRoutes(cfg config.AISettings) []service.AskRoute {
 
 			MaxTokens:      r.AIRouteMaxTokens(),
 			EnableThinking: r.AIRouteThinking(),
+			ThinkingLevel:  r.ThinkingLevel,
+			Headers:        r.Headers,
 			Retries:        r.AIRouteRetries(),
 		})
 	}

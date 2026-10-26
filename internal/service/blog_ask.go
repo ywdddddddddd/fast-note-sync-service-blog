@@ -17,6 +17,8 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/google/uuid"
+
 	"github.com/haierkeys/fast-note-sync-service/pkg/util"
 )
 
@@ -62,6 +64,17 @@ type AskRoute struct {
 	MaxTokens      int
 	EnableThinking bool
 	Retries        int
+
+	// ThinkingLevel overrides the on/off boolean for upstreams that take a thinking object.
+	// Empty means "derive from EnableThinking". See config.AIRouteSetting.ThinkingLevel.
+	//
+	// ThinkingLevel 为使用 thinking 对象的上游覆盖布尔开关。
+	// 留空表示由 EnableThinking 推导。详见 config.AIRouteSetting.ThinkingLevel。
+	ThinkingLevel string
+
+	// Headers are extra request headers. Values may contain ${uuid}, replaced per request.
+	// Headers 是额外的请求头。值中的 ${uuid} 每次请求替换为新生成的 UUIDv4。
+	Headers map[string]string
 }
 
 // AskOptions everything a single question needs. Assembled by the router layer from config, so
@@ -768,6 +781,52 @@ type upstreamChunk struct {
 //
 // onDelta 返回 false 可提前终止（例如客户端断开）。在收到首个片段之前失败的线路会以
 // started=false 报回，调用方可以改用下一条线路；一旦已经输出过文本，这次失败就无法再掩盖。
+// askRouteUsesThinkingObject reports whether an upstream switches reasoning through a thinking
+// object instead of a boolean flag. Two families need the object today: SenseNova's DeepSeek V4
+// and OpenCode. Deciding by URL brand rather than by a config flag is deliberate: sending the
+// boolean to an object-only upstream fails silently (empty content, no error), and a silently
+// empty answer is the worst outcome this pipeline can produce.
+//
+// askRouteUsesThinkingObject 判断某上游是用 thinking 对象而不是布尔开关来切换推理。
+// 目前有两类需要对象：商汤的 DeepSeek V4 与 OpenCode。用 URL 品牌而不是配置开关来判断是刻意的：
+// 向只认对象的上游发布尔字段会静默失败（content 为空、无报错），
+// 而「静默地给出空答案」正是这条管线能造成的最坏结果。
+func askRouteUsesThinkingObject(baseURL string) bool {
+	u := strings.ToLower(baseURL)
+	return strings.Contains(u, "sensenova") || strings.Contains(u, "opencode.ai")
+}
+
+// askRouteThinkingMode resolves the thinking object's type. ThinkingLevel wins when set, otherwise
+// the boolean decides. Measured on OpenCode Go: enable_thinking is ignored outright — the model
+// still emits reasoning_content and, under a small MaxTokens, returns empty content with
+// finish_reason=length. That is why the object is mandatory there, not merely preferable.
+//
+// askRouteThinkingMode 决定 thinking 对象的 type。ThinkingLevel 有值时优先，否则由布尔值决定。
+// 在 OpenCode Go 实测：enable_thinking 被完全忽略——模型照样输出 reasoning_content，
+// 而 MaxTokens 不大时返回空 content 与 finish_reason=length。
+// 这就是那里必须用对象、而不只是「最好用对象」的原因。
+func askRouteThinkingMode(r AskRoute) string {
+	if v := strings.TrimSpace(r.ThinkingLevel); v != "" {
+		return v
+	}
+	if r.EnableThinking {
+		return "enabled"
+	}
+	return "disabled"
+}
+
+// askExpandHeaderValue substitutes ${uuid} with a fresh UUIDv4. Values without the placeholder come
+// back unchanged, so a static header costs nothing extra.
+//
+// askExpandHeaderValue 把 ${uuid} 替换为新生成的 UUIDv4。不含占位符的值原样返回，
+// 静态头因此没有额外开销。
+func askExpandHeaderValue(v string) string {
+	if !strings.Contains(v, "${uuid}") {
+		return v
+	}
+	return strings.ReplaceAll(v, "${uuid}", uuid.NewString())
+}
+
 func (s *shareService) askCallRoute(ctx context.Context, r AskRoute, msgs []upstreamMessage,
 	onDelta func(string) bool, onReasoning func(string) bool) (started bool, err error) {
 
@@ -831,12 +890,8 @@ func (s *shareService) askCallRoute(ctx context.Context, r AskRoute, msgs []upst
 	// SenseNova's DeepSeek V4 toggles reasoning through thinking:{type:...} and does not know
 	// enable_thinking; providers that do know enable_thinking do not accept an object there.
 	// Send one or the other based on the upstream rather than both.
-	if strings.Contains(strings.ToLower(r.BaseURL), "sensenova") {
-		mode := "disabled"
-		if r.EnableThinking {
-			mode = "enabled"
-		}
-		set("thinking", map[string]string{"type": mode})
+	if askRouteUsesThinkingObject(r.BaseURL) {
+		set("thinking", map[string]string{"type": askRouteThinkingMode(r)})
 	} else {
 		set("enable_thinking", r.EnableThinking)
 	}
@@ -854,6 +909,11 @@ func (s *shareService) askCallRoute(ctx context.Context, r AskRoute, msgs []upst
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "text/event-stream")
 	req.Header.Set("Authorization", "Bearer "+r.APIKey)
+	// Route-specific headers go last so a configured value wins over the defaults above.
+	// 线路自定义头放在最后设置，使配置值可以覆盖上面的默认值。
+	for name, value := range r.Headers {
+		req.Header.Set(name, askExpandHeaderValue(value))
+	}
 
 	resp, err := askHTTPClient.Do(req)
 	if err != nil {
@@ -1171,6 +1231,18 @@ func (s *shareService) Ask(ctx context.Context, opts AskOptions, emit func(AskEv
 			if callErr == nil || started {
 				break
 			}
+			// Log every failed attempt, not just the final one. The route-level warning below
+			// fires only when every attempt fails, so a retry that eventually succeeds used to
+			// leave no trace at all — the "路断了一下" line in the browser was the sole evidence
+			// that anything had gone wrong, with no server-side cause to match it against.
+			//
+			// 每次失败尝试都记，而不是只记最后一次。下面那条线路级 WARN 只在全部尝试失败时才打，
+			// 因此「重试后成功」的情况原先不留任何痕迹——浏览器里那句「路断了一下」
+			// 是唯一证据，而服务端没有可对照的原因。
+			s.logger.Warn("blog ask attempt failed",
+				zap.String("route", route.Name), zap.String("model", route.Model),
+				zap.Int("attempt", attempt+1), zap.Int("attempts", attempts),
+				zap.String("error", callErr.Error()))
 			// 429 是分钟级冷却（实测 10s–2min，连续触发会更长），在同一条线路上
 			// 等 500ms 再试必然还是 429。直接跳到下一条线路：换 key 有可能立刻可用。
 			//
