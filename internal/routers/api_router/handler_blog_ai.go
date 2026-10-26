@@ -75,46 +75,7 @@ func (h *BlogHandler) UpdateAIConfig(c *gin.Context) {
 		cfg.SystemPrompt = *params.SystemPrompt
 	}
 
-	if params.Routes != nil {
-		next := make([]config.AIRouteSetting, 0, len(*params.Routes))
-		for i, r := range *params.Routes {
-			route := config.AIRouteSetting{}
-			// Routes are sent whole, so start from the incoming values.
-			// 线路是整表回传的，因此直接以传入值构建。
-			if r.Name != nil {
-				route.Name = strings.TrimSpace(*r.Name)
-			}
-			if r.BaseURL != nil {
-				route.BaseURL = strings.TrimSpace(*r.BaseURL)
-			}
-			if r.APIKey != nil {
-				route.APIKey = strings.TrimSpace(*r.APIKey)
-			}
-			if r.Model != nil {
-				route.Model = strings.TrimSpace(*r.Model)
-			}
-			if r.MinInterval != nil {
-				route.MinInterval = strings.TrimSpace(*r.MinInterval)
-			}
-			if r.Timeout != nil {
-				route.Timeout = strings.TrimSpace(*r.Timeout)
-			}
-			if r.Enabled != nil {
-				route.Enabled = r.Enabled
-			}
-			// An entry with no address and no model carries no information; drop it rather than
-			// leaving a row that can never succeed.
-			// 既无地址也无模型的条目没有信息量，直接丢弃，避免留下一条永远不会成功的线路。
-			if route.BaseURL == "" && route.Model == "" && route.APIKey == "" {
-				continue
-			}
-			if route.Name == "" {
-				route.Name = "route-" + strings.TrimSpace(itoa(i+1))
-			}
-			next = append(next, route)
-		}
-		cfg.Routes = next
-	}
+	if params.Routes != nil {		cfg.Routes = mergeAIRoutes(cfg.Routes, *params.Routes)	}
 
 	// Persist so the setting survives a restart.
 	// 持久化，确保重启后设置仍然生效。
@@ -194,4 +155,82 @@ func itoa(n int) string {
 		buf[i] = '-'
 	}
 	return string(buf[i:])
+}
+
+// mergeAIRoutes applies a partial route list on top of the existing one.
+//
+// 每条线路都以**现有配置为底**，只覆盖请求里真的给出的字段。
+//
+// 为什么必须这样：设置页并不展示 headers / thinking-level / enable-thinking /
+// max-tokens / temperature / retries，它回传的线路表里没有这些字段。
+// 若从零构造，这些"界面上看不见"的设置就会在每一次保存后消失，
+// 而紧接着的 Config().Save() 会把这份残缺配置写回磁盘 ——
+// 用户看到的是"我什么都没改，线路就挂了"。
+//
+// 2026-10-26 实例：OpenCode 的 x-opencode-session 被清成 headers: {}，
+// 网关回 400 MissingSessionID，全站问答不可用，而 api-key 与 base-url 都还在，
+// 配置文件看上去像没被动过。
+//
+// 线路身份取 base-url：它决定用哪套上游协议（自定义头与 thinking 形态都绑在它上面）。
+// 找不到同 base-url 的旧线路时退回同下标，再不行才从零开始。
+//
+// mergeAIRoutes applies a partial route list on top of the existing one so that fields the
+// settings UI does not expose (headers, thinking level, sampling params, retries) survive a save.
+func mergeAIRoutes(old []config.AIRouteSetting, in []dto.AIRouteRequest) []config.AIRouteSetting {
+	byBase := make(map[string]config.AIRouteSetting, len(old))
+	for _, r := range old {
+		key := strings.TrimSpace(r.BaseURL)
+		if key == "" {
+			continue
+		}
+		if _, exists := byBase[key]; !exists {
+			byBase[key] = r
+		}
+	}
+
+	next := make([]config.AIRouteSetting, 0, len(in))
+	for i, r := range in {
+		var route config.AIRouteSetting
+		if r.BaseURL != nil {
+			if prev, ok := byBase[strings.TrimSpace(*r.BaseURL)]; ok {
+				route = prev
+			}
+		} else if i < len(old) {
+			route = old[i]
+		}
+
+		if r.Name != nil {
+			route.Name = strings.TrimSpace(*r.Name)
+		}
+		if r.BaseURL != nil {
+			route.BaseURL = strings.TrimSpace(*r.BaseURL)
+		}
+		if r.APIKey != nil {
+			route.APIKey = strings.TrimSpace(*r.APIKey)
+		}
+		if r.Model != nil {
+			route.Model = strings.TrimSpace(*r.Model)
+		}
+		if r.MinInterval != nil {
+			route.MinInterval = strings.TrimSpace(*r.MinInterval)
+		}
+		if r.Timeout != nil {
+			route.Timeout = strings.TrimSpace(*r.Timeout)
+		}
+		if r.Enabled != nil {
+			route.Enabled = r.Enabled
+		}
+
+		// An entry with no address and no model carries no information; drop it rather than
+		// leaving a row that can never succeed.
+		// 既无地址也无模型的条目没有信息量，直接丢弃，避免留下一条永远不会成功的线路。
+		if route.BaseURL == "" && route.Model == "" && route.APIKey == "" {
+			continue
+		}
+		if route.Name == "" {
+			route.Name = "route-" + strings.TrimSpace(itoa(i+1))
+		}
+		next = append(next, route)
+	}
+	return next
 }
