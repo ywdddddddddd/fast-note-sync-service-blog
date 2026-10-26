@@ -805,9 +805,23 @@ func askRouteUsesThinkingObject(baseURL string) bool {
 // 在 OpenCode Go 实测：enable_thinking 被完全忽略——模型照样输出 reasoning_content，
 // 而 MaxTokens 不大时返回空 content 与 finish_reason=length。
 // 这就是那里必须用对象、而不只是「最好用对象」的原因。
+//
+// 白名单是必要的：这个字段直接进请求体，上游对枚举的改动会让**整条线路**回 422，
+// 而错误消息埋在几千 token 的请求尾部，从外面只能看到「所有模型线路都不可用」。
+// 2026-10-26 就发生过一次：配置写着 max，上游已改为只接受 adaptive/enabled/disabled，
+// 于是问答彻底不可用。这里对未知值降级并说明，而不是原样转发。
 func askRouteThinkingMode(r AskRoute) string {
 	if v := strings.TrimSpace(r.ThinkingLevel); v != "" {
-		return v
+		switch strings.ToLower(v) {
+		case "adaptive", "enabled", "disabled":
+			return strings.ToLower(v)
+		default:
+			// 未知取值：按 enable-thinking 降级，宁可少一层推理，也不要整条线路失败。
+			if r.EnableThinking {
+				return "enabled"
+			}
+			return "disabled"
+		}
 	}
 	if r.EnableThinking {
 		return "enabled"

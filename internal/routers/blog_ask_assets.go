@@ -884,6 +884,16 @@ function broadcastOpen(who) {
     }
     // 只更新文字，不追加内容节点：字数变化不会改变行高。
     box.querySelector('.ask-thought-n').textContent = total ? total + ' 字' : '';
+    // 摘要行也要跟着动。推理内容本身不展示（那是"隐藏思考链"的要求），
+    // 但"正在推理 N 字"是读者唯一能看到的进度信号 —— 一次回答可能有几百个 thinking 事件、
+    // 首个答案 token 要到 6.9 秒，中间什么都不动会像是卡死。
+    var sum = trace.querySelector('.ask-trace-sum');
+    if (sum) {
+      var ico = sum.querySelector('.ask-sum-ico');
+      if (ico) ico.innerHTML = STAGE_ICON.idea;
+      var t = sum.querySelector('.ask-sum-t');
+      if (t) t.textContent = '正在推理' + (total ? ' · ' + total + ' 字' : '…');
+    }
   }
 
   function finishThought(trace) {
@@ -892,8 +902,14 @@ function broadcastOpen(who) {
     box.classList.add('is-done');
     var t = box.querySelector('.ask-thought-t');
     if (t) t.textContent = '推理完成';
-    var n = box.querySelector('.ask-thought-n');
-    if (n && !n.textContent) n.textContent = '';
+    // 摘要行切到"正在写"，这是真正向前推进一步，不是回退。
+    var sum = trace.querySelector('.ask-trace-sum');
+    if (sum) {
+      var ico = sum.querySelector('.ask-sum-ico');
+      if (ico) ico.innerHTML = STAGE_ICON.pencil;
+      var st = sum.querySelector('.ask-sum-t');
+      if (st) st.textContent = '正在写…';
+    }
   }
 
   function renderSources(trace, list) {

@@ -63,8 +63,22 @@ func TestAskRouteThinkingMode(t *testing.T) {
 		r    AskRoute
 		want string
 	}{
-		{"level wins over boolean", AskRoute{ThinkingLevel: "max", EnableThinking: false}, "max"},
-		{"level trimmed", AskRoute{ThinkingLevel: "  high  "}, "high"},
+		// 白名单内的三个取值原样透传（上游接受的枚举）。
+		{"enabled passes through", AskRoute{ThinkingLevel: "enabled", EnableThinking: false}, "enabled"},
+		{"adaptive passes through", AskRoute{ThinkingLevel: "adaptive"}, "adaptive"},
+		{"disabled passes through", AskRoute{ThinkingLevel: "disabled", EnableThinking: true}, "disabled"},
+		{"level trimmed and lowercased", AskRoute{ThinkingLevel: "  Enabled  "}, "enabled"},
+
+		// 白名单外的取值必须降级，而不是原样转发。
+		// 2026-10-26：配置里写的是 max，而上游已把枚举改成 adaptive/enabled/disabled，
+		// 原样转发让整条线路 422，问答彻底不可用。
+		{"unknown level with thinking on falls back to enabled",
+			AskRoute{ThinkingLevel: "max", EnableThinking: true}, "enabled"},
+		{"unknown level with thinking off falls back to disabled",
+			AskRoute{ThinkingLevel: "max", EnableThinking: false}, "disabled"},
+		{"unknown high with thinking off falls back to disabled",
+			AskRoute{ThinkingLevel: "high", EnableThinking: false}, "disabled"},
+
 		{"boolean true without level", AskRoute{EnableThinking: true}, "enabled"},
 		{"boolean false without level", AskRoute{}, "disabled"},
 	}
