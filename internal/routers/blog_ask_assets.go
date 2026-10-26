@@ -747,7 +747,10 @@ function broadcastOpen(who) {
         // （没有加粗、没有列表、没有引用角标），表现成"有时能渲染、有时不行"。
         flushAnswer(answer, stream, raw);
         // 结束态：读者不必去读正文最后一句才知道答完了。
-        setSum(trace, 'done', raw ? '回答结束 · ' + raw.replace(/\s/g, '').length + ' 字' : '回答结束');
+        // 字数改用**渲染后**的正文来数。
+        // raw 里含 markdown 标记（** - 引用角标等），数出来比读者看到的正文多几十字，
+        // 摘要行宣布"583 字"而正文只有 526 字，对不上就会让人怀疑统计不可信。
+        setSum(trace, 'done', raw ? '回答结束 · ' + answer.textContent.replace(/\s/g, '').length + ' 字' : '回答结束');
         renderCites(citesBox, cites);
         // 生成结束时平滑落位。此前是直接改 scrollTop，画面一下子「跳」到末尾；
         // 用 smooth 走完最后一段，读者能看清引文是从哪里长出来的。
