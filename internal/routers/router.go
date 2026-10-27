@@ -14,6 +14,7 @@ import (
 	"github.com/gin-gonic/gin"
 	ut "github.com/go-playground/universal-translator"
 	"github.com/lxzan/gws"
+	"go.uber.org/zap"
 )
 
 var methodLimiters = limiter.NewMethodLimiter().AddBuckets(
@@ -43,8 +44,49 @@ var methodLimiters = limiter.NewMethodLimiter().AddBuckets(
 	},
 )
 
-func NewRouter(frontendFiles embed.FS, appContainer *app.App, uni *ut.UniversalTranslator) *gin.Engine {
+// applyTrustedProxies tells gin which peers may supply the client address.
+//
+// gin ships with trustedProxies = ["0.0.0.0/0", "::/0"] (gin.go), i.e. every peer is trusted,
+// and Context.ClientIP walks X-Forwarded-For from the right, skipping trusted hops. With
+// everything trusted it lands on the left-most entry — the one the client wrote. So without
+// this call every reader of c.ClientIP() (login, token BoundIP checks, the recovery log) is
+// reading a value an attacker chooses.
+//
+// The default here mirrors middleware.Proxy and clientIdentityResolver: an empty list means
+// loopback only. Keeping the three in agreement matters more than which rule is chosen — if
+// Proxy rewrites RemoteAddr from a peer that this engine then refuses to trust, the address
+// ends up in a state no single rule predicts.
+//
+// applyTrustedProxies 告诉 gin 哪些对端可以提供客户端地址。
+//
+// gin 的内置值是信任 0.0.0.0/0（即全部），Context.ClientIP 从右往左跳过可信跳，于是在全信
+// 的情况下落到最左项——那是客户端自己写的。不调这一行，每个 c.ClientIP() 的调用方
+//（登录、Token 的 BoundIP 校验、panic 日志）读到的都是攻击者可选的值。
+//
+// 这里的默认值与 middleware.Proxy、clientIdentityResolver 一致：空列表＝只信回环。
+// 三者保持一致比选了哪条规则更重要——若 Proxy 采信了某个本引擎拒绝信任的对端改写的
+// RemoteAddr，地址就会落进任何单一规则都预测不了的状态。
+func applyTrustedProxies(r *gin.Engine, trusted []string, appContainer *app.App) {
+	if len(trusted) == 0 {
+		trusted = []string{"127.0.0.1", "::1"}
+	}
+	if err := r.SetTrustedProxies(trusted); err != nil {
+		// Configuration that cannot be parsed is not a reason to serve traffic with a wrong
+		// client identity: every limit and every BoundIP check downstream would be keyed on
+		// something nobody intended. Reported loudly; SetTrustedProxies has already cleared
+		// the CIDRs, so the engine falls back to refusing to trust anything.
+		//
+		// 配置解析失败不能成为「带着错误的客户端身份继续服务」的理由：下游每个限流与
+		// BoundIP 校验都会键在没人预期的值上。这里大声记录；SetTrustedProxies 已经把
+		// CIDR 清空，因此引擎退化为谁都不信。
+		if appContainer != nil {
+			appContainer.Logger().Error("SetTrustedProxies failed; client address will be the TCP peer only",
+				zap.Error(err), zap.Strings("trusted", trusted))
+		}
+	}
+}
 
+func NewRouter(frontendFiles embed.FS, appContainer *app.App, uni *ut.UniversalTranslator) *gin.Engine {
 	// Get configuration
 	// 获取配置
 	cfg := appContainer.Config()
@@ -90,6 +132,7 @@ func NewRouter(frontendFiles embed.FS, appContainer *app.App, uni *ut.UniversalT
 	initWebSocketRoutes(wss, appContainer)
 
 	r := gin.New()
+	applyTrustedProxies(r, cfg.Server.TrustedProxies, appContainer)
 	r.Use(middleware.Proxy(cfg.Server.TrustedProxies))
 	r.Use(middleware.Cors(cfg.Server.CORSAllowedOrigins, cfg.Server.ExtApiUrl))
 	if len(cfg.Server.CustomResponseHeaders) > 0 {
@@ -128,6 +171,7 @@ func NewRouter(frontendFiles embed.FS, appContainer *app.App, uni *ut.UniversalT
 func NewWebGuiRouter(frontendFiles embed.FS, appContainer *app.App) *gin.Engine {
 	cfg := appContainer.Config()
 	r := gin.New()
+	applyTrustedProxies(r, cfg.Server.TrustedProxies, appContainer)
 	r.Use(middleware.Proxy(cfg.Server.TrustedProxies))
 	r.Use(middleware.Cors(cfg.Server.CORSAllowedOrigins, cfg.Server.ExtApiUrl))
 	if len(cfg.Server.CustomResponseHeaders) > 0 {
@@ -145,6 +189,7 @@ func NewWebGuiRouter(frontendFiles embed.FS, appContainer *app.App) *gin.Engine 
 func NewShareRouter(frontendFiles embed.FS, appContainer *app.App) *gin.Engine {
 	cfg := appContainer.Config()
 	r := gin.New()
+	applyTrustedProxies(r, cfg.Server.TrustedProxies, appContainer)
 	r.Use(middleware.Proxy(cfg.Server.TrustedProxies))
 	r.Use(middleware.Cors(cfg.Server.CORSAllowedOrigins, cfg.Server.ExtApiUrl))
 	if len(cfg.Server.CustomResponseHeaders) > 0 {

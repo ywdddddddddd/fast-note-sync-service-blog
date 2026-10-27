@@ -82,20 +82,37 @@ func Proxy(trustedProxies []string) gin.HandlerFunc {
 			}
 		}
 
-		// Trust CF-Connecting-IP only when the direct TCP connection originates from
-		// the loopback interface (127.0.0.1 / ::1). This is the fingerprint of a local
-		// cloudflared tunnel process — the only entity that connects from loopback and
-		// injects this header. An external attacker connecting directly to the origin
-		// cannot fake a loopback RemoteAddr at the TCP level.
+		// CF-Connecting-IP is deliberately NOT trusted here, and this is the one place in the
+		// codebase where "no code" is the fix.
 		//
-		// 仅当 TCP 直连来源为回环地址（127.0.0.1 / ::1）时，才信任 CF-Connecting-IP 头。
-		// 这是本地 cloudflared 进程的唯一特征——它是唯一从回环地址连接并注入该头的实体。
-		// 外部攻击者直连源站时，无法在 TCP 层伪造回环地址，因此此头会被忽略。
-		if cfIP := c.GetHeader("CF-Connecting-IP"); cfIP != "" {
-			if remoteHost == "127.0.0.1" || remoteHost == "::1" {
-				c.Request.RemoteAddr = cfIP + ":0"
-			}
-		}
+		// The removed version rewrote RemoteAddr from that header whenever the TCP peer was
+		// loopback, on the reasoning that only a local cloudflared process connects from
+		// loopback. That reasoning holds only if cloudflared is the *sole* loopback client.
+		// On this deployment it is not: the topology is
+		//
+		//     visitor → entry nginx (39.105.27.90) → origin nginx → 127.0.0.1:9000 fns
+		//
+		// so every external visitor arrives from 127.0.0.1 and the guard was true for all of
+		// them. Measured before removal: eight requests with eight different forged values of
+		// this header were all answered 200, against 200/200/429… with the header held constant
+		// — the rate limiter and the reaction dedup were keyed on a value the client chose.
+		//
+		// The header is also not needed for anything this service does. The real client address
+		// already arrives on X-Real-IP, which nginx overwrites with $remote_addr (it sets, it
+		// does not append, so a client cannot pre-seed it), and blogGuard already reads that
+		// header only when the peer is a configured trusted proxy.
+		//
+		// 这里刻意不信任 CF-Connecting-IP —— 保留「什么都不写」正是修复本身。
+		//
+		// 被删掉的版本在对端为回环时用该头改写 RemoteAddr，理由是「只有本地 cloudflared
+		// 会从回环连进来」。这个前提只在 cloudflared 是唯一回环客户端时成立。本部署不是：
+		// 访客 → 入口机 nginx → 源站 nginx → 127.0.0.1:9000，于是每个外网访客都从
+		// 127.0.0.1 到达，那道守卫对所有人成立。删除前实测：同一请求头换八个伪造值全部
+		// 回答 200，而固定该头时为 200/200/429…——限流与表态去重都键在一个客户端自选的值上。
+		//
+		// 本服务也不需要这个头：真实地址已经在 X-Real-IP 里，nginx 用 $remote_addr 覆盖写
+		//（是写，不是追加，客户端无法预置），而 blogGuard 只在 TCP 对端是已配置的可信代理时
+		// 才读它。
 
 		c.Next()
 	}

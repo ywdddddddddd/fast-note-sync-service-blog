@@ -116,5 +116,50 @@ func (h *VersionHandler) Support(c *gin.Context) {
 	pager := pkgapp.NewPager(c)
 	data, total := h.App.GetSupportRecordsPage(lang, sortBy, sortOrder, pager.Page, pager.PageSize)
 
-	response.ToResponseList(code.Success, data, total)
+	// Supporter names are removed before the list leaves the process.
+	//
+	// This endpoint is unauthenticated (router_api.go registers it outside the auth group)
+	// and it publishes records belonging to *third parties* — people who chose to support the
+	// upstream plugin's author, not this site's owner, and who agreed to nothing about being
+	// listed on someone else's blog. The amount and the message stay; they are what the
+	// patrons wrote for public display. The name is what turns a thank-you into a directory.
+	//
+	// Removed rather than masked: a masked name ("J*") still lets two donations be tied to
+	// one person, which is the only thing the field was useful for anyway.
+	//
+	// 赞助者姓名在列表离开进程之前就被去掉。
+	//
+	// 这个端点免认证（router_api.go 把它注册在 auth 组之外），而它发布的是**第三方**的记录——
+	// 那些人支持的是上游插件作者，不是本站主人，也从未同意被列在别人的博客上。
+	// 金额与留言保留：那是赞助者写给公开看的内容。姓名才是把一个致谢变成一份名录的东西。
+	//
+	// 选择移除而不是打码：打码后的姓名（"J*"）仍让两笔赞助能被关联到同一个人，
+	// 而关联性恰恰是这个字段唯一的用途。
+	response.ToResponseList(code.Success, withoutSupporterNames(data), total)
+}
+
+// withoutSupporterNames returns the records with Name cleared.
+//
+// A copy, not an in-place edit: the slice comes from the app container's cache, and zeroing
+// the field there would erase the names for every future caller too — turning a response
+// filter into data loss the first time something else needs it.
+//
+// The field is cleared rather than the JSON tag changed to "-", because the tag is shared with
+// any internal consumer that may still want the name; the redaction belongs at the boundary
+// that is actually public.
+//
+// withoutSupporterNames 返回把 Name 清空后的记录。
+//
+// 复制而不是就地改：切片来自 app 容器的缓存，那里把字段清零会连将来每个调用方也拿不到姓名——
+// 一旦有别的功能需要它，响应过滤就变成了数据丢失。
+//
+// 选择清空字段而不是把 JSON tag 改成 "-"，因为那个 tag 与可能仍需姓名的内部消费方共享；
+// 脱敏应当发生在真正公开的那条边界上。
+func withoutSupporterNames(records []pkgapp.SupportRecord) []pkgapp.SupportRecord {
+	out := make([]pkgapp.SupportRecord, len(records))
+	copy(out, records)
+	for i := range out {
+		out[i].Name = ""
+	}
+	return out
 }

@@ -18,6 +18,13 @@ func registerAPIRoutes(r *gin.Engine, appContainer *app.App, wss *pkgapp.Websock
 	cfg := appContainer.Config()
 	api := r.Group("/api")
 	{
+		// One resolver, shared with the blog endpoints: the process keeps a single definition
+		// of "who is calling", built from the same trusted-proxy list middleware.Proxy uses.
+		//
+		// 与博客端点共用同一个 resolver：进程内只有一份「谁在调用」的定义，
+		// 且取自 middleware.Proxy 使用的同一份可信代理列表。
+		ident := newClientIdentityResolver(cfg.Server.TrustedProxies)
+
 		api.Use(middleware.AppInfoWithConfig(app.Name, appContainer.Version().Version))
 		api.Use(gin.Logger())
 		api.Use(middleware.TraceMiddlewareWithConfig(*cfg.Tracer.Enabled, cfg.Tracer.Header)) // Trace ID middleware
@@ -67,8 +74,17 @@ func registerAPIRoutes(r *gin.Engine, appContainer *app.App, wss *pkgapp.Websock
 		noAuthWebgui := api.Group("")
 		noAuthWebgui.Use(middleware.RequireWebGUI())
 		{
-			noAuthWebgui.POST("/user/register", userHandler.Register)
-			noAuthWebgui.POST("/user/login", userHandler.Login)
+			// Credential endpoints are the only two anonymous routes that verify a secret, so
+			// they are the only two that need a per-caller limit. MethodLimiter already caps
+			// the whole path at five per second, but its bucket key is the URI — one bucket
+			// shared by everyone, which lets anyone lock the operator out and never bounds a
+			// slow guessing run. See login_guard.go.
+			//
+			// 凭据端点是在所有匿名路由里唯二会校验秘密的，因此也是唯二需要「按调用方」限流的。
+			// MethodLimiter 已经把那整条路径压到每秒五次，但它的桶键是 URI —— 一个全站共享的桶，
+			// 于是任何人都能把运维锁在外面，同时永远约束不了一次慢速猜解。见 login_guard.go。
+			noAuthWebgui.POST("/user/register", loginRateLimited(userHandler.Register, ident))
+			noAuthWebgui.POST("/user/login", loginRateLimited(userHandler.Login, ident))
 			noAuthWebgui.GET("/user/auth/oidc/config", oidcHandler.Config)
 			noAuthWebgui.GET("/webgui/config", adminControlHandler.Config)
 		}

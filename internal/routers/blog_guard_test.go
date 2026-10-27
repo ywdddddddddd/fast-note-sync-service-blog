@@ -117,6 +117,41 @@ func TestClientIdentity(t *testing.T) {
 			headers:    map[string]string{"X-Real-IP": "not-an-ip", "X-Forwarded-For": "111.47.84.40"},
 			want:       "111.47.84.40",
 		},
+		{
+			// The regression this case exists for: middleware.Proxy used to rewrite
+			// RemoteAddr from CF-Connecting-IP whenever the peer was loopback. On this
+			// deployment every visitor arrives from loopback (nginx is local), so the
+			// header was the visitor's own choice of identity. Measured in production
+			// before the removal: eight requests with eight forged values were all
+			// answered 200 against 200/200/429… with the value held constant.
+			//
+			// The resolver is given the same context shape and must ignore the header
+			// entirely, because it is not one this deployment's proxy writes.
+			//
+			// 这条用例就是为那次回归而存在的：middleware.Proxy 曾在对端为回环时用
+			// CF-Connecting-IP 改写 RemoteAddr，而本部署每个访客都从回环到达（nginx 在本机），
+			// 于是这个头等于访客自选身份。移除前线上实测：换八个伪造值全部 200，
+			// 固定该值时为 200/200/429…。
+			name:       "CF-Connecting-IP 不再影响身份",
+			resolver:   loopbackOnly,
+			remoteAddr: "127.0.0.1:51005",
+			headers: map[string]string{
+				"CF-Connecting-IP": "198.51.100.99",
+				"X-Real-IP":        "111.47.84.40",
+			},
+			want: "111.47.84.40",
+		},
+		{
+			// Same header with no X-Real-IP at all: the peer address is the only fact,
+			// and the header must not promote itself into one.
+			//
+			// 同样的头但不带 X-Real-IP：对端地址是唯一的事实，该头不得把自己提升为事实。
+			name:       "只有 CF-Connecting-IP 时退回对端地址",
+			resolver:   loopbackOnly,
+			remoteAddr: "127.0.0.1:51006",
+			headers:    map[string]string{"CF-Connecting-IP": "198.51.100.98"},
+			want:       "127.0.0.1",
+		},
 	}
 
 	for _, tc := range cases {
