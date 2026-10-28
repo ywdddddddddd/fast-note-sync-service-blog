@@ -140,6 +140,10 @@ function broadcastOpen(who) {
     fab.setAttribute('aria-expanded', 'true');
     syncOpeners();
     host.classList.add('ask-on');
+    // 页面上同时只该有一个「浮起来的东西」。胶囊在面板打开后没有任何用途，
+    // 而它恰好压在输入框上（移动端实测），所以整条收起来。
+    // 挂在 documentElement 上是因为胶囊与 #ask-root 是兄弟节点，CSS 没有可用的祖先。
+    document.documentElement.classList.add('ask-open');
     // 告诉图谱与抽屉：我开了。它们各自收自己，不需要知道我是谁。
     broadcastOpen('ask');
     bindViewport();
@@ -166,6 +170,7 @@ function broadcastOpen(who) {
       clearTimeout(guard);
       unbindViewport();
       panel.hidden = true; backdrop.hidden = true; host.classList.remove('ask-on');
+      document.documentElement.classList.remove('ask-open');
       // 外部入口的展开态也要收回去，否则读屏软件会一直认为面板还开着。
       syncOpeners();
       panel.removeEventListener('transitionend', done);

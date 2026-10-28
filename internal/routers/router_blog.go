@@ -2,9 +2,11 @@ package routers
 
 import (
 	"bytes"
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"html/template"
+	"math/big"
 	"net/http"
 	"sort"
 	"strings"
@@ -170,6 +172,30 @@ func registerBlogRoutes(r *gin.Engine, appContainer *app.App) {
 	// 与订阅源同理，注册在 "/blog/:slug" 之前——"shelf" 是一个字面段，
 	// 不能被当成某篇笔记的 slug。
 	registerBlogShelfRoutes(blog, appContainer)
+
+	// Random walk: pick one published note and redirect straight to it.
+	//
+	// Why a server route instead of "go home, then let the home page pick": that was the old
+	// behaviour (location.href = "/blog#walk"), and it cost two full navigations — one to render
+	// the entire home page, another to leave it. On a slow phone the reader sees the home page
+	// flash and concludes the button did nothing. A 302 is one visible navigation: the address
+	// goes straight from the current article to the next one, and the warp transition still runs
+	// because the click handler navigates here.
+	//
+	// Registered before "/blog/:slug" for the same literal-segment reason as the feed.
+	//
+	// 随机漫游：挑一篇已发布笔记直接 302 跳过去。
+	//
+	// 为什么是服务端路由，而不是「先回首页、再由首页挑一篇」：后者是旧做法
+	// （location.href = "/blog#walk"），代价是两次完整导航——先渲染整个首页，再离开它。
+	// 在慢一点的手机上，读者会看到首页闪一下，然后以为什么都没发生。
+	// 302 只有一次可见导航：地址栏从当前文章直接到下一篇；穿越特效照常播放，
+	// 因为点击处理器仍然会先播动画再导航到这里。
+	//
+	// 与订阅源同理，注册在 "/blog/:slug" 之前，避免 "walk" 被当作笔记 slug。
+	blog.GET("/blog/walk", func(c *gin.Context) {
+		serveBlogWalk(c, appContainer, shareSvc)
+	})
 
 	blog.GET("/blog", func(c *gin.Context) {
 		cfg, ok := blogEnabled(c, appContainer)
@@ -739,6 +765,46 @@ func blogUID(v int64) int64 {
 		return 1
 	}
 	return v
+}
+
+// serveBlogWalk redirects to one randomly chosen published note.
+//
+// The pick is uniformly random over the published set. Using a fresh random source per request
+// is fine here: the endpoint exists so a reader can wander, and "which note" has no correctness
+// requirement beyond being published and reachable.
+//
+// If there is nothing published, it falls back to the index rather than showing an error —
+// the reader asked to wander, and an empty blog's only honest destination is the empty index.
+//
+// serveBlogWalk 重定向到随机挑中的一篇已发布笔记。
+//
+// 在已发布集合上均匀随机。每次请求现取随机源即可：这个端点是为了让读者随便逛，
+// 「挑中哪一篇」除了必须已发布、可达之外没有任何正确性要求。
+//
+// 若一篇都没发布，退回索引页而不是报错——读者想逛，而空博客唯一诚实的去处就是那个空索引。
+func serveBlogWalk(c *gin.Context, appContainer *app.App, shareSvc service.ShareService) {
+	cfg, ok := blogEnabled(c, appContainer)
+	if !ok {
+		return
+	}
+	uid := blogUID(cfg.UID)
+
+	entries, err := shareSvc.ListBlogEntries(c.Request.Context(), uid)
+	if err != nil || len(entries) == 0 {
+		c.Redirect(http.StatusFound, "/blog")
+		return
+	}
+
+	// crypto-free randomness is deliberate: nothing here is a secret, and math/rand avoids
+	// paying for an entropy syscall on a path a reader may hit repeatedly.
+	// 刻意不用密码学随机：这里没有秘密，而且这条路径可能被连续点击，
+	// 用 math/rand 不必为一次熵调用付费。
+	n, err := rand.Int(rand.Reader, big.NewInt(int64(len(entries))))
+	if err != nil || n == nil {
+		c.Redirect(http.StatusFound, "/blog/"+entries[0].Slug)
+		return
+	}
+	c.Redirect(http.StatusFound, "/blog/"+entries[n.Int64()].Slug)
 }
 
 // blogBaseURL resolves the externally reachable base address, mirroring getShareBaseUrl.

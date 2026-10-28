@@ -473,6 +473,16 @@ img{max-width:100%;height:auto;border-radius:.5rem}
 .nav-folder>summary .count{
   margin-left:auto;font-size:.6875rem;color:var(--muted-foreground);font-weight:500;
 }
+  /* 文件夹展开/收回的高度过渡由 JS 驱动（见 /blog/sheet.js）。
+     这里只做两件 CSS 能可靠做到的事：
+       ① 内容溢出裁切，使 JS 每次高度都画得出来；
+       ② 箭头旋转，与高度过渡同一条缓动曲线。
+     为什么不用 CSS 的 grid-template-rows 0fr→1fr：那样要求子元素是单个包裹层，
+     而 .nav-children 直接装着同级的多棵树；而且浏览器会把 <details> 关闭态的子元素
+     整个隐藏，过渡根本不会被绘制。 */
+  .nav-folder>.nav-children{overflow:hidden}
+  .nav-head svg{transition:transform .3s cubic-bezier(.22,1,.36,1)}
+  .nav-folder[open]>.nav-head svg{transform:rotate(90deg)}
 .nav-children{margin-left:.75rem;padding-left:.5rem;border-left:1px solid var(--border)}
 /* 树内的叶子不再需要固定大缩进，缩进由层级本身提供 */
 .nav-children .nav-item{padding-left:.5rem;margin-left:0}
@@ -750,37 +760,32 @@ svg:not(.graph-svg) .g-node:hover text{opacity:1}
   body.is-post .ask-fab{display:none}
   /* 页面笔记同样把问答搬进胶囊，顶部那颗圆钮退场；底部留白一并加够。 */
   body.is-page .ask-fab{display:none}
+
+  /* 问道面板打开时，底部胶囊整条退场。
+     它在面板里没有任何用途，而移动端实测它正压在输入框上（图1）。
+     用 transform + opacity 而不是 display:none：display 会让它在关闭瞬间跳回来，
+     而这里需要它「收下去」再「升回来」。 */
+  html.ask-open .dock{
+    opacity:0;pointer-events:none;
+    transform:translateX(-50%) translateY(140%);
+    transition:opacity .2s ease,transform .32s cubic-bezier(.4,0,.9,.4);
+  }
   body.is-page .layout.layout-page{padding-bottom:5.5rem}
   /* 阅读页底部同样常驻一条：正文最后一行不该被它压住。
      必须写成 .layout.layout-post 才压得住 —— 文件后面那条把 padding 设成 3rem 的规则
      与本条同特异性、且更靠后，只写 body.is-post .layout-post 会被它整条盖掉
      （实测仍是 48px，两次）。 */
   body.is-post .layout.layout-post{padding-bottom:5.5rem}
-  /* 热门与活跃都只有几行字，给它们全屏抽屉会得到一块大白板。
-     这两条改成右侧浮出的卡片：高度跟着内容走，四角圆，离顶留一点距离。
-     目录不一样 —— 它有二十来个栏目，只有全高才有意义，所以它保持全高抽屉。 */
+  /* 热门与活跃：高度跟着内容走，这是它们在底部 sheet 里唯一的特殊之处。
+     旧版这里还叠了一层「右侧浮出卡片」的几何（top:1rem / bottom:auto / 左圆右方），
+     那是为右滑抽屉写的；换成自下而上之后，那层覆盖会把板子钉在屏幕顶部（实测 top=16px）。
+     现在只保留一句：高度自动。
+     drawer-hold-* 也随之失去意义 —— 收起时高度本来就是 auto，不会出现
+     「内容一点点、却先膨胀到整屏再滑走」的老毛病。 */
   body.drawer-hot .layout-home .rail,
   body.drawer-live .layout-home .rail{
-    top:calc(1rem + env(safe-area-inset-top,0px));
-    bottom:auto;height:auto;
-    max-height:calc(100dvh - 2rem);
-    border-radius:1rem 0 0 1rem;
-    box-shadow:0 12px 40px rgba(0,0,0,.14);
-    padding:1rem 1.1rem;
-  }
-  /* 收起动画期间保持卡片形态（drawer-hold-*）。
-     热门与活跃只有几行内容，打开时是一张小卡片；但 drawer-hot 类一移除，
-     .rail 立刻退回 height:100dvh 全屏 —— 那块板子先膨胀到整屏、再滑出屏幕。
-     用户看到的"只有一点点内容，收起却是一整个屏幕"就是这一步。
-     下面让 hold 类在 380ms 的滑出动画里维持卡片几何与单面板内容。 */
-  body.drawer-hold-hot .layout-home .rail,
-  body.drawer-hold-live .layout-home .rail{
-    top:calc(1rem + env(safe-area-inset-top,0px));
-    bottom:auto;height:auto;
-    max-height:calc(100dvh - 2rem);
-    border-radius:1rem 0 0 1rem;
-    box-shadow:0 12px 40px rgba(0,0,0,.14);
-    padding:1rem 1.1rem;
+    height:auto;
+    max-height:92dvh;
   }
   body.drawer-hold-hot .layout-home .rail>.panel:not(.hot){display:none}
   body.drawer-hold-live .layout-home .rail>.panel:not(.act){display:none}
@@ -913,8 +918,14 @@ mjx-container[display="true"]{margin:.9rem 0}
 
 .graph-backdrop{
   position:fixed;inset:0;z-index:calc(var(--gr-z) - 1);
-  background:color-mix(in srgb,var(--foreground) 22%,transparent);
+  /* 22% → 34%。磨砂在部分移动端 webview 上会失效（尤其键盘弹出后），
+     那时仅靠 blur 就等于没有遮罩，读者会看到正文穿透面板边缘。
+     加深底色让「被压下去」这件事即使 blur 不生效也成立。 */
+  background:color-mix(in srgb,var(--foreground) 34%,transparent);
   backdrop-filter:blur(2px);-webkit-backdrop-filter:blur(2px);
+  /* 强制独立合成层：键盘弹出改变视口时，不提升的 fixed 元素常常保留旧的
+     位图缓存，于是底部一条没有模糊。translateZ(0) 让 webview 重新合成。 */
+  transform:translateZ(0);will-change:opacity;
   opacity:0;transition:opacity .24s ease;
 }
 #graph-root.gr-in .graph-backdrop{opacity:1}
@@ -1293,11 +1304,34 @@ html.ask-inline .ask-fab{display:none}
 .ask-answer li{margin:.22rem 0}
 .ask-answer .ask-h{font-weight:700;margin:.6rem 0 .25rem}
 .ask-answer strong{font-weight:700}
+/* 等待首个 token 时的占位动画。
+   形状复刻 loading-v2.json：7 个方块沿对角线错半格铺开，整体缩放脉动。
+   那段 Lottie 是 32×32、46 帧 /1.53s，本质就是这条斜向阶梯带的出现—停留—消失；
+   用 7 层 box-shadow 画阶梯，比引入 ~60KB 的 lottie-web 运行时划算得多。 */
 .ask-answer:empty::after{
-  content:"";display:block;width:1.9rem;height:.95rem;border-radius:.3rem;
-  background:linear-gradient(90deg,var(--muted) 0%,color-mix(in srgb,var(--primary) 30%,var(--muted)) 50%,var(--muted) 100%);
-  background-size:200% 100%;animation:ask-shimmer 1.15s linear infinite}
-@keyframes ask-shimmer{from{background-position:120% 0}to{background-position:-120% 0}}
+  content:"";display:block;
+  width:.4rem;height:.4rem;
+  margin:.55rem 0 .55rem .1rem;
+  border-radius:.08rem;
+  background:var(--primary);
+  box-shadow:
+    .2rem .2rem 0 0 var(--primary),
+    .4rem .4rem 0 0 var(--primary),
+    .6rem .6rem 0 0 var(--primary),
+    .8rem .8rem 0 0 var(--primary),
+    1rem 1rem 0 0 var(--primary),
+    1.2rem 1.2rem 0 0 var(--primary);
+  transform-origin:0 0;
+  animation:ask-stair 1.53s cubic-bezier(.22,1,.36,1) infinite;
+}
+/* 出现、停留、消失、再出现。三段占比照 Lottie 的 0→10 / 10→18 / 18→28 帧推算。 */
+@keyframes ask-stair{
+  0%  {opacity:0;transform:scale(.2)}
+  22% {opacity:1;transform:scale(1)}
+  39% {opacity:1;transform:scale(1)}
+  61% {opacity:0;transform:scale(.2)}
+  100%{opacity:0;transform:scale(.2)}
+}
 
 /* 检索过程的可视化。节奏刻意放缓：原来图标持续旋转、底部还有一条来回扫的光带，
    两者叠加让每一步都像被硬切进来。现在改为静态图标 + 逐行柔和淡入。 */
@@ -1528,24 +1562,22 @@ html.ask-inline .ask-fab{display:none}
     transition:opacity .34s ease,transform .44s cubic-bezier(.22,1,.36,1),
       height .2s ease,bottom .2s ease;
   }
-  /* 胶囊是收起面板的唯一常驻入口，所以它必须始终在面板之上，并且不被面板盖住。
-     抬到 61：面板 60、它的遮罩 59、抽屉 58、书签 59 —— 胶囊要压过这一切。
-     同时面板底边让出胶囊的高度（60px + 1.05rem 底边距 ≈ 77px），
-     否则输入框会落在胶囊后面：实测 elementFromPoint 在胶囊中心取到的是 ask-field。 */
+  /* 胶囊仍然压在面板之上（61 > 面板 60 > 遮罩 59），
+     但它在面板打开时已经整条退场（见 html.ask-open .dock），所以这两者不再抢位置。 */
   body .dock{z-index:61}
+
+  /* 面板铺到底，遮罩也铺到底。
+     旧版这里给胶囊让出 4.6rem：面板底边上抬、遮罩用 clip-path 把底部一条挖掉。
+     挖掉的那条缝在胶囊退场之后就只剩正文 —— 读者看到的是「模糊到一半断了」（图2）。
+     现在两处让位一起去掉：
+       面板 bottom:0，自己盖住那块；
+       遮罩不再 clip，从视口顶到视口底，边缘不留缝。 */
   body.is-home .ask-panel,
   body.is-post .ask-panel,
   body.is-page .ask-panel{
-    bottom:calc(4.6rem + env(safe-area-inset-bottom,0px));
-    height:min(88vh,calc(100dvh - 4.6rem - env(safe-area-inset-bottom,0px)));
-    border-radius:1.25rem;
-  }
-  /* 遮罩不能盖住胶囊，否则「点遮罩关闭」会吃掉对胶囊的点击。
-     用 clip-path 把底部一条挖掉，而不是改 z-index —— 遮罩必须继续压住正文。 */
-  body.is-home .ask-backdrop,
-  body.is-post .ask-backdrop,
-  body.is-page .ask-backdrop{
-    clip-path:inset(0 0 calc(4.6rem + env(safe-area-inset-bottom,0px)) 0);
+    bottom:0;
+    height:min(92vh,calc(100dvh - 3.4rem - env(safe-area-inset-top,0px)));
+    border-radius:1.25rem 1.25rem 0 0;
   }
   .ask-body{padding:.85rem}
   .ask-form{padding-bottom:calc(.55rem + env(safe-area-inset-bottom,0px))}
@@ -1563,6 +1595,8 @@ html.ask-inline .ask-fab{display:none}
     transition:none;animation:none}
   .ask-answer:empty::after{animation:none}
   .ask-dot{animation:none}
+  /* 减少动效时保留静态阶梯：去掉动画但不能让等待区变成空白，否则读者以为卡死了。 */
+  .ask-answer:empty::after{animation:none;opacity:1;transform:scale(1)}
 }
 
 /* ── 页面笔记（关于）───────────────────────────────────────────────── */
@@ -2013,38 +2047,75 @@ html.fns-arrived .shell{animation:fns-arrive-fade .62s cubic-bezier(.22,1,.36,1)
      全部共用同一条遮罩与同一个 class 名，任何时候 body 上只有一个 drawer class ——
      互斥不是靠两个布尔值互相让步，而是靠「只可能存在一个」这条结构约束。
      首页右栏里同时住着活跃度与热门两块，打开哪一条由 body 上的 class 决定只显示哪一块。 */
+  /* ── 底部 sheet ─────────────────────────────────────────────────────────
+     五个面板全部从底部升起。旧的左右抽屉在拇指区之外：右手持机时，
+     从右侧滑出的抽屉要跨过整个屏幕去够，而底部本来就已经有一条常驻胶囊。
+     方向改成自下而上之后，入口与面板在同一个拇指半径内， gestured 也连贯。 */
   body.is-post .aside,body.is-page .aside,body.is-home .aside,
   body.is-post .rail,body.is-page .rail,body.is-home .rail{
     /* display 必须显式写回。本断点前面有一条 .aside,.rail{display:none} 收掉了侧栏,
-       只改 position 会得到一个「fixed 但不可见」的抽屉。 */
+       只改 position 会得到一个「fixed 但不可见」的 sheet。 */
     display:block;
-    position:fixed;top:0;bottom:0;z-index:58;
-    /* 首页的右栏是两个模块共用的容器，内容可长可短。top/bottom 同时设 0 本应撑满视口，
-       但实测在 grid 里退化成「内容高度」（热门只有 262px，抽屉就停在半空）——
-       显式给高度，不跟这条规则较劲。dvh 优先，vh 兜底。 */
-    height:100vh;height:100dvh;
-    width:min(82vw,19rem);
-    max-height:none;margin:0;
-    padding:1.1rem .9rem calc(1.1rem + env(safe-area-inset-bottom,0px));
+    position:fixed;left:0;right:0;bottom:0;top:auto;z-index:58;
+    width:auto;max-width:none;margin:0;
+    border-radius:1.35rem 1.35rem 0 0;
+    /* 顶部多留一点：那一圈是拖拽热区与抓手，正文不该顶到圆角上。
+       底部留出胶囊的高度：胶囊在 sheet 之上，是切换面板的入口，不能藏起来；
+       那就让内容在它上方停住，而不是滑到它底下。 */
+    padding:1.65rem .95rem calc(5rem + env(safe-area-inset-bottom,0px));
     overflow-y:auto;
     background:var(--card);
-    box-shadow:0 0 60px rgba(0,0,0,.16);
-    /* 与页面其它动效同一条缓动曲线,使抽屉和书签读起来是一次动作。 */
-    transition:transform .38s cubic-bezier(.22,1,.36,1);
+    box-shadow:0 -16px 48px rgba(0,0,0,.2);
+    /* 与页面其它动效同一条缓动曲线,使 sheet 与胶囊读起来是一次动作。 */
+    transition:transform .42s cubic-bezier(.22,1,.36,1);
     overscroll-behavior:contain;
+    -webkit-overflow-scrolling:touch;
     /* 自成合成层。遮罩的 backdrop-filter 在移动端 WebKit 上会把同级的 fixed 元素
-       一起卷进它的合成组,抽屉的文字因此也跟着糊掉 —— 这两个属性把抽屉摘出来。 */
+       一起卷进它的合成组,sheet 的文字因此也跟着糊掉 —— 这几个属性把 sheet 摘出来。 */
     isolation:isolate;
     will-change:transform;
   }
-  body.is-post .aside,body.is-page .aside,body.is-home .aside{
-    left:0;border-radius:0 1rem 1rem 0;
-    transform:translateX(-101%);
-  }
+  /* 关闭态一律往下退场，不再分左右。 */
+  body.is-post .aside,body.is-page .aside,body.is-home .aside,
   body.is-post .rail,body.is-page .rail,body.is-home .rail{
-    right:0;border-radius:1rem 0 0 1rem;
-    transform:translateX(101%);
+    transform:translateY(101%);
   }
+
+  /* 抓手：一道 2.5rem 宽的圆角短横，只出现在可拖的三个 sheet 上。
+     用 ::before 而不是新增 DOM —— 它没有任何语义，加节点只会让模板更难读。 */
+  body.is-post .aside::before,
+  body.is-page .aside::before,
+  body.is-home .aside::before,
+  body.is-post .rail::before{
+    content:"";position:absolute;left:50%;top:.62rem;
+    width:2.5rem;height:.25rem;margin-left:-1.25rem;
+    border-radius:999px;background:var(--border);
+  }
+
+  /* 长内容：三档可拖。--sheet-h 由脚本写入，初值 40%。 */
+  body.is-post .aside,body.is-page .aside,body.is-home .aside,
+  body.is-post .rail{
+    height:var(--sheet-h,40dvh);
+    max-height:92dvh;
+    /* 拖动时不要有过渡，否则手指和面板之间会有一层延迟。 */
+    transition:transform .42s cubic-bezier(.22,1,.36,1),height 0s;
+  }
+  body.is-post .aside.is-dragging,body.is-page .aside.is-dragging,body.is-home .aside.is-dragging,
+  body.is-post .rail.is-dragging{
+    transition:transform .42s cubic-bezier(.22,1,.36,1),height 0s;
+  }
+  /* 松手后吸附到档位时才需要过渡。 */
+  body.is-post .aside.is-snapping,body.is-page .aside.is-snapping,body.is-home .aside.is-snapping,
+  body.is-post .rail.is-snapping{
+    transition:height .3s cubic-bezier(.22,1,.36,1);
+  }
+
+  /* 短内容：热门与活跃只有几行，高度随内容，不给拖拽 —— 拉上去还是那么高，
+     那种「拉不动」比不能拉更像故障。 */
+  body.is-home .rail{
+    height:auto;max-height:92dvh;
+  }
+  /* 首页右栏里住着两块，打开哪一块由 body 上的 class 决定只显示哪一块。 */
   /* 抽屉里的卡片不再需要自己的边框与阴影 —— 它们现在住在一个已经有边界的容器里。 */
   body.is-post .aside>.panel,body.is-page .aside>.panel,
   body.is-post .rail>.panel,body.is-page .rail>.panel,body.is-home .rail>.panel{
@@ -2098,20 +2169,33 @@ html.fns-arrived .shell{animation:fns-arrive-fade .62s cubic-bezier(.22,1,.36,1)
   /* 图谱面板:居中浮层,四周留边。
      桌面端它是右下角的停靠卡片;窄屏上那个位置既放不下图,也和两个书签抢地方。
      居中并留边之后,图的可用宽度是屏幕减去两侧边距,而书签仍然露在两侧。 */
+  /* 图谱也是底部 sheet，与目录/大纲/热门/活跃同一套动作语言：
+     自下而上升起、顶部抓手、三档可拖、内部滚动。
+     画布需要高度，所以默认开在 92% 而不是 40% —— 半屏的图什么都看不清。 */
   #graph-root .graph-panel{
-    right:auto;left:50%;bottom:auto;top:50%;
-    width:calc(100vw - 2rem);max-width:26rem;
-    height:min(78vh,40rem);
-    padding:.6rem;
-    border-radius:1.15rem;
-    transform:translate(-50%,-50%) translateY(14px) scale(.975);
-    transform-origin:50% 50%;
+    right:0;left:0;bottom:0;top:auto;
+    width:auto;max-width:none;
+    height:var(--sheet-h,92dvh);max-height:96dvh;
+    /* 同样给胶囊留位：图的底部控件不该被压在胶囊下。 */
+    padding:1.65rem .6rem calc(5rem + env(safe-area-inset-bottom,0px));
+    border-radius:1.35rem 1.35rem 0 0;
+    transform:translateY(101%);
+    transform-origin:50% 100%;
     isolation:isolate;
+    overflow-y:auto;
+    overscroll-behavior:contain;
+    transition:transform .42s cubic-bezier(.22,1,.36,1);
   }
-  /* 打开态必须重新给出居中的 transform —— 桌面那条 .gr-in .graph-panel{transform:none}
-     会把它拉回左上角。 */
+  /* 抓手只画在可拖的三个面板上；图谱复用同一形态，保持视觉一致。 */
+  #graph-root .graph-panel::before{
+    content:"";position:absolute;left:50%;top:.62rem;
+    width:2.5rem;height:.25rem;margin-left:-1.25rem;
+    border-radius:999px;background:var(--border);
+  }
+  /* 打开态：桌面那条 .gr-in .graph-panel{transform:none} 会把它拉回原点，
+     这里显式落到底。 */
   #graph-root.gr-in .graph-panel{
-    transform:translate(-50%,-50%);
+    transform:none;
   }
   #graph-canvas{height:auto;flex:1;min-height:0}
 
@@ -2514,6 +2598,7 @@ html.is-wx .ask-panel{left:.45rem;right:.45rem;width:auto}
      因为 iOS 键盘弹出时只有视觉视口会变，vh 与 bottom 都不会跟着动。 */
   .ask-panel{
     left:.45rem;right:.45rem;width:auto;height:auto;
+    /* 贴底与高度见上文「面板铺到底」。键盘弹出时脚本会覆写内联 top/height。 */
     border-radius:var(--ask-r);
   }
   .ask-cite-x{display:none}

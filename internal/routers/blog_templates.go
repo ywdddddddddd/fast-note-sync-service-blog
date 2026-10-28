@@ -279,7 +279,7 @@ type blogPostView struct {
 // It renders nothing at all when there is no page note — an empty <nav> would still take part in
 // the flex layout and shift the breadcrumb.
 //
-// The "about" entry carries id="fns-warp": that is what the warp transition binds its departing
+// The "about" entry carries: that is what the warp transition binds its departing
 // half to. It moved here from the right-hand card, which is gone — the top bar is now the only
 // way into the résumé, so the transition follows the entry rather than the other way round.
 //
@@ -287,11 +287,11 @@ type blogPostView struct {
 //
 // 没有页面笔记时它什么都不输出：一个空的 <nav> 仍会参与弹性布局，把面包屑挤偏。
 //
-// "about" 那一条带 id="fns-warp"：穿越过渡的「出发」那一半绑的就是它。
+// "about" 那一条带：穿越过渡的「出发」那一半绑的就是它。
 // 它从右栏那张卡片迁到这里，卡片已经撤掉——顶栏现在是通往简历的唯一入口，
 // 所以过渡跟着入口走，而不是让入口迁就过渡。
 const blogTopNav = `
-{{define "topnav"}}{{if or .Pages .HasShelf}}<nav class="topnav">{{range .Pages}}<a href="{{.URL}}"{{if eq .Alias "about"}} id="fns-warp"{{end}}>{{.Title}}</a>{{end}}{{if .HasShelf}}<a href="/blog/shelf">资料</a>{{end}}</nav>{{end}}{{end}}`
+{{define "topnav"}}{{if or .Pages .HasShelf}}<nav class="topnav">{{range .Pages}}<a href="{{.URL}}"{{if eq .Alias "about"}}{{end}}>{{.Title}}</a>{{end}}{{if .HasShelf}}<a href="/blog/shelf">资料</a>{{end}}</nav>{{end}}{{end}}`
 
 // blogFooterLegal is the shared filing-number block.
 //
@@ -666,6 +666,14 @@ var blogHomeTmpl = template.Must(template.New("blog-home").Funcs(blogAssetFuncs)
       setDrawer(name);
     }
   }
+  // 穿越的包装：脚本没就绪或用户要减少动效时，退回普通跳转。
+  // 直接调 window.fnsWarp 会在它尚未定义时抛错，按钮就变成"点了没反应"——
+  // 这正是这次要修的问题，不能再用一个可能不存在的函数去修它。
+  function warp(url) {
+    if (!url) { return; }
+    if (typeof window.fnsWarp === 'function') { window.fnsWarp(url); return; }
+    location.href = url;
+  }
   function bind(id, slot, action) {
     var b = document.getElementById(id);
     if (!b) { return; }
@@ -688,8 +696,9 @@ var blogHomeTmpl = template.Must(template.New("blog-home").Funcs(blogAssetFuncs)
     if (!cards.length) { return false; }
     var href = cards[Math.floor(Math.random() * cards.length)].getAttribute('href');
     if (!href) { return false; }
-    prefetch(href);
-    setTimeout(function () { location.href = href; }, SLIDE);
+    // 首页已在 /blog，列表就在眼前，直接挑一张卡片跳，不必绕服务端。
+    // 仍然走穿越，让「漫游」与跨页跳转是同一种体验。
+    warp(href);
     return true;
   }
   bind('dock-walk', 2, walk);
@@ -757,6 +766,7 @@ var blogHomeTmpl = template.Must(template.New("blog-home").Funcs(blogAssetFuncs)
 {{if .AskEnabled}}
 <div id="ask-root"></div>
 <script src="/blog/ask.js?v={{assetVer}}" defer></script>
+<script src="/blog/sheet.js?v={{assetVer}}" defer></script>
 {{end}}
 <script src="/blog/lightbox.js?v={{assetVer}}" defer></script>
 </body>
@@ -978,6 +988,7 @@ var blogPostTmpl = template.Must(template.New("blog-post").Funcs(blogAssetFuncs)
 {{if .AskEnabled}}
 <div id="ask-root"></div>
 <script src="/blog/ask.js?v={{assetVer}}" defer></script>
+<script src="/blog/sheet.js?v={{assetVer}}" defer></script>
 {{end}}
 <script src="/blog/lightbox.js?v={{assetVer}}" defer></script>
 
@@ -995,10 +1006,6 @@ var blogPostTmpl = template.Must(template.New("blog-post").Funcs(blogAssetFuncs)
 
        两个侧栏由 CSS 直接变成抽屉,这里没有复制任何内容。
        把目录树复制进第二个容器意味着两处要同步,而服务端已经恰好渲染了一份。 -->
-  <button type="button" class="fns-tab fns-tab-r" id="fns-tab-toc"
-          aria-label="本页目录" aria-expanded="false" aria-controls="fns-toc-drawer">
-    <span class="fns-tab-ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m9.5 6.5 5.5 5.5-5.5 5.5"/></svg></span>
-  </button>
 
   <!-- 阅读页的五点胶囊：山（全局目录）· 图谱 · 首页 · 漫游 · 问道。
        左书签撤掉了 —— 全局目录的入口在这里的「山」上，同一个页面不需要两个通往目录的入口。
@@ -1011,11 +1018,11 @@ var blogPostTmpl = template.Must(template.New("blog-post").Funcs(blogAssetFuncs)
     <button type="button" class="dock-b" data-i="1" id="dock-graph" aria-label="知识图谱">
       <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="m7.775 3.275 1.25-1.25a3.5 3.5 0 1 1 4.95 4.95l-2.5 2.5a3.5 3.5 0 0 1-4.95 0 .751.751 0 0 1 .018-1.042.751.751 0 0 1 1.042-.018 1.998 1.998 0 0 0 2.83 0l2.5-2.5a2.002 2.002 0 0 0-2.83-2.83l-1.25 1.25a.751.751 0 0 1-1.042-.018.751.751 0 0 1-.018-1.042Zm-4.69 9.64a1.998 1.998 0 0 0 2.83 0l1.25-1.25a.751.751 0 0 1 1.042.018.751.751 0 0 1 .018 1.042l-1.25 1.25a3.5 3.5 0 1 1-4.95-4.95l2.5-2.5a3.5 3.5 0 0 1 4.95 0 .751.751 0 0 1-.018 1.042.751.751 0 0 1-1.042.018 1.998 1.998 0 0 0-2.83 0l-2.5 2.5a1.998 1.998 0 0 0 0 2.83Z"/></svg>
     </button>
-    <button type="button" class="dock-b" data-i="2" id="dock-walk" aria-label="漫游 · 随机打开一篇笔记">
-      <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M13.25 1c.966 0 1.75.784 1.75 1.75v10.5c0 .464-.184.909-.513 1.237A1.746 1.746 0 0 1 13.25 15H2.75c-.464 0-.909-.184-1.237-.513A1.746 1.746 0 0 1 1 13.25V2.75C1 1.784 1.784 1 2.75 1h10.5ZM2.75 2.5a.25.25 0 0 0-.25.25v10.5c0 .138.112.25.25.25h10.5a.25.25 0 0 0 .25-.25V2.75a.25.25 0 0 0-.25-.25H2.75Z"/><path d="M5 12a1 1 0 1 0 0-2 1 1 0 0 0 0 2Zm6-6a1 1 0 1 0 0-2 1 1 0 0 0 0 2ZM8 9a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z"/></svg>
-    </button>
-    <button type="button" class="dock-b" data-i="3" id="dock-home" aria-label="回首页">
+    <button type="button" class="dock-b" data-i="2" id="dock-home" aria-label="回首页">
       <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M6.906.664a1.749 1.749 0 0 1 2.187 0l5.25 4.2c.415.332.657.835.657 1.367v7.019A1.75 1.75 0 0 1 13.25 15h-3.5a.75.75 0 0 1-.75-.75V9H7v5.25a.75.75 0 0 1-.75.75h-3.5A1.75 1.75 0 0 1 1 13.25V6.23c0-.531.242-1.034.657-1.366l5.25-4.2Zm1.25 1.171a.25.25 0 0 0-.312 0l-5.25 4.2a.25.25 0 0 0-.094.196v7.019c0 .138.112.25.25.25H5.5V8.25a.75.75 0 0 1 .75-.75h3.5a.75.75 0 0 1 .75.75v5.25h2.75a.25.25 0 0 0 .25-.25V6.23a.25.25 0 0 0-.094-.195Z"/></svg>
+    </button>
+    <button type="button" class="dock-b" data-i="3" id="dock-toc" aria-label="本页大纲" aria-expanded="false">
+      <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M5.75 2.5h8.5a.75.75 0 0 1 0 1.5h-8.5a.75.75 0 0 1 0-1.5Zm0 5h8.5a.75.75 0 0 1 0 1.5h-8.5a.75.75 0 0 1 0-1.5Zm0 5h8.5a.75.75 0 0 1 0 1.5h-8.5a.75.75 0 0 1 0-1.5ZM2 14a1 1 0 1 1 0-2 1 1 0 0 1 0 2Zm1-6a1 1 0 1 1-2 0 1 1 0 0 1 2 0ZM2 4a1 1 0 1 1 0-2 1 1 0 0 1 0 2Z"/></svg>
     </button>
     <button type="button" class="dock-b" data-i="4" id="dock-ask" aria-label="问道 · 向知识库提问" aria-expanded="false" data-ask-open>
       <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M1.75 1h8.5c.966 0 1.75.784 1.75 1.75v5.5A1.75 1.75 0 0 1 10.25 10H7.061l-2.574 2.573A1.458 1.458 0 0 1 2 11.543V10h-.25A1.75 1.75 0 0 1 0 8.25v-5.5C0 1.784.784 1 1.75 1ZM1.5 2.75v5.5c0 .138.112.25.25.25h1a.75.75 0 0 1 .75.75v2.19l2.72-2.72a.749.749 0 0 1 .53-.22h3.5a.25.25 0 0 0 .25-.25v-5.5a.25.25 0 0 0-.25-.25h-8.5a.25.25 0 0 0-.25.25Zm13 2a.25.25 0 0 0-.25-.25h-.5a.75.75 0 0 1 0-1.5h.5c.966 0 1.75.784 1.75 1.75v5.5A1.75 1.75 0 0 1 14.25 12H14v1.543a1.458 1.458 0 0 1-2.487 1.03L9.22 12.28a.749.749 0 0 1 .326-1.275.749.749 0 0 1 .734.215l2.22 2.22v-2.19a.75.75 0 0 1 .75-.75h1a.25.25 0 0 0 .25-.25Z"/></svg>
@@ -1035,10 +1042,10 @@ var blogPostTmpl = template.Must(template.New("blog-post").Funcs(blogAssetFuncs)
      漫游交给首页处理，因为只有首页手上有 146 张卡可以随机挑。 */
   (function () {
     var b = document.body;
-    var tabToc = document.getElementById('fns-tab-toc');
-    var scrim = document.getElementById('fns-scrim');
     var dock = document.getElementById('fns-dock');
-    if (!tabToc || !scrim || !dock) return;
+    var tabToc = document.getElementById('dock-toc');
+    var scrim = document.getElementById('fns-scrim');
+    if (!dock || !tabToc || !scrim) return;
 
     var NAV = 'drawer-nav', TOC = 'drawer-toc';
     // 跨页进来时让胶囊自己重组一次：读者因此知道这一条的顺序与上一页不同。
@@ -1087,7 +1094,15 @@ var blogPostTmpl = template.Must(template.New("blog-post").Funcs(blogAssetFuncs)
     function prefetch(href) {
       try { fetch(href, { credentials: 'same-origin' }).catch(function () {}); } catch (e) {}
     }
-    function bind(id, slot, action) {
+    // 穿越的包装：脚本没就绪或用户要减少动效时，退回普通跳转。
+  // 直接调 window.fnsWarp 会在它尚未定义时抛错，按钮就变成"点了没反应"——
+  // 这正是这次要修的问题，不能再用一个可能不存在的函数去修它。
+  function warp(url) {
+    if (!url) { return; }
+    if (typeof window.fnsWarp === 'function') { window.fnsWarp(url); return; }
+    location.href = url;
+  }
+  function bind(id, slot, action) {
       var el = document.getElementById(id);
       if (!el) return;
       el.addEventListener('click', function (e) {
@@ -1101,14 +1116,10 @@ var blogPostTmpl = template.Must(template.New("blog-post").Funcs(blogAssetFuncs)
       var fab = document.getElementById('graph-fab');
       if (fab) fab.click();
     });
-    bind('dock-home', 3, function () {
-      prefetch('/blog');
-      setTimeout(function () { location.href = '/blog'; }, SLIDE);
+    bind('dock-home', 2, function () {
+      warp('/blog');
     });
-    bind('dock-walk', 2, function () {
-      prefetch('/blog');
-      setTimeout(function () { location.href = '/blog#walk'; }, SLIDE);
-    });
+
     // 问道由 ask 脚本的 data-ask-open 接管，这里只管滑块与震动。
     bind('dock-ask', 4, null);
 
@@ -1306,6 +1317,7 @@ var blogPageTmpl = template.Must(template.New("blog-page").Funcs(blogAssetFuncs)
 {{if .AskEnabled}}
 <div id="ask-root"></div>
 <script src="/blog/ask.js?v={{assetVer}}" defer></script>
+<script src="/blog/sheet.js?v={{assetVer}}" defer></script>
 {{end}}
 <script src="/blog/lightbox.js?v={{assetVer}}" defer></script>
 
@@ -1325,21 +1337,17 @@ var blogPageTmpl = template.Must(template.New("blog-page").Funcs(blogAssetFuncs)
        把目录树复制进第二个容器意味着两处要同步,而服务端已经恰好渲染了一份。 -->
   <!-- 页面笔记是终点，不是中转站：全局目录在这里本来就不存在，
        所以只留一个本页大纲的书签。 -->
-  <button type="button" class="fns-tab fns-tab-r" id="fns-tab-toc"
-          aria-label="本页目录" aria-expanded="false" aria-controls="fns-toc-drawer">
-    <span class="fns-tab-ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m9.5 6.5 5.5 5.5-5.5 5.5"/></svg></span>
-  </button>
 
   <!-- 页面笔记的三点胶囊：首页 · 漫游 · 问道。
        比阅读页少两格，因为这两种东西在这一页上不存在 —— 全局目录没有（页面是终点），
        局部图谱也没有（本页不携带图谱）。少两格比给对方一个点了没反应的键诚实。 -->
   <div class="dock" id="fns-dock" role="group" aria-label="页面入口" data-slot="0">
     <span class="dock-thumb" aria-hidden="true"></span>
-    <button type="button" class="dock-b" data-i="0" id="dock-home" aria-label="回首页">
-      <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M6.906.664a1.749 1.749 0 0 1 2.187 0l5.25 4.2c.415.332.657.835.657 1.367v7.019A1.75 1.75 0 0 1 13.25 15h-3.5a.75.75 0 0 1-.75-.75V9H7v5.25a.75.75 0 0 1-.75.75h-3.5A1.75 1.75 0 0 1 1 13.25V6.23c0-.531.242-1.034.657-1.366l5.25-4.2Zm1.25 1.171a.25.25 0 0 0-.312 0l-5.25 4.2a.25.25 0 0 0-.094.196v7.019c0 .138.112.25.25.25H5.5V8.25a.75.75 0 0 1 .75-.75h3.5a.75.75 0 0 1 .75.75v5.25h2.75a.25.25 0 0 0 .25-.25V6.23a.25.25 0 0 0-.094-.195Z"/></svg>
+    <button type="button" class="dock-b" data-i="0" id="dock-toc" aria-label="本页大纲" aria-expanded="false">
+      <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M5.75 2.5h8.5a.75.75 0 0 1 0 1.5h-8.5a.75.75 0 0 1 0-1.5Zm0 5h8.5a.75.75 0 0 1 0 1.5h-8.5a.75.75 0 0 1 0-1.5Zm0 5h8.5a.75.75 0 0 1 0 1.5h-8.5a.75.75 0 0 1 0-1.5ZM2 14a1 1 0 1 1 0-2 1 1 0 0 1 0 2Zm1-6a1 1 0 1 1-2 0 1 1 0 0 1 2 0ZM2 4a1 1 0 1 1 0-2 1 1 0 0 1 0 2Z"/></svg>
     </button>
-    <button type="button" class="dock-b" data-i="1" id="dock-walk" aria-label="漫游 · 随机打开一篇笔记">
-      <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M13.25 1c.966 0 1.75.784 1.75 1.75v10.5c0 .464-.184.909-.513 1.237A1.746 1.746 0 0 1 13.25 15H2.75c-.464 0-.909-.184-1.237-.513A1.746 1.746 0 0 1 1 13.25V2.75C1 1.784 1.784 1 2.75 1h10.5ZM2.75 2.5a.25.25 0 0 0-.25.25v10.5c0 .138.112.25.25.25h10.5a.25.25 0 0 0 .25-.25V2.75a.25.25 0 0 0-.25-.25H2.75Z"/><path d="M5 12a1 1 0 1 0 0-2 1 1 0 0 0 0 2Zm6-6a1 1 0 1 0 0-2 1 1 0 0 0 0 2ZM8 9a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z"/></svg>
+    <button type="button" class="dock-b" data-i="1" id="dock-home" aria-label="回首页">
+      <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M6.906.664a1.749 1.749 0 0 1 2.187 0l5.25 4.2c.415.332.657.835.657 1.367v7.019A1.75 1.75 0 0 1 13.25 15h-3.5a.75.75 0 0 1-.75-.75V9H7v5.25a.75.75 0 0 1-.75.75h-3.5A1.75 1.75 0 0 1 1 13.25V6.23c0-.531.242-1.034.657-1.366l5.25-4.2Zm1.25 1.171a.25.25 0 0 0-.312 0l-5.25 4.2a.25.25 0 0 0-.094.196v7.019c0 .138.112.25.25.25H5.5V8.25a.75.75 0 0 1 .75-.75h3.5a.75.75 0 0 1 .75.75v5.25h2.75a.25.25 0 0 0 .25-.25V6.23a.25.25 0 0 0-.094-.195Z"/></svg>
     </button>
     <button type="button" class="dock-b" data-i="2" id="dock-ask" aria-label="问道 · 向知识库提问" aria-expanded="false" data-ask-open>
       <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M1.75 1h8.5c.966 0 1.75.784 1.75 1.75v5.5A1.75 1.75 0 0 1 10.25 10H7.061l-2.574 2.573A1.458 1.458 0 0 1 2 11.543V10h-.25A1.75 1.75 0 0 1 0 8.25v-5.5C0 1.784.784 1 1.75 1ZM1.5 2.75v5.5c0 .138.112.25.25.25h1a.75.75 0 0 1 .75.75v2.19l2.72-2.72a.749.749 0 0 1 .53-.22h3.5a.25.25 0 0 0 .25-.25v-5.5a.25.25 0 0 0-.25-.25h-8.5a.25.25 0 0 0-.25.25Zm13 2a.25.25 0 0 0-.25-.25h-.5a.75.75 0 0 1 0-1.5h.5c.966 0 1.75.784 1.75 1.75v5.5A1.75 1.75 0 0 1 14.25 12H14v1.543a1.458 1.458 0 0 1-2.487 1.03L9.22 12.28a.749.749 0 0 1 .326-1.275.749.749 0 0 1 .734.215l2.22 2.22v-2.19a.75.75 0 0 1 .75-.75h1a.25.25 0 0 0 .25-.25Z"/></svg>
@@ -1348,7 +1356,7 @@ var blogPageTmpl = template.Must(template.New("blog-page").Funcs(blogAssetFuncs)
   <script>
   (function () {
     var b = document.body;
-    var tabToc = document.getElementById('fns-tab-toc');
+    var tabToc = document.getElementById('dock-toc');
     var scrim = document.getElementById('fns-scrim');
     if (!tabToc || !scrim) return;
 
@@ -1385,6 +1393,14 @@ var blogPageTmpl = template.Must(template.New("blog-page").Funcs(blogAssetFuncs)
     function prefetch(href) {
       try { fetch(href, { credentials: 'same-origin' }).catch(function () {}); } catch (e) {}
     }
+    // 穿越的包装：脚本没就绪或用户要减少动效时，退回普通跳转。
+    // 直接调 window.fnsWarp 会在它尚未定义时抛错，按钮就变成"点了没反应"——
+    // 这正是这次要修的问题，不能再用一个可能不存在的函数去修它。
+    function warp(url) {
+      if (!url) { return; }
+      if (typeof window.fnsWarp === 'function') { window.fnsWarp(url); return; }
+      location.href = url;
+    }
     function bind(id, slot, fn) {
       var el = document.getElementById(id);
       if (!el) return;
@@ -1393,14 +1409,10 @@ var blogPageTmpl = template.Must(template.New("blog-page").Funcs(blogAssetFuncs)
         if (fn) fn(e);
       });
     }
-    bind('dock-home', 0, function () {
-      prefetch('/blog');
-      setTimeout(function () { location.href = '/blog'; }, SLIDE);
+    bind('dock-home', 1, function () {
+      warp('/blog');
     });
-    bind('dock-walk', 1, function () {
-      prefetch('/blog');
-      setTimeout(function () { location.href = '/blog#walk'; }, SLIDE);
-    });
+
     // 问道由 ask 脚本的 data-ask-open 接管，这里只管滑块与震动。
     bind('dock-ask', 2, null);
 

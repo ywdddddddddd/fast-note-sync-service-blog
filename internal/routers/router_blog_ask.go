@@ -68,6 +68,21 @@ func registerBlogAskRoutes(r *gin.Engine, appContainer *app.App) {
 		c.String(http.StatusOK, blogLightboxScript)
 	})
 
+	// Bottom-sheet dragging. Gated by the blog switch only, for the same reason as the
+	// lightbox: it is pure interaction, and tying it to the Q&A flag would make every drawer
+	// stop dragging whenever the model was off.
+	//
+	// 底部 sheet 拖拽。与灯箱同理只受博客总开关约束：它是纯交互，
+	// 绑到问答开关上会导致模型一关、所有抽屉都不能拖。
+	r.GET("/blog/sheet.js", func(c *gin.Context) {
+		if _, ok := blogEnabled(c, appContainer); !ok {
+			return
+		}
+		c.Header("Content-Type", "application/javascript; charset=utf-8")
+		c.Header("Cache-Control", "no-cache")
+		c.String(http.StatusOK, blogSheetScript)
+	})
+
 	r.POST("/api/blog/ask", func(c *gin.Context) {
 		_, ok := blogEnabled(c, appContainer)
 		if !ok {

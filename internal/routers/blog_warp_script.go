@@ -55,13 +55,7 @@ const blogWarpScript = `
   var FLAG = 'fns:warp';
 
   // ── The arriving half runs on every page ────────────────────────────────────────────────
-  // This block comes first on purpose. It used to sit at the bottom, after the guard that returns
-  // when the home page's entry point is missing — which meant it never ran on the résumé page, the
-  // one page it exists for.
-  //
-  // ── 抵达的那一半在每个页面上运行 ────────────────────────────────────────────────────────
-  // 这一块刻意放在最前。它原本在末尾，位于「首页入口不存在就返回」的守卫之后 ——
-  // 那意味着它在简历页上永远不会运行，而简历页正是它唯一存在的理由。
+  // 抵达的那一半在每个页面上运行
   var arrived = null;
   try { arrived = sessionStorage.getItem(FLAG); } catch (e) {}
   if (arrived) {
@@ -74,21 +68,26 @@ const blogWarpScript = `
     }, 900);
   }
 
-  // ── The departing half needs the home page's entry point ────────────────────────────────
-  // ── 出发的那一半需要首页的入口 ──────────────────────────────────────────────────────────
-  var link = document.getElementById('fns-warp');
-  if (!link) return;
-
   var STILL = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+  var running = false;
 
-  link.addEventListener('click', function (ev) {
-    // Only the plain left click. Ctrl/cmd/middle click mean "open elsewhere", and hijacking those
-    // is how a link stops behaving like a link.
-    // 只接管普通的左键点击。Ctrl/⌘/中键表示「在别处打开」，抢走它们就是一个链接不再像链接的方式。
-    if (ev.defaultPrevented || ev.button !== 0 || ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.altKey) return;
-    if (STILL) return;   // Reduced motion: let the browser navigate plainly. // 减少动效：交给浏览器普通导航。
+  // ── The departing half, exposed so JS navigations can use it too ────────────────────────
+  //
+  // Dock entries are buttons with JS handlers, not links, so there is nothing for the click
+  // delegation below to intercept. They call this directly instead.
+  //
+  // 出发的那一半，同时暴露给 JS 跳转使用。
+  //
+  // 胶囊里的入口是带 JS 处理器的按钮而不是链接，下面那层点击代理拦不到它们；
+  // 它们直接调这个函数。
+  function warpTo(url) {
+    if (!url) return;
+    if (STILL) { location.href = url; return; }
+    // A second click during the flight would stack canvases and start a second animation.
+    // 飞行途中再点一次会叠起第二块画布和第二套动画。
+    if (running) return;
+    running = true;
 
-    ev.preventDefault();
     try { sessionStorage.setItem(FLAG, '1'); } catch (e) {}
 
     var w = window.innerWidth, h = window.innerHeight;
@@ -158,12 +157,63 @@ const blogWarpScript = `
       if (p < 1) {
         requestAnimationFrame(tick);
       } else {
-        location.href = link.getAttribute('href');
+        location.href = url;
       }
     }
     requestAnimationFrame(tick);
+  }
+
+  window.fnsWarp = warpTo;
+
+  // ── Click delegation for in-site note links ─────────────────────────────────────────────
+  //
+  // Only plain left clicks. Ctrl/cmd/middle mean "open elsewhere", and hijacking those is how a
+  // link stops behaving like a link.
+  //
+  // 站内笔记链接的点击代理。
+  //
+  // 只接管普通左键。Ctrl/⌘/中键表示「在别处打开」，抢走它们就等于让链接不再像链接。
+  //
+  // 用委托而不是逐个绑定：目录树、热门列表、页末推荐、图谱节点都是服务端渲染的，
+  // 一次性遍历要给每个都挂监听，而且图谱节点是后来插进来的，遍历时还不存在。
+  // 非文章的路径段。见上面点击代理里的说明。
+  var SEGMENT_SKIP = {
+    'rss.xml': 1, 'graph': 1, 'shelf': 1, 'walk': 1,
+    'ask.js': 1, 'lightbox.js': 1, 'sheet.js': 1
+  };
+
+  document.addEventListener('click', function (ev) {
+    if (ev.defaultPrevented || ev.button !== 0 || ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.altKey) return;
+    var a = ev.target && ev.target.closest ? ev.target.closest('a[href]') : null;
+    if (!a) return;
+    // download / target=_blank / 外站 / 纯锚点 都不是「去读另一篇」。
+    if (a.hasAttribute('download')) return;
+    if (a.target && a.target !== '_self') return;
+
+    var href = a.getAttribute('href') || '';
+    if (!href || href.charAt(0) === '#') return;
+    // Only in-site note links. The index, the shelf, feeds and the graph endpoint are not
+    // articles: warping into them would be theatre without a destination.
+    // 只拦站内笔记链接。索引、书架、订阅源与图谱端点不是文章，
+    // 对着它们播穿越是没有目的地的表演。
+    if (!/^\/blog\/[^/?#]+$/.test(href)) return;
+    // 字面段不是文章：订阅源、图谱端点、资料书架、随机漫游端点、几个共享脚本。
+    // 它们都只有一个路径段，因此形状上与文章看不出区别，只能按名字排除。
+    // 对着一个 RSS 文件播穿越，是没有目的地的表演。
+    var seg = href.replace(/^\/blog\//, '').split(/[?#]/)[0];
+    if (SEGMENT_SKIP[seg]) return;
+    // /blog/walk is a redirect endpoint, not an article — but it *is* a "go somewhere random"
+    // action and deserves the same treatment, so it is handled by the caller, not here.
+    // /blog/walk 是重定向端点而不是文章，但它同样是一次「去某处」的动作，
+    // 由调用方处理，不在这里拦。
+
+    if (STILL) return;   // Reduced motion: let the browser navigate plainly. // 减少动效：交给浏览器普通导航。
+
+    ev.preventDefault();
+    warpTo(href);
   });
 })();
+
 `
 
 // blogWarpJS returns the warp script.

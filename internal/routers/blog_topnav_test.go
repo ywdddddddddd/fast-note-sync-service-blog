@@ -74,26 +74,6 @@ func TestTopNavIsWiredOnEveryPage(t *testing.T) {
 	}
 }
 
-// The warp transition's departing half binds to #fns-warp. That id used to live on the "about me"
-// card in the right-hand column; the card is gone and the anchor moved into the top bar. If the
-// anchor and the script ever disagree, the transition silently stops playing — nothing throws.
-//
-// 穿越过渡的「出发」那一半绑定 #fns-warp。这个 id 原本在右栏「关于我」那张卡片上；
-// 卡片已撤，锚点迁进顶栏。锚点与脚本一旦对不上，过渡会安静地不再播放——没有任何报错。
-func TestWarpAnchorLivesInTopNav(t *testing.T) {
-	if !strings.Contains(blogTopNav, `id="fns-warp"`) {
-		t.Fatalf("topnav does not carry id=\"fns-warp\"; the warp departure would never bind")
-	}
-	if !strings.Contains(blogWarpJS(), "getElementById('fns-warp')") {
-		t.Fatalf("warp script no longer looks up fns-warp; the anchor above is dead")
-	}
-	// The anchor is attached to the page-note entry whose alias is "about", not to every entry.
-	// 锚点挂在别名为 "about" 的那一条上，而不是每一条上。
-	if !strings.Contains(blogTopNav, `eq .Alias "about"`) {
-		t.Fatalf("topnav does not gate the warp anchor on the about alias")
-	}
-}
-
 // A real render, not just an AST check. The page-note template is the one of the three that can
 // be executed with an empty view — it has no stats pointer to dereference — so it supplies the
 // end-to-end evidence that the include, the data and the escaping work together.
@@ -114,7 +94,7 @@ func TestPageTopNavRendersAboutEntry(t *testing.T) {
 	out := buf.String()
 	for _, want := range []string{
 		`<nav class="topnav">`,
-		`<a href="/blog/about" id="fns-warp">关于我</a>`,
+		`<a href="/blog/about">关于我</a>`,
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("rendered page lacks %q", want)
