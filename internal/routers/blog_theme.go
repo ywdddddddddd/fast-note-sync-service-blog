@@ -300,6 +300,253 @@ img{max-width:100%;height:auto;border-radius:.5rem}
 .item-meta span{display:inline-flex;align-items:center;gap:.25rem}
 .item-meta svg{width:11px;height:11px}
 
+/* 视图切换用 hidden 属性收起非活动视图。必须显式写这条：浏览器默认样式表的
+   [hidden]{display:none} 优先级低于作者样式表，而 .list 与 .cover-grid 都自带
+   display 值，于是 hidden 会被静默忽略 —— 表现是切到封面后列表仍然画在下面。
+   实测：属性读出来是 true，画面却纹丝不动。 */
+.list[hidden],.cover-grid[hidden],.wheel-root[hidden]{display:none}
+
+/* ── 标题行 + 三段式视图开关 ──────────────────────────────────────────────
+   开关与它控制的内容同处一行，不污染顶栏。移动端整块隐藏：封面与动效都需要横向空间，
+   而且手机上的卡片网格会把「全部笔记」撑成无限长的一列。
+   用 opacity/visibility 而不是 display:none —— 让过渡能在断点两侧平滑发生。 */
+.list-head{display:flex;align-items:center;justify-content:space-between;gap:1rem}
+.list-head .card-title{margin:0}
+
+.view-switch{
+  display:inline-flex;align-items:center;gap:.15rem;flex:none;
+  padding:.2rem;border-radius:.7rem;
+  background:color-mix(in srgb,var(--muted) 26%,transparent);
+  transition:opacity .32s ease,visibility .32s ease;
+}
+.vs-btn{
+  margin:0;padding:.32rem .62rem;border:0;border-radius:.52rem;
+  background:transparent;color:var(--muted-foreground);cursor:pointer;
+  font-family:inherit;font-size:.75rem;font-weight:500;line-height:1.4;
+  letter-spacing:.01em;white-space:nowrap;
+  -webkit-appearance:none;appearance:none;
+  transition:color .2s ease,background-color .24s ease,box-shadow .24s ease;
+}
+.vs-btn:hover{color:var(--foreground)}
+.vs-btn:focus-visible{outline:2px solid var(--primary);outline-offset:1px}
+.vs-btn.is-on{
+  background:var(--background);color:var(--foreground);
+  box-shadow:0 .1rem .3rem -.05rem color-mix(in srgb,var(--foreground) 16%,transparent);
+}
+@media (max-width:860px){
+  .view-switch{display:none}
+}
+
+/* ── 封面模式：等宽正方形网格 ────────────────────────────────────────────
+   三列是参照图的比例，也是这个内容宽度下卡片最大的列数：再少一列卡片会大到失衡，
+   再多一列则摘要只剩一行可读。 */
+.cover-grid{
+  display:grid;grid-template-columns:repeat(3,minmax(0,1fr));
+  gap:1.1rem;margin-top:1.15rem;
+  animation:coverGridIn .42s cubic-bezier(.22,1,.36,1) both;
+}
+@keyframes coverGridIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+
+.cover-card{
+  display:flex;flex-direction:column;overflow:hidden;
+  border:1px solid var(--border);border-radius:.95rem;
+  background:var(--card);text-decoration:none;color:inherit;
+  transition:transform .3s cubic-bezier(.22,1,.36,1),box-shadow .3s ease,border-color .3s ease;
+}
+.cover-card:hover{
+  transform:translateY(-3px);
+  border-color:color-mix(in srgb,var(--foreground) 16%,transparent);
+  box-shadow:0 .9rem 1.9rem -.7rem color-mix(in srgb,var(--foreground) 22%,transparent);
+}
+.cover-card:focus-visible{outline:2px solid var(--primary);outline-offset:2px}
+
+/* 画框本身永远是正方形：那是三个视图共同的语言，也是圆形轨道上唯一能对齐的形状。 */
+.cover-frame{
+  position:relative;width:100%;aspect-ratio:1/1;overflow:hidden;
+  background:var(--muted);
+}
+.cover-frame img,.cover-frame video{
+  position:absolute;inset:0;width:100%;height:100%;
+  object-fit:cover;display:block;
+}
+/* zoom 由内联 --cz 提供，缩放围绕作者选的焦点发生 —— 这正是「裁切」的可视含义。 */
+.cover-frame img,.cover-frame video{
+  transform:scale(var(--cz,1));
+  transform-origin:var(--fx,50%) var(--fy,50%);
+}
+.cover-card:hover .cover-frame img{transform:scale(calc(var(--cz,1) * 1.03))}
+.cover-frame{transition:none}
+.cover-frame img,.cover-frame video{transition:transform .45s cubic-bezier(.22,1,.36,1)}
+
+/* 没有封面：一块平色 #F3EFE7 —— 与参照页给纯文字吊舱的颜色相同。
+   早先按标题派生颜色、再叠一层渐变高光，结果是 150 张卡片连成一片米色糊；
+   平色反而让每张卡读起来是一个独立的物体。 */
+.cover-frame--blank{background:#F3EFE7}
+.cover-card-body{padding:.72rem .85rem .85rem;display:flex;flex-direction:column;gap:.3rem;flex:1}
+.cover-card-title{
+  margin:0;font-size:.9375rem;font-weight:600;line-height:1.42;letter-spacing:-.01em;
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;
+}
+.cover-card:hover .cover-card-title{color:var(--primary)}
+.cover-card-meta{
+  margin-top:auto;display:flex;flex-wrap:wrap;align-items:center;gap:.55rem;
+  font-size:.6875rem;color:var(--c3);
+}
+.cover-card-meta span{display:inline-flex;align-items:center;gap:.22rem}
+.cover-card-meta svg{width:11px;height:11px}
+
+/* ── 动效模式：整页同心轮 ────────────────────────────────────────────────
+   下列取值逐条照抄参照页（deepseek_html_20261028_1eb36f.html），只把卡片的形状与
+   内容换成本站的：18px 卡片圆角、白色卡面、#F3EFE7 无图款、#33312E 文字、
+   rgba(0,0,0,.08) 边框、0 4px 20px rgba(0,0,0,.05) 阴影、14px 内部圆角。
+   上一版用了自己调的米色渐变，与参照页已经不是一回事，这一版改回原值。 */
+.wheel-root{
+  position:fixed;inset:0;z-index:120;
+  background:var(--background);
+  opacity:0;visibility:hidden;
+  transition:opacity .38s cubic-bezier(.22,1,.36,1),visibility 0s linear .38s;
+}
+.wheel-root.is-in{opacity:1;visibility:visible;transition:opacity .38s cubic-bezier(.22,1,.36,1),visibility 0s}
+/* 背景必须与站点一致：白底 + 20px 点阵。
+   上一版直接照抄参照页的 #FAF8F5 纯色，结果它把站点原有那层点阵整个盖住，
+   整个模式看起来就是一块死白 —— 参照页的暖白是它自己的底，不是这里的底。 */
+.wheel-root::before{
+  content:"";position:absolute;inset:0;pointer-events:none;
+  background-image:radial-gradient(circle,var(--dot) 1px,transparent 1px);
+  background-size:20px 20px;background-position:center;
+  opacity:.5;
+}
+.wheel-stage{position:absolute;inset:0}
+
+/* 同心轨道虚线：参照页用 1px dashed rgba(0,0,0,.05) 把两个圆画出来。
+   它几乎看不见，但正是它让画面读成「摩天轮」而不是「漂浮的方块」。 */
+.wheel-track{
+  position:absolute;left:50%;top:50%;border-radius:50%;
+  border:1px dashed rgba(0,0,0,.05);
+  transform:translate(-50%,-50%);
+  pointer-events:none;z-index:2;
+}
+
+.wheel-title{
+  position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
+  z-index:20;pointer-events:none;text-align:center;
+}
+/* clamp(3rem,5.2vw,4.4rem) 是参照页 hero 的字号。 */
+.wheel-title b{
+  display:block;
+  font-size:clamp(3rem,5.2vw,4.4rem);
+  font-weight:400;line-height:1.08;letter-spacing:-.025em;
+  color:var(--foreground);
+}
+/* 中心保护罩：580px 正圆，参照页原值。 */
+.wheel-vignette{
+  position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
+  width:580px;height:580px;border-radius:50%;
+  pointer-events:none;z-index:8;
+  background:radial-gradient(circle,var(--background) 40%,color-mix(in srgb,var(--background) 70%,transparent) 65%,transparent 100%);
+}
+
+/* 吊舱卡片：照抄 .gondola-card。 */
+.wheel-card{
+  position:absolute;top:0;left:0;
+  border-radius:18px;
+  background:#FFFFFF;
+  border:1px solid rgba(0,0,0,.08);
+  box-shadow:0 4px 20px rgba(0,0,0,.05);
+  cursor:pointer;text-decoration:none;color:inherit;
+  will-change:transform;
+  /* 绝不 rotate：吊舱始终正立，这是这个效果读起来不晕的原因。 */
+  transform-origin:center center;
+  transition:box-shadow .3s ease,border-color .3s ease;
+}
+.wheel-card:hover,.wheel-card:focus-visible{
+  border-color:rgba(0,0,0,.2);
+  box-shadow:0 18px 40px rgba(0,0,0,.14);
+  z-index:40;outline:none;
+}
+
+/* 有封面：白卡 + 5px 内边距 + 14px 内部圆角，照抄 .card-square-photo。 */
+.wheel-frame{
+  position:relative;width:100%;height:100%;
+  padding:5px;box-sizing:border-box;
+}
+.wheel-frame img,.wheel-frame video{
+  width:100%;height:100%;object-fit:cover;
+  border-radius:14px;display:block;
+  transform:scale(var(--cz,1));transform-origin:var(--fx,50%) var(--fy,50%);
+}
+/* 无封面：整块 #F3EFE7，照抄 .card-pill-tag 的配色。
+   不是渐变、不是浅米色 —— 参照页就是这一个平色。 */
+.wheel-card--blank{background:#F3EFE7}
+.wheel-card--blank:hover{background:#EFEADF}
+
+.wheel-frame--blank{
+  position:relative;width:100%;height:100%;
+  display:flex;align-items:flex-end;justify-content:flex-start;
+  padding:0;
+}
+
+/* 标题：参照页把文字居中放在胶囊里；本博主要求放左下角小字，故位置按本博，
+   颜色与字号沿用参照页的 #33312E / 13.5px / 500。 */
+.wheel-label{
+  position:absolute;left:0;right:0;bottom:0;z-index:3;
+  padding:.5rem .6rem;
+  font-size:.84375rem;font-weight:500;line-height:1.35;letter-spacing:.01em;
+  color:#33312E;
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;
+  pointer-events:none;
+}
+/* 有封面的卡片上文字压在图里，需要白字；无图款是浅底，用 #33312E。 */
+.wheel-card:not(.wheel-card--blank) .wheel-label{
+  color:#FAF8F5;
+  background:linear-gradient(to top,rgba(0,0,0,.5),rgba(0,0,0,.22) 60%,transparent);
+}
+
+/* 悬停气泡：照抄 .card-hint 的形状与配色（圆角 999px、#181716 底、#FAF8F5 字、11.5px）。
+   内容比参照页多一行摘要，所以去掉 nowrap 并放宽，但形状仍是参照页那条胶囊。 */
+.wheel-tip{
+  position:absolute;left:50%;top:calc(100% + 10px);transform:translate(-50%,6px);
+  min-width:max-content;max-width:16rem;
+  padding:.44rem .82rem;border-radius:999px;
+  background:#181716;color:#FAF8F5;
+  font-size:.71875rem;font-weight:500;line-height:1.45;letter-spacing:.01em;
+  opacity:0;pointer-events:none;z-index:60;
+  transition:opacity .22s ease,transform .22s ease;
+  text-align:center;
+}
+.wheel-card:hover .wheel-tip,.wheel-card:focus-visible .wheel-tip{opacity:1;transform:translate(-50%,0)}
+/* 靠近底部的卡片把气泡翻到上方：位置取决于轮子把卡片带到了哪里，每帧都在变，
+   所以只能由脚本判定并挂这个类。 */
+.wheel-card.tip-above .wheel-tip{
+  top:auto;bottom:calc(100% + 10px);
+  transform:translate(-50%,-6px);
+}
+.wheel-card.tip-above:hover .wheel-tip,.wheel-card.tip-above:focus-visible .wheel-tip{
+  transform:translate(-50%,0);
+}
+
+/* 关闭钮：右上角，与全站其它浮层同一个位置语言。 */
+.wheel-close{
+  position:absolute;top:1rem;right:1rem;z-index:80;
+  display:grid;place-items:center;width:2.15rem;height:2.15rem;
+  margin:0;padding:0;border:1px solid var(--border);border-radius:50%;
+  background:color-mix(in srgb,var(--background) 82%,transparent);
+  color:var(--muted-foreground);cursor:pointer;
+  -webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);
+  transition:color .18s ease,border-color .18s ease,transform .18s ease;
+}
+.wheel-close:hover{color:var(--foreground);border-color:color-mix(in srgb,var(--foreground) 26%,transparent);transform:scale(1.05)}
+.wheel-close:focus-visible{outline:2px solid var(--primary);outline-offset:2px}
+.wheel-close svg{fill:currentColor}
+
+/* 轮子打开时锁住页面滚动：滚轮在这个模式下是给轮子加速的，不是给文档滚动的。 */
+html.wheel-open,html.wheel-open body{overflow:hidden}
+
+@media (prefers-reduced-motion:reduce){
+  .cover-grid{animation:none}
+  .wheel-root{transition:opacity .01ms,visibility .01ms}
+}
+
 /* 底部三点（爻路 / 目录 / 问道）只在窄屏首页出现 —— 模板只为首页输出它。
    桌面走三栏，入口在右下角的悬浮钮与顶栏，不需要这一条。
    基础规则写在这里（媒体查询之前），窄屏断点里再把它打开，

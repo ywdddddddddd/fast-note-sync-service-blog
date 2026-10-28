@@ -288,6 +288,7 @@ func registerBlogRoutes(r *gin.Engine, appContainer *app.App) {
 			Visits:       reactions.Visits,
 			Hot:          blogHotList(reactions, home.Entries, blogHotLimit),
 			ReactionJS:   template.JS(blogReactionJS()),
+			EntriesJSON:  blogEntriesJSON(home.Entries),
 			WarpJS:       template.JS(blogWarpJS()),
 			ParticlesJS:  template.JS(blogParticlesJS()),
 			ParticlesCfg: template.JS(particlesCfg),

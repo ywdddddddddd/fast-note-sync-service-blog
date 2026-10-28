@@ -101,6 +101,15 @@ type blogHomeView struct {
 	// ReactionJS 承载仪表盘七个数字的滚动。脚本里属于互动条的那一半在这个页面上会提前返回，
 	// 因为这里没有互动条。
 	ReactionJS template.JS
+	// EntriesJSON carries the same entries as a compact JSON array, for the two client-rendered
+	// views. The cover grid and the wheel need the same fields the list already renders, and
+	// rendering that markup twice would add roughly 200 KB to a page that is already 446 KB;
+	// this array is about 30 KB.
+	//
+	// EntriesJSON 以紧凑 JSON 数组承载同一批条目，供两个客户端渲染的视图使用。
+	// 封面网格与同心轮需要的字段和列表已经渲染的完全一样，而把那套标记再渲染一遍，
+	// 会让一个本已 446 KB 的页面再长出约 200 KB；这个数组只有约 30 KB。
+	EntriesJSON template.JS
 	// WarpJS carries the warp transition. The home page uses it to leave; every page uses it to
 	// fade in when it was reached through the warp.
 	//
@@ -455,12 +464,19 @@ var blogHomeTmpl = template.Must(template.New("blog-home").Funcs(blogAssetFuncs)
       {{end}}
 
       <section class="card card-pad">
-        <h2 class="card-title">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h.01"/><path d="M3 18h.01"/><path d="M3 6h.01"/><path d="M8 12h13"/><path d="M8 18h13"/><path d="M8 6h13"/></svg>
-          全部笔记
-        </h2>
+        <div class="list-head">
+          <h2 class="card-title">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h.01"/><path d="M3 18h.01"/><path d="M3 6h.01"/><path d="M8 12h13"/><path d="M8 18h13"/><path d="M8 6h13"/></svg>
+            全部笔记
+          </h2>
+          {{if .Entries}}<div class="view-switch" role="group" aria-label="笔记显示方式">
+            <button type="button" class="vs-btn is-on" data-view="list" aria-pressed="true">列表</button>
+            <button type="button" class="vs-btn" data-view="cover" aria-pressed="false">封面</button>
+            <button type="button" class="vs-btn" data-view="wheel" aria-pressed="false">动效</button>
+          </div>{{end}}
+        </div>
         {{if .Entries}}
-        <div class="list">
+        <div class="list" data-view-body="list">
           {{range .Entries}}
           <a class="item" href="/blog/{{.Slug}}">
             <h3>{{.Title}}</h3>
@@ -474,6 +490,11 @@ var blogHomeTmpl = template.Must(template.New("blog-home").Funcs(blogAssetFuncs)
           </a>
           {{end}}
         </div>
+        <div class="cover-grid" data-view-body="cover" hidden></div>
+        <script type="application/json" id="fns-entries">{{.EntriesJSON}}</script>
+        <div id="wheel-root" class="wheel-root" hidden></div>
+        {{/* Only the home page has entries to draw, so the script rides along with them. */}}
+        <script src="/blog/views.js?v={{assetVer}}" defer></script>
         {{else}}
         <p class="nav-empty">还没有公开分享的笔记。在 Obsidian 里分享一篇，它就会出现在这里。</p>
         {{end}}
@@ -746,8 +767,15 @@ var blogHomeTmpl = template.Must(template.New("blog-home").Funcs(blogAssetFuncs)
 </script>
 {{if .ReactionJS}}<script>{{.ReactionJS}}</script>{{end}}
 {{if .WarpJS}}<script>{{.WarpJS}}</script>{{end}}
+{{/* ── 粒子场：暂时停用（2026-10-28）───────────────────────────────────────
+     停用原因不是性能，而是观感：有人反映这些漂浮的小点像苍蝇。
+     代码、样式与配置项全部保留，只把下面两行注释掉 —— 想换一种形态时从原处改，
+     而不是从头再写一遍。blogParticlesJS 与 .fns-particles 都还在原位置。
+     ─────────────────────────────────────────────────────────────────────── */}}
+{{/*
 {{if .ParticlesCfg}}<script type="application/json" id="fns-particles-cfg">{{.ParticlesCfg}}</script>{{end}}
 {{if .ParticlesJS}}<script>{{.ParticlesJS}}</script>{{end}}
+*/}}
 <script>
 /* 目录滚动高亮 —— 渐进增强：脚本不执行时目录链接仍可点击跳转。
 

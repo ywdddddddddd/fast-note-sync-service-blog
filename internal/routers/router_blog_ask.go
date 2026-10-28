@@ -83,6 +83,21 @@ func registerBlogAskRoutes(r *gin.Engine, appContainer *app.App) {
 		c.String(http.StatusOK, blogFeedScript)
 	})
 
+	// Home page view switching. Gated by the blog switch only, like the two above: it is pure
+	// interaction, and standing it behind the Q&A flag would make the cover grid and the wheel
+	// disappear whenever the model was off.
+	//
+	// 首页视图切换。与上面两个一样只受博客总开关约束：它是纯交互，
+	// 把它挂在问答开关后面意味着模型一关，封面网格与同心轮就一起消失。
+	r.GET("/blog/views.js", func(c *gin.Context) {
+		if _, ok := blogEnabled(c, appContainer); !ok {
+			return
+		}
+		c.Header("Content-Type", "application/javascript; charset=utf-8")
+		c.Header("Cache-Control", "no-cache")
+		c.String(http.StatusOK, blogViewsScript)
+	})
+
 	// Bottom-sheet dragging. Gated by the blog switch only, for the same reason as the
 	// lightbox: it is pure interaction, and tying it to the Q&A flag would make every drawer
 	// stop dragging whenever the model was off.
