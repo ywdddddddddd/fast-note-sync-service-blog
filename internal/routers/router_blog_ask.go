@@ -68,6 +68,21 @@ func registerBlogAskRoutes(r *gin.Engine, appContainer *app.App) {
 		c.String(http.StatusOK, blogLightboxScript)
 	})
 
+	// The subscribe dialog. Gated by the blog switch only: it needs no upstream configuration and
+	// no indexable flag of its own — the entry point that uses it is already conditional on
+	// blog.indexable in the template, so a page that hides the button never requests this file.
+	//
+	// 订阅弹层。只受博客总开关约束：它不需要任何上游配置，也不需要自己的收录开关——
+	// 使用它的入口在模板里已经依赖 blog.indexable，因此隐藏了按钮的页面不会请求这个文件。
+	r.GET("/blog/feed.js", func(c *gin.Context) {
+		if _, ok := blogEnabled(c, appContainer); !ok {
+			return
+		}
+		c.Header("Content-Type", "application/javascript; charset=utf-8")
+		c.Header("Cache-Control", "no-cache")
+		c.String(http.StatusOK, blogFeedScript)
+	})
+
 	// Bottom-sheet dragging. Gated by the blog switch only, for the same reason as the
 	// lightbox: it is pure interaction, and tying it to the Q&A flag would make every drawer
 	// stop dragging whenever the model was off.

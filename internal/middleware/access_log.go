@@ -118,6 +118,22 @@ func BlogVisitRecorder(recorder AccessLogRecorder) gin.HandlerFunc {
 		// 打码发生在这里、在把任何东西交给记录器之前，因此即使将来某个记录器索要原始地址，
 		// 访问日志也绝不会持有它。
 		path := maskPathTokens(c.Request.URL.Path)
+		// Exactly one query parameter survives, at exactly one value.
+		//
+		// The feed links articles with "?from=rss" so that "a subscriber clicked through" is
+		// distinguishable from "a search engine landed here". It is matched as a literal rather
+		// than copied, so a crafted "?from=<anything>" cannot write arbitrary text into the log,
+		// and every other parameter — including the share_token that image URLs carry — is still
+		// dropped before anything is stored.
+		//
+		// 只有一个查询参数被保留，且只有一个固定取值。
+		//
+		// 订阅源给文章链接带上 "?from=rss"，好让「订阅者点了进来」与「搜索引擎落到了这里」
+		// 可以区分。它按字面比较而不是复制，因此构造出来的 "?from=<任意内容>" 无法把任意文本
+		// 写进日志；其余每一个参数——包括图片地址携带的 share_token——仍在存储之前就被丢弃。
+		if c.Request.URL.Query().Get("from") == "rss" {
+			path += "?from=rss"
+		}
 		maskedIP := maskIP(c.ClientIP())
 		client := browserFamily(c.Request.UserAgent())
 
@@ -154,7 +170,42 @@ func browserFamily(ua string) string {
 
 	// Order matters: every Chrome UA contains "safari", and every Edge UA contains "chrome".
 	// 顺序有意义：每个 Chrome 的 UA 都含 "safari"，每个 Edge 的 UA 都含 "chrome"。
+	// Feed readers first: this file feeds a blog, and a feed reader's UA is the only way to tell
+	// "someone subscribed" apart from "someone opened the page". Feedly announces itself as
+	// "Feedly/1.0 (+http://www.feedly.com/fetcher.html; 4 subscribers; like FeedFetcher-Google)",
+	// which matched no branch and was filed under "Other" — indistinguishable from an unknown
+	// browser, so the subscription column read as zero no matter how many readers pulled the feed.
+	//
+	// 阅读器放在最前面：这个日志服务的是一个博客，而阅读器的 UA 是唯一能把「有人订阅了」
+	// 与「有人打开了页面」区分开的线索。Feedly 自称
+	// "Feedly/1.0 (+http://www.feedly.com/fetcher.html; 4 subscribers; like FeedFetcher-Google)"，
+	// 原实现没有一条分支能命中它，于是它被归入 "Other"——与不知名的浏览器无法区分，
+	// 结果是无论多少阅读器在拉订阅源，订阅那一列都读作零。
 	switch {
+	case strings.Contains(l, "feedly"):
+		return "Feedly"
+	case strings.Contains(l, "inoreader"):
+		return "Inoreader"
+	case strings.Contains(l, "newsblur"):
+		return "NewsBlur"
+	case strings.Contains(l, "miniflux"):
+		return "Miniflux"
+	case strings.Contains(l, "freshrss"):
+		return "FreshRSS"
+	case strings.Contains(l, "tiny tiny rss") || strings.Contains(l, "tt-rss"):
+		return "TinyTinyRSS"
+	case strings.Contains(l, "netnewswire"):
+		return "NetNewsWire"
+	case strings.Contains(l, "reeder/"):
+		return "Reeder"
+	case strings.Contains(l, "theoldreader"):
+		return "TheOldReader"
+	case strings.Contains(l, "feedfetcher"):
+		return "FeedFetcher"
+	case strings.Contains(l, "simplepie"):
+		return "SimplePie"
+	case strings.Contains(l, "feedparser") || strings.Contains(l, "universal feed parser"):
+		return "FeedParser"
 	case strings.Contains(l, "edg/") || strings.Contains(l, "edge/"):
 		return "Edge"
 	case strings.Contains(l, "opr/") || strings.Contains(l, "opera"):

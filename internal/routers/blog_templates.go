@@ -290,8 +290,21 @@ type blogPostView struct {
 // "about" 那一条带：穿越过渡的「出发」那一半绑的就是它。
 // 它从右栏那张卡片迁到这里，卡片已经撤掉——顶栏现在是通往简历的唯一入口，
 // 所以过渡跟着入口走，而不是让入口迁就过渡。
+// The subscribe entry sits after the shelf link, per the owner's call that function entries come
+// last. It is conditional on the same two fields the <link rel="alternate"> uses, because
+// blog.indexable=false makes /blog/rss.xml answer 404 — an entry point that leads to an error page
+// is worse than no entry point.
+//
+// The icon is inlined rather than referenced, so the mobile variant (icon only) needs no extra
+// request and no font.
+//
+// 订阅入口排在资料之后，遵循「功能入口放在最后」的决定。它依赖与 <link rel="alternate">
+// 相同的两个字段，因为 blog.indexable=false 会让 /blog/rss.xml 返回 404 ——
+// 一个通往错误页的入口比没有入口更糟。
+//
+// 图标内联而不是引用，使移动端的纯图标形态不需要额外请求，也不需要字体。
 const blogTopNav = `
-{{define "topnav"}}{{if or .Pages .HasShelf}}<nav class="topnav">{{range .Pages}}<a href="{{.URL}}"{{if eq .Alias "about"}}{{end}}>{{.Title}}</a>{{end}}{{if .HasShelf}}<a href="/blog/shelf">资料</a>{{end}}</nav>{{end}}{{end}}`
+{{define "topnav"}}{{if or .Pages .HasShelf .FeedURL}}<nav class="topnav">{{range .Pages}}<a href="{{.URL}}"{{if eq .Alias "about"}}{{end}}>{{.Title}}</a>{{end}}{{if .HasShelf}}<a href="/blog/shelf">资料</a>{{end}}{{if and .Indexable .FeedURL}}<button type="button" class="topnav-feed" data-feed="{{.FeedURL}}" aria-label="订阅《{{.SiteName}}》"><svg class="topnav-feed-icon" width="14" height="14" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M2.002 2.725a.75.75 0 0 1 .797-.699C8.79 2.42 13.58 7.21 13.974 13.201a.75.75 0 0 1-1.497.098 10.502 10.502 0 0 0-9.776-9.776.747.747 0 0 1-.7-.798ZM2.84 7.05h-.002a7.002 7.002 0 0 1 6.113 6.111.75.75 0 0 1-1.49.178 5.503 5.503 0 0 0-4.8-4.8.75.75 0 0 1 .179-1.489ZM2 13a1 1 0 1 1 2 0 1 1 0 0 1-2 0Z"/></svg><span class="topnav-feed-text">订阅</span></button>{{end}}</nav>{{end}}{{end}}`
 
 // blogFooterLegal is the shared filing-number block.
 //
@@ -768,6 +781,7 @@ var blogHomeTmpl = template.Must(template.New("blog-home").Funcs(blogAssetFuncs)
 <script src="/blog/ask.js?v={{assetVer}}" defer></script>
 <script src="/blog/sheet.js?v={{assetVer}}" defer></script>
 {{end}}
+<script src="/blog/feed.js?v={{assetVer}}" defer></script>
 <script src="/blog/lightbox.js?v={{assetVer}}" defer></script>
 </body>
 </html>
@@ -990,6 +1004,7 @@ var blogPostTmpl = template.Must(template.New("blog-post").Funcs(blogAssetFuncs)
 <script src="/blog/ask.js?v={{assetVer}}" defer></script>
 <script src="/blog/sheet.js?v={{assetVer}}" defer></script>
 {{end}}
+<script src="/blog/feed.js?v={{assetVer}}" defer></script>
 <script src="/blog/lightbox.js?v={{assetVer}}" defer></script>
 
   <!-- Mobile edge tabs and their drawers.
@@ -1319,6 +1334,7 @@ var blogPageTmpl = template.Must(template.New("blog-page").Funcs(blogAssetFuncs)
 <script src="/blog/ask.js?v={{assetVer}}" defer></script>
 <script src="/blog/sheet.js?v={{assetVer}}" defer></script>
 {{end}}
+<script src="/blog/feed.js?v={{assetVer}}" defer></script>
 <script src="/blog/lightbox.js?v={{assetVer}}" defer></script>
 
   <!-- Mobile edge tabs and their drawers.

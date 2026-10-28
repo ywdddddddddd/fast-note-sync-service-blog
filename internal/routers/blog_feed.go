@@ -1,17 +1,18 @@
 package routers
 
 import (
-	"encoding/xml"
-	"net/http"
-	"strings"
-	"time"
-
 	"encoding/json"
+	"encoding/xml"
 	"html/template"
+	"net/http"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/haierkeys/fast-note-sync-service/internal/app"
-	"github.com/haierkeys/fast-note-sync-service/internal/dto"
+	"github.com/haierkeys/fast-note-sync-service/internal/service"
 )
 
 // RSS 2.0 feed for the built-in blog.
@@ -26,16 +27,26 @@ import (
 // "<" 的笔记不会破坏文档。html/template 会在 XML 文档里输出 HTML 实体（&amp;），
 // 部分阅读器会把它们原样显示出来。
 
-// blogFeedMaxItems caps the feed length. Readers poll repeatedly, and an unbounded feed turns
-// every poll into a full-vault transfer.
+// blogFeedMaxItems caps the feed length.
 //
-// blogFeedMaxItems 限制订阅源条数。阅读器会反复轮询，不设上限会让每次轮询都变成整库传输。
-const blogFeedMaxItems = 50
+// It came down from 50 when the feed went full-text: twelve of these notes average roughly
+// 5,700 characters, so a full-body item costs about 25 KB and 50 of them made every poll a
+// megabyte. Fifteen is also the honest number for this format — a subscriber drains the backlog
+// on day one and sees one or two new items a day afterwards, so the extra 35 slots were paying
+// bandwidth on every request to cover a window nobody scrolls back through.
+//
+// blogFeedMaxItems 限制订阅源条数。
+//
+// 全文订阅上线时它从 50 降到 15：本仓库这些笔记平均约 5700 字，因此一条全文项约 25 KB，
+// 50 条会让每次轮询都变成一兆字节。15 对这个格式也是诚实的数字——订阅者第一天拉完历史，
+// 之后每天只见一两篇新的，多出来的 35 个位置是在为一段没人回翻的窗口反复支付带宽。
+const blogFeedMaxItems = 15
 
 type rssFeed struct {
 	XMLName xml.Name   `xml:"rss"`
 	Version string     `xml:"version,attr"`
 	Atom    string     `xml:"xmlns:atom,attr"`
+	Content string     `xml:"xmlns:content,attr"`
 	Channel rssChannel `xml:"channel"`
 }
 
@@ -56,12 +67,37 @@ type rssAtom struct {
 }
 
 type rssItem struct {
-	Title       string  `xml:"title"`
-	Link        string  `xml:"link"`
-	GUID        rssGUID `xml:"guid"`
-	PubDate     string  `xml:"pubDate,omitempty"`
-	Description string  `xml:"description,omitempty"`
-	Author      string  `xml:"author,omitempty"`
+	Title       string      `xml:"title"`
+	Link        string      `xml:"link"`
+	GUID        rssGUID     `xml:"guid"`
+	PubDate     string      `xml:"pubDate,omitempty"`
+	Description string      `xml:"description,omitempty"`
+	Author      string      `xml:"author,omitempty"`
+	Content     *rssEncoded `xml:"content:encoded,omitempty"`
+}
+
+// rssEncoded carries full article HTML in the content module's element.
+//
+// The tag name is written with its prefix literally. encoding/xml does not resolve prefixes, so
+// what makes this document valid is the xmlns:content declaration on <rss>, not anything the
+// encoder knows about the content module.
+//
+// The value is CDATA rather than escaped text: article HTML is tag-dense, and escaping would turn
+// every "<p>" into "&lt;p&gt;" — roughly a third more bytes on a document that is already the
+// largest thing this site serves. The one sequence CDATA cannot contain is "]]>", and a "<p>"
+// stream never produces it, so it is escaped defensively rather than assumed away.
+//
+// rssEncoded 在内容模块的元素里承载完整文章 HTML。
+//
+// 标签名连同前缀按字面书写。encoding/xml 不解析前缀，因此使这份文档合法的是 <rss> 上的
+// xmlns:content 声明，而不是编码器对内容模块的任何了解。
+//
+// 值用 CDATA 而不是转义文本：文章 HTML 标签密集，转义会把每个 "<p>" 变成 "&lt;p&gt;"——
+// 在一份本就是本站最大响应的文档上多出约三分之一字节。CDATA 唯一不能包含的序列是 "]]>"，
+// 而 "<p>" 流永远不会产生它，所以这里只做防御性转义，而不是假定它不存在。
+type rssEncoded struct {
+	XMLName xml.Name `xml:"content:encoded"`
+	Value   string   `xml:",cdata"`
 }
 
 // encoding/xml has no "-" name for a chardata field: the field name must be empty so the
@@ -78,16 +114,23 @@ type rssGUID struct {
 // rfc1123z 是 RSS 阅读器期望的日期格式。
 const rfc1123z = "Mon, 02 Jan 2006 15:04:05 -0700"
 
-// buildBlogFeed renders the feed document for a set of blog entries.
+// buildBlogFeed renders the feed document for a set of already-rendered entries.
 //
-// Entries whose CreatedAt failed to parse are still published, just without a pubDate: dropping
-// a note from the feed because its timestamp was odd is worse than omitting one field.
+// Entries whose Published value failed to parse are still published, just without a pubDate:
+// dropping a note from the feed because its timestamp was odd is worse than omitting one field.
 //
-// buildBlogFeed 为一组博客条目渲染订阅源文档。
+// lastBuildDate is the moment the document was built, not the newest item's date. The RSS
+// specification defines it as when the content was last generated, and readers that conditionally
+// refetch on it would stop noticing new items if it only ever repeated the latest publish date.
 //
-// CreatedAt 解析失败的条目仍然发布，只是不带 pubDate：因为时间戳格式异常就把笔记从订阅源里
+// buildBlogFeed 为一组已渲染完成的条目渲染订阅源文档。
+//
+// Published 解析失败的条目仍然发布，只是不带 pubDate：因为时间戳格式异常就把笔记从订阅源里
 // 丢掉，比少一个字段更糟。
-func buildBlogFeed(entries []*dto.BlogEntryDTO, siteTitle, baseURL string) ([]byte, error) {
+//
+// lastBuildDate 是文档构建的时刻，不是最新条目的日期。RSS 规范把它定义为内容最后生成的
+// 时间，而会据此做条件重取的阅读器，在它只是重复最新发布日的情况下将不再察觉新条目。
+func buildBlogFeed(entries []*service.BlogFeedEntry, siteTitle, baseURL string) ([]byte, error) {
 	base := strings.TrimRight(baseURL, "/")
 	home := base + "/blog"
 	feedURL := home + "/rss.xml"
@@ -98,45 +141,42 @@ func buildBlogFeed(entries []*dto.BlogEntryDTO, siteTitle, baseURL string) ([]by
 	}
 
 	items := make([]rssItem, 0, limit)
-	var latest time.Time
 	for _, e := range entries[:limit] {
 		if e == nil {
 			continue
 		}
-		link := home + "/" + e.Slug
 		item := rssItem{
 			Title:       e.Title,
-			Link:        link,
-			GUID:        rssGUID{Value: link, IsPermaLink: "true"},
+			Link:        e.Link,
+			GUID:        rssGUID{Value: e.GUID, IsPermaLink: "true"},
 			Description: e.Summary,
-			Author:      e.Vault,
+			Author:      e.Author,
 		}
-		if e.CreatedAt != "" {
-			if t, err := time.Parse("2006-01-02", e.CreatedAt); err == nil {
+		if e.Published != "" {
+			if t, err := time.Parse("2006-01-02", e.Published); err == nil {
 				item.PubDate = t.Format(rfc1123z)
-				if t.After(latest) {
-					latest = t
-				}
 			}
+		}
+		if e.ContentHTML != "" {
+			item.Content = &rssEncoded{Value: cdataSafe(e.ContentHTML)}
 		}
 		items = append(items, item)
 	}
 
 	channel := rssChannel{
-		Title:       siteTitle,
-		Link:        home,
-		Description: siteTitle + " — 笔记订阅",
-		Language:    "zh-CN",
-		AtomLink:    rssAtom{Href: feedURL, Rel: "self", Type: "application/rss+xml"},
-		Items:       items,
-	}
-	if !latest.IsZero() {
-		channel.LastBuildDate = latest.Format(rfc1123z)
+		Title:         siteTitle,
+		Link:          home,
+		Description:   siteTitle + " — 笔记订阅",
+		Language:      "zh-CN",
+		LastBuildDate: time.Now().UTC().Format(rfc1123z),
+		AtomLink:      rssAtom{Href: feedURL, Rel: "self", Type: "application/rss+xml"},
+		Items:         items,
 	}
 
 	body, err := xml.MarshalIndent(rssFeed{
 		Version: "2.0",
 		Atom:    "http://www.w3.org/2005/Atom",
+		Content: "http://purl.org/rss/1.0/modules/content/",
 		Channel: channel,
 	}, "", "  ")
 	if err != nil {
@@ -151,16 +191,107 @@ func buildBlogFeed(entries []*dto.BlogEntryDTO, siteTitle, baseURL string) ([]by
 	return out, nil
 }
 
+// cdataSafe rewrites the one sequence a CDATA section cannot contain.
+//
+// A "]]>" inside a CDATA section would close it early and leave the rest of the article as
+// markup, so it cannot be passed through. Splitting the section around it — the technique that
+// works when writing XML by hand — does not work here, because the value still goes through
+// encoding/xml, which wraps whatever it is given in another CDATA layer; measured, the split
+// came back as the literal text "]]]]><![CDATA[>" instead of "]]>".
+//
+// So the sequence is replaced with its HTML entity rather than escaped around. "&gt;" renders as
+// ">" in every reader, so the article reads identically, and the byte sequence that would break
+// the document no longer exists.
+//
+// cdataSafe 改写 CDATA 段唯一无法包含的序列。
+//
+// CDATA 段里的 "]]>" 会提前关闭它，把文章剩余部分留成标记，因此不能原样通过。把它切开——
+// 手工书写 XML 时可行的技巧——在这里无效，因为这个值仍要经过 encoding/xml，
+// 而它会再包一层 CDATA；实测切开之后拿回来的是字面量 "]]]]><![CDATA[>" 而不是 "]]>"。
+//
+// 所以这里把该序列换成它的 HTML 实体，而不是绕着它转义。"&gt;" 在每个阅读器里都渲染成 ">"，
+// 文章读起来完全一致，而那个会破坏文档的字节序列已经不存在了。
+func cdataSafe(s string) string {
+	if !strings.Contains(s, "]]>") {
+		return s
+	}
+	return strings.ReplaceAll(s, "]]>", "]]&gt;")
+}
+
 // serveBlogFeed writes the RSS document for the built-in blog.
 //
-// The feed follows the same visibility switch as the pages: when blog.indexable is off the feed
-// is not served, because "do not index me" and "hand out a subscription document" are the same
-// decision made from opposite sides.
+// The document is cached for blogFeedCacheTTL. Rendering fifteen full articles costs whole
+// seconds — measured at 4.9 s cold, 263 ms warm on this host — because each item goes through the
+// share pipeline: token generation, attachment resolution, transclusion expansion and a wiki-link
+// pass over the note index. Readers poll far more often than notes change, so every one of those
+// seconds would be spent rebuilding identical bytes.
 //
-// serveBlogFeed 写出内置博客的 RSS 文档。
+// Ten minutes, not ninety seconds: at ninety seconds almost every poll is a cold one, because
+// Feedly and friends poll on intervals of tens of minutes — the cache would never hit while the
+// cost stayed. Ten minutes also costs nothing in freshness that RSS does not already cost: a
+// subscriber's client decides when to fetch, so the feed is minutes-to-hours behind regardless.
+// The only property this window can violate is "a note published now appears instantly", and ten
+// minutes is well inside the delay a reader already expects from a feed.
 //
-// 订阅源与页面遵循同一个可见性开关：blog.indexable 关闭时不提供订阅源，因为「不要收录我」
-// 与「对外发放订阅文档」是从两侧表述的同一个决定。
+// 文档会缓存 blogFeedCacheTTL 这么久。渲染十五篇全文的代价是以秒计的——本机实测冷 4.9 秒、
+// 热 263 毫秒——因为每一条都要经过分享管线：生成令牌、解析附件、展开嵌入，并对笔记索引做
+// 一遍 wiki 链接处理。阅读器轮询的频率远高于笔记变化的频率，因此这些秒数里每一次都花在
+// 重建完全相同的字节上。
+//
+// 十分钟，而不是九十秒：九十秒的话几乎每次轮询都是冷的，因为 Feedly 之类的轮询间隔是几十分钟
+// ——缓存永远命中不了，而代价照付。十分钟在新鲜度上也并不额外损失什么 RSS 本来就在损失的东西：
+// 何时拉取由订阅者的客户端决定，所以订阅源本来就会晚几分钟到几小时。
+// 这个窗口唯一可能破坏的性质是「此刻发布的笔记立刻出现」，而十分钟远在读者对订阅源
+// 本就预期的延迟之内。
+const blogFeedCacheTTL = 10 * time.Minute
+
+var blogFeedCache struct {
+	mu      sync.Mutex
+	key     string
+	body    []byte
+	builtAt time.Time
+}
+
+// cachedFeedBody returns a previously built document when it is still fresh.
+//
+// A stale entry is kept rather than cleared: if rendering fails, serving a 30-second-old document
+// is strictly better than serving an error page to every subscriber at once.
+//
+// cachedFeedBody 在文档仍然新鲜时返回上次构建的结果。
+//
+// 过期条目保留而不是清除：如果渲染失败，提供一份 30 秒前的文档严格优于同时向每位订阅者
+// 提供一个错误页。
+func cachedFeedBody(key string) ([]byte, bool) {
+	blogFeedCache.mu.Lock()
+	defer blogFeedCache.mu.Unlock()
+	if blogFeedCache.body == nil || blogFeedCache.key != key {
+		return nil, false
+	}
+	if time.Since(blogFeedCache.builtAt) > blogFeedCacheTTL {
+		return nil, false
+	}
+	return blogFeedCache.body, true
+}
+
+func storeFeedBody(key string, body []byte) {
+	blogFeedCache.mu.Lock()
+	defer blogFeedCache.mu.Unlock()
+	blogFeedCache.key = key
+	blogFeedCache.body = body
+	blogFeedCache.builtAt = time.Now()
+}
+
+// staleFeedBody returns whatever was cached, ignoring freshness.
+// staleFeedBody 返回缓存中的内容，忽略新鲜度。
+func staleFeedBody(key string) []byte {
+	blogFeedCache.mu.Lock()
+	defer blogFeedCache.mu.Unlock()
+	if blogFeedCache.key != key {
+		return nil
+	}
+	return blogFeedCache.body
+}
+
 func serveBlogFeed(c *gin.Context, appContainer *app.App) {
 	cfg, ok := blogEnabled(c, appContainer)
 	if !ok {
@@ -185,31 +316,54 @@ func serveBlogFeed(c *gin.Context, appContainer *app.App) {
 	siteTitle := blogSiteTitle(cfg.Title)
 	base := blogBaseURL(c, appContainer)
 
-	// GetBlogHome rather than ListBlogEntries: only the home assembly fills Summary (the index
-	// list, which also serves wiki-link resolution, does not), and a feed of bare titles is not
-	// worth subscribing to. maxNodes=0 keeps the graph layout out of this path entirely — the
-	// guard added in stage 2 means nothing gets relaxed — and publishedOnly stays true so no
-	// anonymous nodes are minted for unpublished notes.
+	// The cache key covers everything the document depends on, so switching the site title or
+	// the public address invalidates it instead of serving a document that describes a different
+	// site.
+	// 缓存键覆盖文档依赖的一切，因此改站点标题或对外地址会让它失效，
+	// 而不是继续提供一份描述着另一个站点的文档。
+	cacheKey := strconv.FormatInt(uid, 10) + "|" + base + "|" + siteTitle
+
+	if body, hit := cachedFeedBody(cacheKey); hit {
+		writeFeedDocument(c, body)
+		return
+	}
+
+	// GetBlogFeed rather than GetBlogHome: the feed needs rendered bodies, and GetBlogHome's
+	// entry struct carries only an excerpt. It shares the same source list underneath, so the
+	// feed and the site still cannot disagree about what is published, while the graph layout,
+	// the heat map and the tag cloud stay out of this path entirely.
 	//
-	// 这里用 GetBlogHome 而不是 ListBlogEntries：只有首页组装会填充 Summary
-	// （同时承担 wiki 内链解析的索引列表不填），而一份只有标题的订阅源不值得订阅。
-	// maxNodes=0 让图谱布局完全不进入这条路径——阶段 2 加的守护意味着不会有任何松弛计算——
-	// 且 publishedOnly 保持 true，不会为未发布笔记铸造匿名节点。
-	home, err := shareSvc.GetBlogHome(c.Request.Context(), uid, base, true, 0)
+	// 用 GetBlogFeed 而不是 GetBlogHome：订阅源需要渲染好的正文，而 GetBlogHome 的条目结构里
+	// 只有摘要。它在底层共用同一份来源清单，因此订阅源与站点依然不可能在「什么算已发布」上
+	// 产生分歧，同时图谱布局、热力图与标签云完全不会进入这条路径。
+	entries, err := shareSvc.GetBlogFeed(c.Request.Context(), uid, base, blogFeedMaxItems)
 	if err != nil {
+		if body := staleFeedBody(cacheKey); body != nil {
+			writeFeedDocument(c, body)
+			return
+		}
 		blogFail(c, appContainer, err.Error())
 		return
 	}
 
-	body, err := buildBlogFeed(home.Entries, siteTitle, base)
+	body, err := buildBlogFeed(entries, siteTitle, base)
 	if err != nil {
 		// Render into memory first, then write: an encoding failure must not leave a truncated
 		// document that readers cache as "the feed is broken".
 		// 先渲染到内存再写出：编码失败不能留下一个被阅读器缓存为「订阅源坏了」的半截文档。
+		if stale := staleFeedBody(cacheKey); stale != nil {
+			writeFeedDocument(c, stale)
+			return
+		}
 		blogFail(c, appContainer, err.Error())
 		return
 	}
 
+	storeFeedBody(cacheKey, body)
+	writeFeedDocument(c, body)
+}
+
+func writeFeedDocument(c *gin.Context, body []byte) {
 	c.Header("Content-Type", "application/rss+xml; charset=utf-8")
 	c.Header("Cache-Control", "no-cache")
 	c.Status(http.StatusOK)

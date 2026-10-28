@@ -146,6 +146,11 @@ type ShareService interface {
 	// GetBlogAccessLog 返回一页博客访问记录以及聚合摘要。
 	GetBlogAccessLog(ctx context.Context, days, limit int) (*BlogAccessLogPage, error)
 
+	// GetBlogFeed returns the newest published articles with their full rendered bodies, ready to
+	// be encoded as an RSS document.
+	// GetBlogFeed 返回最新的已发布文章及其渲染好的完整正文，可直接编码为 RSS 文档。
+	GetBlogFeed(ctx context.Context, uid int64, baseURL string, limit int) ([]*BlogFeedEntry, error)
+
 	// GetBlogReactions returns the like/dislike tallies and the run-total visit count.
 	// GetBlogReactions 返回赞/踩计数与累计访问次数。
 	GetBlogReactions() *dto.BlogReactionsDTO

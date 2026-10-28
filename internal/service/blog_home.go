@@ -122,7 +122,7 @@ func blogPlainText(content string, limit int) string {
 	s = mdHRRegex.ReplaceAllString(s, " ")
 	s = mdEmbedRegex.ReplaceAllString(s, " ")
 	s = mdImageRegex.ReplaceAllString(s, " ")
-	s = mdWikiRegex.ReplaceAllString(s, "$1$2")
+	s = mdWikiRegex.ReplaceAllStringFunc(s, blogWikiDisplayText)
 	s = mdLinkRegex.ReplaceAllString(s, "$1")
 	s = mdHeadingRegex.ReplaceAllString(s, "")
 	s = mdQuoteRegex.ReplaceAllString(s, "")
@@ -136,6 +136,52 @@ func blogPlainText(content string, limit int) string {
 		}
 	}
 	return s
+}
+
+// blogWikiDisplayText reduces one [[target|alias]] to the text a reader should see.
+//
+// The old substitution was `$1$2`, which concatenated the path and the alias: a link written as
+// [[（1）口腔笔记/口组笔记/3.2牙本质（Dentin）|牙本质]] rendered as
+// "（1）口腔笔记/口组笔记/3.2牙本质（Dentin）牙本质" — the vault path, followed by the word it
+// already ended with. That string then appeared verbatim in the home page excerpt and in the
+// feed's description, where it reads as corruption rather than as a link.
+//
+// Three cases, in order of how much the author told us:
+//   - an alias exists: the alias is exactly what the author wanted displayed;
+//   - no alias: the last path segment is the note's name, which is what the author typed;
+//   - a bare [[note]]: the target is already the name.
+//
+// blogWikiDisplayText 把一个 [[目标|别名]] 归约为读者应该看到的文字。
+//
+// 旧的替换是 `$1$2`，它把路径和别名拼接起来：写成
+// [[（1）口腔笔记/口组笔记/3.2牙本质（Dentin）|牙本质]] 的链接会渲染成
+// 「（1）口腔笔记/口组笔记/3.2牙本质（Dentin）牙本质」——仓库路径，跟上它本已包含的那个词。
+// 这串文字随后原样出现在首页摘要和订阅源描述里，读起来像数据损坏而不是一个链接。
+//
+// 三种情况，按作者告诉我们的信息量排序：
+//   - 有别名：别名正是作者想显示的文字；
+//   - 无别名：路径最后一段就是笔记名，也就是作者写下的东西；
+//   - 光秃秃的 [[笔记]]：目标本身就是名字。
+func blogWikiDisplayText(m string) string {
+	sub := mdWikiRegex.FindStringSubmatch(m)
+	if sub == nil {
+		return m
+	}
+	if len(sub) > 2 {
+		if alias := strings.TrimSpace(sub[2]); alias != "" {
+			return alias
+		}
+	}
+	target := strings.TrimSpace(sub[1])
+	if i := strings.LastIndex(target, "/"); i >= 0 {
+		target = target[i+1:]
+	}
+	// A heading anchor ("note#section") is not part of the note's name.
+	// 标题锚点（"note#section"）不是笔记名的一部分。
+	if i := strings.Index(target, "#"); i >= 0 {
+		target = target[:i]
+	}
+	return target
 }
 
 // blogCountChars counts visible characters (CJK-aware) excluding whitespace and markup noise.

@@ -95,6 +95,16 @@ func (m *MockShareService) GetBlogAccessLog(ctx context.Context, days, limit int
 	return nil, args.Error(1)
 }
 
+// GetBlogFeed returns the newest published articles with rendered bodies.
+// GetBlogFeed 返回最新的已发布文章及渲染好的正文。
+func (m *MockShareService) GetBlogFeed(ctx context.Context, uid int64, baseURL string, limit int) ([]*service.BlogFeedEntry, error) {
+	args := m.Called(ctx, uid, baseURL, limit)
+	if v := args.Get(0); v != nil {
+		return v.([]*service.BlogFeedEntry), args.Error(1)
+	}
+	return nil, args.Error(1)
+}
+
 // GetLinkPreviews returns hover-card metadata for internal links.
 // GetLinkPreviews 返回内部链接的悬停卡片元数据。
 func (m *MockShareService) GetLinkPreviews(ctx context.Context, uid int64, slugs []string) (map[string]*dto.BlogPreviewDTO, error) {

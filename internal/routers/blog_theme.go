@@ -1627,6 +1627,94 @@ html.ask-inline .ask-fab{display:none}
 }
 .topnav a:hover{color:var(--foreground);background:color-mix(in srgb,var(--muted) 34%,transparent)}
 
+/* 订阅入口。是 button 不是 a：点它弹的是一张说明卡，不是跳走 ——
+   而 /blog/rss.xml 直接打开在手机上是源码。
+   每一项排版都要对齐 .topnav a：button 会拿到浏览器默认的按钮字体与内边距，
+   而 font:inherit 继承到的是 body 的 16px/400，与链接的 13px/500 不是一套字。 */
+.topnav-feed{
+  display:inline-flex;align-items:center;gap:.28rem;
+  margin:0;padding:.3rem .6rem;border:0;border-radius:.5rem;
+  background:transparent;color:var(--muted-foreground);cursor:pointer;
+  font-family:inherit;font-size:.8125rem;font-weight:500;line-height:inherit;
+  letter-spacing:inherit;text-align:inherit;
+  -webkit-appearance:none;appearance:none;
+  transition:color .16s ease,background-color .16s ease;
+}
+.topnav-feed:hover{color:var(--foreground);background:color-mix(in srgb,var(--muted) 34%,transparent)}
+.topnav-feed:focus-visible{outline:2px solid var(--primary);outline-offset:1px;border-radius:.5rem}
+.topnav-feed-icon{flex:none;fill:currentColor;transition:transform .32s cubic-bezier(.22,1,.36,1)}
+.topnav-feed:hover .topnav-feed-icon{transform:scale(1.14)}
+
+/* 移动端只留图标：顶栏已有「关于我」「资料」，再加两个字会在 360px 上挤到换行。
+   断点取 860 而不是另立一个值：这个文件里移动端的一切都在 860 上切换，
+   新开一个 720 会让"顶栏已经变成手机版、页面还是桌面版"的那段宽度出现。 */
+@media (max-width:860px){
+  .topnav-feed{padding:.3rem .45rem}
+  .topnav-feed-text{display:none}
+}
+
+/* ── 订阅弹层 ──────────────────────────────────────────────────────────── */
+/* 居中而不是从底部升起：它是一次性的说明卡，不是可以停留在屏幕上的面板，
+   用 sheet 的几何会让读者以为它也能拖、也能悬停。 */
+.feed-pop-wrap{
+  position:fixed;inset:0;z-index:210;
+  display:flex;align-items:center;justify-content:center;
+  padding:1.1rem;
+  background:color-mix(in srgb,var(--foreground) 34%,transparent);
+  backdrop-filter:blur(3px);-webkit-backdrop-filter:blur(3px);
+  opacity:0;visibility:hidden;
+  transition:opacity .24s ease,visibility 0s linear .24s;
+}
+.feed-pop-wrap.is-in{opacity:1;visibility:visible;transition:opacity .24s ease,visibility 0s}
+.feed-pop{
+  position:relative;width:min(23rem,100%);box-sizing:border-box;
+  padding:1.35rem 1.25rem 1.15rem;border-radius:1.1rem;
+  background:var(--background);
+  border:1px solid color-mix(in srgb,var(--foreground) 12%,transparent);
+  box-shadow:0 1.4rem 3.4rem -1.1rem color-mix(in srgb,var(--foreground) 42%,transparent);
+  transform:translateY(14px) scale(.97);
+  transition:transform .38s cubic-bezier(.22,1,.36,1);
+}
+.feed-pop-wrap.is-in .feed-pop{transform:none}
+.feed-pop-x{
+  position:absolute;top:.55rem;right:.55rem;
+  display:grid;place-items:center;width:1.7rem;height:1.7rem;
+  margin:0;padding:0;border:0;border-radius:.5rem;
+  background:transparent;color:var(--muted-foreground);cursor:pointer;
+  transition:color .16s ease,background-color .16s ease;
+}
+.feed-pop-x:hover{color:var(--foreground);background:color-mix(in srgb,var(--muted) 40%,transparent)}
+.feed-pop-x svg{fill:currentColor}
+.feed-pop-title{
+  margin:0 1.7rem .45rem 0;
+  font-size:1rem;font-weight:650;line-height:1.45;letter-spacing:-.01em;
+  color:var(--foreground);
+}
+.feed-pop-hint{margin:0 0 .9rem;font-size:.8125rem;line-height:1.72;color:var(--muted-foreground)}
+.feed-pop-url{
+  display:block;width:100%;box-sizing:border-box;
+  padding:.6rem .7rem;border-radius:.6rem;
+  border:1px solid color-mix(in srgb,var(--foreground) 14%,transparent);
+  background:color-mix(in srgb,var(--muted) 22%,transparent);
+  color:var(--foreground);
+  font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  font-size:.75rem;line-height:1.5;
+  text-overflow:ellipsis;
+}
+.feed-pop-url:focus{outline:2px solid var(--primary);outline-offset:1px}
+/* 主按钮用前景色填充：这张卡片只有一个动作，它必须一眼就是那个动作。 */
+.feed-pop-copy{
+  display:block;width:100%;margin-top:.7rem;
+  padding:.62rem 1rem;border:0;border-radius:.6rem;
+  background:var(--foreground);color:var(--background);
+  font-family:inherit;font-size:.8125rem;font-weight:600;line-height:1.4;
+  cursor:pointer;
+  transition:opacity .16s ease,transform .16s ease,background-color .16s ease;
+}
+.feed-pop-copy:hover{opacity:.88}
+.feed-pop-copy:active{transform:scale(.985)}
+.feed-pop-copy.is-done{background:color-mix(in srgb,var(--primary) 88%,#000);color:#fff}
+
 /* ── 首页加载动画：各组件由下滑入 ──────────────────────────────────────── */
 /* 编排顺序(与用户标注一致)：仪表盘 → 全部笔记逐条 → 侧栏。
    左栏最后动，因为它是一张导航卡，读者先看内容再看路。

@@ -53,8 +53,32 @@ const (
 	// blogAccessLogExt 是文件后缀；每行一个 JSON 对象。
 	blogAccessLogExt = ".jsonl"
 	// blogAccessLogMaxDays bounds how far back a query may reach.
+	//
+	// Raised from 30 to 90 for one reason: retention is what makes "is this subscriber still
+	// here?" answerable at all. A 30-day window can show that a source pulled the feed recently,
+	// but not that it has been pulling for a quarter — and a subscription that quietly died two
+	// months ago looks identical to one that never existed.
+	//
 	// blogAccessLogMaxDays 限定查询最多回溯多少天。
-	blogAccessLogMaxDays = 30
+	//
+	// 从 30 提到 90 只为一个原因：保留期决定了「这个订阅者还在不在」这个问题能不能被回答。
+	// 30 天的窗口能显示某个来源最近拉过，但显示不了它已经拉了三个月——
+	// 而一个两个月前悄悄停止的订阅，看起来和一个从未存在过的订阅完全一样。
+	blogAccessLogMaxDays = 90
+	// blogAccessLogMaxTotalBytes caps the directory, not just each day.
+	//
+	// The per-day line cap alone stops being a disk bound when the retention window triples:
+	// 90 days x 20,000 lines x ~200 bytes is 360 MB of worst case. This is the second, independent
+	// bound — it removes the oldest day files until the whole directory fits, so an unattended
+	// server cannot fill its disk no matter how the traffic grows.
+	//
+	// blogAccessLogMaxTotalBytes 约束整个目录，而不只是单日文件。
+	//
+	// 保留期变成三倍之后，只有单日行数上限就不再是磁盘保障：
+	// 90 天 × 20000 行 × 约 200 字节就是 360 MB 的最坏情况。这是第二道独立约束——
+	// 它从最旧的日期文件开始删除，直到整个目录装得下，因此无论流量怎么涨，
+	// 无人看管的服务器都不会写满磁盘。
+	blogAccessLogMaxTotalBytes = 64 << 20
 	// blogAccessLogMaxLinesPerDay bounds one day's file. At roughly 200 bytes per line this is
 	// about 4 MB per day, which is more than a personal blog will produce and small enough that
 	// thirty days of it stays trivial.
@@ -206,6 +230,25 @@ func (b *blogAccessLog) pruneLocked(day string) {
 		return
 	}
 	cutoff := time.Now().UTC().AddDate(0, 0, -blogAccessLogMaxDays).Format("2006-01-02")
+
+	// Two bounds, applied in one pass: age first, then total size.
+	//
+	// Age is the normal case and the only one that runs on a healthy server. The size bound is
+	// what keeps the promise when traffic outgrows the estimate behind the per-day line cap —
+	// without it, tripling the retention window would have tripled the worst-case footprint of
+	// a file nobody reads on most days.
+	//
+	// 两道约束在同一遍里执行：先按年龄，再按总量。
+	//
+	// 年龄是常规情况，也是健康服务器上唯一会触发的一道。总量这道是在流量超出单日行数上限
+	// 背后的估算时兑现承诺的东西——没有它，保留期变成三倍就会让一个大多数日子根本没人读的
+	// 文件在最坏情况下的占用也变成三倍。
+	type dayFile struct {
+		name string
+		size int64
+	}
+	files := make([]dayFile, 0, len(entries))
+	var total int64
 	for _, e := range entries {
 		name := e.Name()
 		if !strings.HasPrefix(name, blogAccessLogPrefix) || !strings.HasSuffix(name, blogAccessLogExt) {
@@ -214,6 +257,29 @@ func (b *blogAccessLog) pruneLocked(day string) {
 		stamp := strings.TrimSuffix(strings.TrimPrefix(name, blogAccessLogPrefix), blogAccessLogExt)
 		if stamp < cutoff {
 			_ = os.Remove(filepath.Join(b.dir, name))
+			continue
+		}
+		info, ierr := e.Info()
+		if ierr != nil {
+			continue
+		}
+		files = append(files, dayFile{name: name, size: info.Size()})
+		total += info.Size()
+	}
+	if total <= blogAccessLogMaxTotalBytes {
+		return
+	}
+
+	// Day names sort lexicographically in date order, so the front of this slice is the oldest
+	// file to give up first.
+	// 日期文件名按字典序即日期序，因此这个切片的前端就是最先放弃的最旧文件。
+	sort.Slice(files, func(i, j int) bool { return files[i].name < files[j].name })
+	for _, f := range files {
+		if total <= blogAccessLogMaxTotalBytes {
+			break
+		}
+		if rerr := os.Remove(filepath.Join(b.dir, f.name)); rerr == nil {
+			total -= f.size
 		}
 	}
 }
