@@ -37,6 +37,10 @@ type shelfCollection struct {
 type shelfView struct {
 	Title     string
 	SiteName  string
+	// 页脚备案号。空表示不渲染那一行，见 config.BlogConfig.ICP。
+	ICP     string
+	MPS     string
+	MPSCode string
 	Indexable bool
 	CSS         template.CSS
 	Cards       []shelfCard
@@ -52,6 +56,10 @@ type shelfView struct {
 type readerView struct {
 	Title     string
 	SiteName  string
+	// 页脚备案号。空表示不渲染那一行，见 config.BlogConfig.ICP。
+	ICP     string
+	MPS     string
+	MPSCode string
 	Indexable bool
 	CSS       template.CSS
 
@@ -152,7 +160,7 @@ const blogShelfPage = `<!DOCTYPE html>
 
   <footer class="footer">
     <div>由 <a href="https://github.com/haierkeys/fast-note-sync-service" target="_blank" rel="noopener noreferrer">Fast Note Sync</a> 提供支持</div>
-    <div class="footer-legal"><a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer nofollow">浙ICP备2026089991号-1</a></div>
+    {{template "footer-legal" .}}
   </footer>
 </div>
 </body>
@@ -243,5 +251,5 @@ const blogReaderPage = `<!DOCTYPE html>
 </body>
 </html>`
 
-var blogShelfTmpl = template.Must(template.New("blog-shelf").Parse(blogShelfPage))
-var blogReaderTmpl = template.Must(template.New("blog-reader").Parse(blogReaderPage))
+var blogShelfTmpl = template.Must(template.New("blog-shelf").Parse(blogFooterLegal + blogShelfPage))
+var blogReaderTmpl = template.Must(template.New("blog-reader").Parse(blogFooterLegal + blogReaderPage))

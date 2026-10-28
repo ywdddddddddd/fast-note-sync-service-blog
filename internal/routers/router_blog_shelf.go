@@ -34,6 +34,7 @@ func registerBlogShelfRoutes(blog *gin.RouterGroup, appContainer *app.App) {
 			return
 		}
 		siteTitle := blogSiteTitle(cfg.Title)
+	icp, mps, mpCode := blogFiling(cfg)
 		base := strings.TrimRight(blogBaseURL(c, appContainer), "/")
 
 		books := shelfBooks()
@@ -88,6 +89,9 @@ func registerBlogShelfRoutes(blog *gin.RouterGroup, appContainer *app.App) {
 		if err := blogShelfTmpl.Execute(&buf, shelfView{
 			Title:       "资料 · " + siteTitle,
 			SiteName:    siteTitle,
+			ICP:         icp,
+			MPS:         mps,
+			MPSCode:     mpCode,
 			Indexable:   blogIndexable(cfg.Indexable),
 			CSS:         template.CSS(blogCSS),
 			Cards:       cards,
@@ -110,6 +114,7 @@ func registerBlogShelfRoutes(blog *gin.RouterGroup, appContainer *app.App) {
 			return
 		}
 		siteTitle := blogSiteTitle(cfg.Title)
+	icp, mps, mpCode := blogFiling(cfg)
 		base := strings.TrimRight(blogBaseURL(c, appContainer), "/")
 
 		id := c.Param("id")
@@ -141,6 +146,9 @@ func registerBlogShelfRoutes(blog *gin.RouterGroup, appContainer *app.App) {
 		if err := blogReaderTmpl.Execute(&buf, readerView{
 			Title:       book.Title + " · " + siteTitle,
 			SiteName:    siteTitle,
+			ICP:         icp,
+			MPS:         mps,
+			MPSCode:     mpCode,
 			Indexable:   blogIndexable(cfg.Indexable),
 			CSS:         template.CSS(blogCSS),
 			ID:          book.ID,

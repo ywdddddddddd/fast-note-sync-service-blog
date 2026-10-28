@@ -60,6 +60,36 @@ type BlogConfig struct {
 	// DislikeBurstEnabled 开关点踩的粒子喷发。按要求默认开启；
 	// 用指针而不是布尔值，使「未设置」与「显式关闭」可区分，默认值也能在手工编辑删掉该键时存活。
 	DislikeBurstEnabled *bool `yaml:"dislike-burst" default:"true"`
+
+	// ICP is the site's ICP filing number, rendered in the footer as a link to beian.miit.gov.cn.
+	//
+	// Empty means "render nothing" — which is the right default for an open-source project:
+	// a filing number belongs to one operator's domain, so shipping a placeholder (or anyone
+	// else's real number) in the repository would be wrong. Whoever deploys this fills in their
+	// own, and the footer line only exists for them.
+	//
+	// ICP 是本站的 ICP 备案号，渲染在页脚并链接到 beian.miit.gov.cn。
+	//
+	// 留空表示不渲染 —— 这对开源项目才是正确的默认值：备案号属于某个运营者的具体域名，
+	// 仓库里放占位符（或别人的真号）都是错的。部署者填自己的，那一行页脚才存在。
+	ICP string `yaml:"icp"`
+
+	// MPS is the site's public-security filing number, rendered in the footer as a link to the
+	// official query page. Same reasoning as ICP: empty means no line.
+	//
+	// When non-empty, MPSCode is appended to the query URL so the link lands on this site's
+	// record rather than the generic search form. If MPSCode is empty the plain query page is
+	// used, so a deployment that only has the number still gets a working link.
+	//
+	// MPS 是本站的公安联网备案号，渲染在页脚并链接到官方查询页。留空则不渲染，理由同 ICP。
+	//
+	// 非空时会把 MPSCode 拼进查询地址，使链接直接定位到本站记录而不是通用搜索页；
+	// MPSCode 为空则用普通查询页，只有号的部署也仍然拿到可用链接。
+	MPS string `yaml:"mps"`
+
+	// MPSCode is the numeric code used by the official query page (the digits in the MPS number).
+	// MPSCode 是官方查询页使用的数字编码（即 MPS 号里的那串数字）。
+	MPSCode string `yaml:"mps-code"`
 }
 
 // DislikeBurst reports whether the dislike burst is enabled, defaulting to on.

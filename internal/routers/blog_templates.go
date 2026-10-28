@@ -129,6 +129,10 @@ type blogHomeView struct {
 	Description string
 	FeedURL     string
 	JSONLD      template.JS
+	// 备案号：空表示不渲染那一行。见 config.BlogConfig.ICP。
+	ICP     string
+	MPS     string
+	MPSCode string
 }
 
 // blogPostView is the data bound to the article template.
@@ -258,6 +262,10 @@ type blogPostView struct {
 	// WarpJS 承载穿越过渡中「抵达」的那一半；每个页面都需要它，
 	// 因为读者离开首页后可能落到其中任何一个。
 	WarpJS template.JS
+	// 备案号：空表示不渲染那一行。见 config.BlogConfig.ICP。
+	ICP     string
+	MPS     string
+	MPSCode string
 }
 
 // The sidebar renders a recursive folder tree using native <details>/<summary>. That gives
@@ -284,6 +292,15 @@ type blogPostView struct {
 // 所以过渡跟着入口走，而不是让入口迁就过渡。
 const blogTopNav = `
 {{define "topnav"}}{{if or .Pages .HasShelf}}<nav class="topnav">{{range .Pages}}<a href="{{.URL}}"{{if eq .Alias "about"}} id="fns-warp"{{end}}>{{.Title}}</a>{{end}}{{if .HasShelf}}<a href="/blog/shelf">资料</a>{{end}}</nav>{{end}}{{end}}`
+
+// blogFooterLegal is the shared filing-number block.
+//
+// 备案号来自配置（blog.icp / blog.mps），空值渲染为空字符串 ——
+// 开源仓库里不带任何真实备案号，部署者在 config.yaml 填自己的。
+//
+// 链接说明：ICP 指向工信部备案系统；公安备案指向官方查询页，带 code 时直接定位到本站记录。
+const blogFooterLegal = `
+{{define "footer-legal"}}{{if .ICP}}<div class="footer-legal"><a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer nofollow">{{.ICP}}</a></div>{{end}}{{if .MPS}}<div class="footer-legal"><a href="https://beian.mps.gov.cn/#/query/webSearch{{if .MPSCode}}?code={{.MPSCode}}{{end}}" target="_blank" rel="noopener noreferrer nofollow">{{.MPS}}</a></div>{{end}}{{end}}`
 
 const blogNavTree = `
 {{define "navnode"}}{{if .Children}}<details class="nav-folder"{{if le .Depth 1}} open{{end}}>
@@ -343,7 +360,7 @@ const blogNavPartial = `
 })();
 </script>`
 
-var blogHomeTmpl = template.Must(template.New("blog-home").Funcs(blogAssetFuncs).Parse(`<!DOCTYPE html>
+var blogHomeTmpl = template.Must(template.New("blog-home").Funcs(blogAssetFuncs).Parse(blogFooterLegal + `<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
@@ -498,7 +515,7 @@ var blogHomeTmpl = template.Must(template.New("blog-home").Funcs(blogAssetFuncs)
 
   <footer class="footer">
     <div>由 <a href="https://github.com/haierkeys/fast-note-sync-service" target="_blank" rel="noopener noreferrer">Fast Note Sync</a> 提供支持</div>
-    <div class="footer-legal"><a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer nofollow">浙ICP备2026089991号-1</a></div>
+    {{template "footer-legal" .}}
   </footer>
 </div>
 <!-- 首页的三个入口：爻路（随机漫步）、山（目录）、问道（问答）。
@@ -746,7 +763,7 @@ var blogHomeTmpl = template.Must(template.New("blog-home").Funcs(blogAssetFuncs)
 </html>
 {{define "nav"}}` + blogNavPartial + `{{end}}` + blogNavTree + blogTopNav))
 
-var blogPostTmpl = template.Must(template.New("blog-post").Funcs(blogAssetFuncs).Parse(`<!DOCTYPE html>
+var blogPostTmpl = template.Must(template.New("blog-post").Funcs(blogAssetFuncs).Parse(blogFooterLegal + `<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
@@ -927,7 +944,7 @@ var blogPostTmpl = template.Must(template.New("blog-post").Funcs(blogAssetFuncs)
 
   <footer class="footer">
     <div>由 <a href="https://github.com/haierkeys/fast-note-sync-service" target="_blank" rel="noopener noreferrer">Fast Note Sync</a> 提供支持</div>
-    <div class="footer-legal"><a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer nofollow">浙ICP备2026089991号-1</a></div>
+    {{template "footer-legal" .}}
   </footer>
 </div>
 <script>
@@ -1165,6 +1182,10 @@ type blogPageView struct {
 	// WarpJS is the arriving half of the warp transition. See blogPostView.WarpJS.
 	// WarpJS 是穿越过渡中「抵达」的那一半。见 blogPostView.WarpJS。
 	WarpJS template.JS
+	// 备案号：空表示不渲染那一行。见 config.BlogConfig.ICP。
+	ICP     string
+	MPS     string
+	MPSCode string
 }
 
 // blogPageTmpl renders a page note at its alias route.
@@ -1186,7 +1207,7 @@ type blogPageView struct {
 //  1. 不调用 "nav" 模板，因此没有目录树，宽度归中栏。目录树是通往文章的入口，
 //     而页面是读者专程来读一件事的地方。
 //  2. 中栏带 .layout-page，打印样式表以此为据去掉页面家具、把内容按文档排版。
-var blogPageTmpl = template.Must(template.New("blog-page").Funcs(blogAssetFuncs).Parse(`<!DOCTYPE html>
+var blogPageTmpl = template.Must(template.New("blog-page").Funcs(blogAssetFuncs).Parse(blogFooterLegal + `<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
@@ -1256,7 +1277,7 @@ var blogPageTmpl = template.Must(template.New("blog-page").Funcs(blogAssetFuncs)
 
   <footer class="footer">
     <div>由 <a href="https://github.com/haierkeys/fast-note-sync-service" target="_blank" rel="noopener noreferrer">Fast Note Sync</a> 提供支持</div>
-    <div class="footer-legal"><a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer nofollow">浙ICP备2026089991号-1</a></div>
+    {{template "footer-legal" .}}
   </footer>
 </div>
 {{if .WarpJS}}<script>{{.WarpJS}}</script>{{end}}
@@ -1447,6 +1468,10 @@ type blogErrorView struct {
 	Heading  string
 	Message  string
 	Hints    []string
+	// 备案号：空表示不渲染那一行。见 config.BlogConfig.ICP。
+	ICP     string
+	MPS     string
+	MPSCode string
 }
 
 // blogErrorTmpl renders the shared error page. Same skeleton as the home and article
@@ -1455,7 +1480,7 @@ type blogErrorView struct {
 //
 // blogErrorTmpl 渲染公共错误页。骨架与首页、文章页模板相同（点阵背景 / 顶栏 / 页脚，
 // 同一套设计令牌），使失效链接落在一个仍然像本站的页面上，而不是一行裸文本。
-var blogErrorTmpl = template.Must(template.New("blog-error").Funcs(blogAssetFuncs).Parse(`<!DOCTYPE html>
+var blogErrorTmpl = template.Must(template.New("blog-error").Funcs(blogAssetFuncs).Parse(blogFooterLegal + `<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
@@ -1494,7 +1519,7 @@ var blogErrorTmpl = template.Must(template.New("blog-error").Funcs(blogAssetFunc
 
   <footer class="footer">
     <div>由 <a href="https://github.com/haierkeys/fast-note-sync-service" target="_blank" rel="noopener noreferrer">Fast Note Sync</a> 提供支持</div>
-    <div class="footer-legal"><a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer nofollow">浙ICP备2026089991号-1</a></div>
+    {{template "footer-legal" .}}
   </footer>
 </div>
 </body>

@@ -11,6 +11,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/haierkeys/fast-note-sync-service/internal/app"
+
 	"github.com/haierkeys/fast-note-sync-service/internal/dto"
 	"github.com/haierkeys/fast-note-sync-service/internal/middleware"
 	"github.com/haierkeys/fast-note-sync-service/internal/service"
@@ -176,6 +177,7 @@ func registerBlogRoutes(r *gin.Engine, appContainer *app.App) {
 			return
 		}
 		siteTitle := blogSiteTitle(cfg.Title)
+	icp, mps, mpCode := blogFiling(cfg)
 		uid := blogUID(cfg.UID)
 		base := blogBaseURL(c, appContainer)
 
@@ -236,6 +238,9 @@ func registerBlogRoutes(r *gin.Engine, appContainer *app.App) {
 		if err := blogHomeTmpl.Execute(&buf, blogHomeView{
 			Title:        siteTitle,
 			SiteName:     siteTitle,
+			ICP:          icp,
+			MPS:          mps,
+			MPSCode:      mpCode,
 			Indexable:    blogIndexable(cfg.Indexable),
 			Canonical:    homeURL,
 			Description:  homeDesc,
@@ -290,6 +295,7 @@ func registerBlogRoutes(r *gin.Engine, appContainer *app.App) {
 			return
 		}
 		siteTitle := blogSiteTitle(cfg.Title)
+	icp, mps, mpCode := blogFiling(cfg)
 		uid := blogUID(cfg.UID)
 		// baseURL is needed again, but for a different reason than before: canonical / og:url /
 		// JSON-LD / the feed link must all be absolute. The article page still does not assemble
@@ -452,6 +458,9 @@ func registerBlogRoutes(r *gin.Engine, appContainer *app.App) {
 		if perr := blogPostTmpl.Execute(&pbuf, blogPostView{
 			Title:       post.Title + " · " + siteTitle,
 			SiteName:    siteTitle,
+			ICP:         icp,
+			MPS:         mps,
+			MPSCode:     mpCode,
 			Indexable:   blogIndexable(cfg.Indexable),
 			Canonical:   postURL,
 			Description: postDesc,
@@ -544,6 +553,7 @@ func serveBlogPage(c *gin.Context, appContainer *app.App, shareSvc service.Share
 		return
 	}
 	siteTitle := blogSiteTitle(cfg.Title)
+	icp, mps, mpCode := blogFiling(cfg)
 	uid := blogUID(cfg.UID)
 	base := blogBaseURL(c, appContainer)
 
@@ -594,6 +604,9 @@ func serveBlogPage(c *gin.Context, appContainer *app.App, shareSvc service.Share
 	if err := blogPageTmpl.Execute(&buf, blogPageView{
 		Title:       pageTitle,
 		SiteName:    siteTitle,
+		ICP:         icp,
+		MPS:         mps,
+		MPSCode:     mpCode,
 		Indexable:   blogIndexable(cfg.Indexable),
 		Canonical:   pageURL,
 		Description: desc,
@@ -645,6 +658,9 @@ func blogEnabled(c *gin.Context, appContainer *app.App) (*blogRuntimeConfig, boo
 		MaxGraphNodes:   raw.MaxGraphNodes,
 		ShowGraph:       raw.ShowGraph != nil && *raw.ShowGraph,
 		LocalGraphDepth: blogClampDepth(raw.LocalGraphDepth),
+		ICP:             raw.ICP,
+		MPS:             raw.MPS,
+		MPSCode:         raw.MPSCode,
 	}, true
 }
 
@@ -662,6 +678,13 @@ type blogRuntimeConfig struct {
 	// LocalGraphDepth 是文章内图谱的起始深度。深度是「查看偏好」而不是每篇文章的事实，
 	// 因此它与其它开关放在一起。
 	LocalGraphDepth int
+
+	// Filing numbers for the footer. Empty means "render nothing", so an open-source
+	// deployment without them simply has no filing line. See config.BlogConfig.ICP.
+	// 页脚备案号。空表示不渲染，开源部署没有它们时就不会多出那一行。
+	ICP     string
+	MPS     string
+	MPSCode string
 }
 
 func blogSiteTitle(v string) string {
@@ -701,6 +724,16 @@ func blogClampDepth(d int) int {
 	return d
 }
 
+// blogFiling trims the configured filing numbers and returns the footer values.
+//
+// 空值就返回空字符串，模板据此决定不渲染那一行 —— 开源仓库的默认配置里没有备案号，
+// 只有部署者在 config.yaml 里填了才会出现。
+func blogFiling(cfg *blogRuntimeConfig) (icp, mps, code string) {
+	return strings.TrimSpace(cfg.ICP),
+		strings.TrimSpace(cfg.MPS),
+		strings.TrimSpace(cfg.MPSCode)
+}
+
 func blogUID(v int64) int64 {
 	if v <= 0 {
 		return 1
@@ -732,11 +765,16 @@ func blogBaseURL(c *gin.Context, appContainer *app.App) string {
 func blogErrorPage(c *gin.Context, appContainer *app.App, status int, crumb, heading, message string, hints []string) {
 	cfg := &appContainer.Config().Blog
 	siteTitle := blogSiteTitle(cfg.Title)
+	// 错误页不经过 blogEnabled，所以这里直接取三个值，不走 blogRuntimeConfig。
+	icp, mps, mpCode := strings.TrimSpace(cfg.ICP), strings.TrimSpace(cfg.MPS), strings.TrimSpace(cfg.MPSCode)
 
 	var buf bytes.Buffer
 	if err := blogErrorTmpl.Execute(&buf, blogErrorView{
 		Title:    crumb + " · " + siteTitle,
 		SiteName: siteTitle,
+		ICP:      icp,
+		MPS:      mps,
+		MPSCode:  mpCode,
 		CSS:      template.CSS(blogCSS),
 		Code:     status,
 		Heading:  heading,
