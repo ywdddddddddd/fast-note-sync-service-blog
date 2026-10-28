@@ -55,6 +55,31 @@ type BlogFeedEntry struct {
 	Summary     string
 	ContentHTML string
 	Author      string
+	// CoverURL is the image (or video poster) a reader should show beside this item.
+	//
+	// It is an absolute address for the same reason ContentHTML is rewritten: a reader resolves a
+	// bare path against its own origin. Empty means the article carries no image at all, and the
+	// feed simply omits both cover elements for it.
+	//
+	// CoverURL 是阅读器应在这条内容旁展示的图片（或视频封面）。
+	//
+	// 它是绝对地址，理由与改写 ContentHTML 相同：阅读器会把裸路径按自己的域名解析。
+	// 为空表示这篇文章根本没有任何图片，订阅源对它就完全省略两个封面元素。
+	CoverURL string
+	// CoverMIME is the declared content type for CoverURL, e.g. "image/png".
+	//
+	// It comes from the author's cover reference when there is one. For an article whose cover is
+	// merely the first image in its body the served address carries no extension — it is
+	// `/api/share/file?id=…&share_token=…` — so the fallback type is declared as JPEG rather than
+	// guessed. Readers sniff the bytes anyway; the field exists so validators see a well-formed
+	// enclosure.
+	//
+	// CoverMIME 是 CoverURL 声明的类型，如 "image/png"。
+	//
+	// 作者显式声明封面时来自那条引用。若封面只是正文里的第一张图，对外地址不带扩展名
+	// ——它是 `/api/share/file?id=…&share_token=…`——因此兜底类型直接写 JPEG 而不是去猜。
+	// 阅读器本来就会嗅探字节；这个字段存在的意义是让校验器看到合法的附件声明。
+	CoverMIME string
 }
 
 // blogFeedAbsURL matches the opening of a root-relative href/src plus its first path character.
@@ -226,9 +251,106 @@ func (s *shareService) GetBlogFeed(ctx context.Context, uid int64, baseURL strin
 		if body, rerr := s.renderBlogPostHTML(ctx, src.Slug); rerr == nil {
 			entry.ContentHTML = absolutizeBlogHTML(body, base)
 		}
+		feedCoverFor(entry, src.Cover, base)
 		out = append(out, entry)
 	}
 	return out, nil
+}
+
+// blogFeedFallbackCoverMIME is the declared type when the cover is an in-body image.
+//
+// The served address has no extension, so there is nothing to read a type out of. JPEG is the
+// honest default: nearly every note image in this vault is a screenshot or a phone photo, and a
+// reader that trusts the header rather than the bytes is rarer than one that ignores it.
+//
+// blogFeedFallbackCoverMIME 是封面取自正文图片时声明的类型。
+//
+// 对外地址没有扩展名，读不出类型。JPEG 是诚实的默认值：这个仓库里几乎每张笔记图片都是截图
+// 或手机照片，而信任响应头而不是字节的阅读器，比忽略这个字段的阅读器更少见。
+const blogFeedFallbackCoverMIME = "image/jpeg"
+
+// blogFeedImgSrc matches the opening of an <img> tag up to and including its src value.
+//
+// [^>]* rather than .*?: the rendered body is one long line for a short note, and a lazy any-char
+// match would scan across tag boundaries to find a "src=" that belongs to a later element.
+//
+// blogFeedImgSrc 匹配一个 <img> 标签的开头，直到并包含它的 src 取值。
+//
+// 用 [^>]* 而不是 .*?：短笔记渲染出的正文是一整行，惰性任意字符匹配会跨过标签边界，
+// 命中后面某个元素上的 "src="。
+var blogFeedImgSrc = regexp.MustCompile(`(?i)<img\b[^>]*\bsrc\s*=\s*"([^"]+)"`)
+
+// firstBlogImageSrc returns the first usable image address in rendered article HTML.
+//
+// data: URIs are skipped rather than returned: a reader would be handed a multi-kilobyte string
+// in an attribute, and any image embedded that way is already inside the body the reader renders.
+//
+// firstBlogImageSrc 返回已渲染正文里第一个可用的图片地址。
+//
+// data: URI 被跳过而不是返回：阅读器会在属性里拿到一个几 KB 的字符串，而任何这样嵌入的图片
+// 本就已经在阅读器要渲染的正文里面了。
+func firstBlogImageSrc(html string) string {
+	for _, m := range blogFeedImgSrc.FindAllStringSubmatch(html, 8) {
+		src := strings.TrimSpace(m[1])
+		if src == "" || strings.HasPrefix(strings.ToLower(src), "data:") {
+			continue
+		}
+		return src
+	}
+	return ""
+}
+
+// feedCoverFor fills in an entry's cover, preferring the author's declaration over the body.
+//
+// The precedence is the product decision, restated in code: a note that declares `cover:` gets
+// that image even when its body opens with a different one, and a note that declares nothing
+// falls back to the first image it happens to contain. The fallback is why covers worked at all
+// before the frontmatter key existed, and it is why the grid is not empty for the 150 notes that
+// have not been annotated yet.
+//
+// feedCoverFor 填充条目的封面，作者显式声明的优先于正文。
+//
+// 这个优先级就是产品决定，在这里用代码重述一遍：声明了 `cover:` 的笔记得到那张图，
+// 即使正文开头是另一张；什么都没声明的笔记退化到它碰巧包含的第一张图。正是这个退化
+// 让封面键存在之前封面也能工作，也正是它让那 150 篇还没标注的笔记不会把网格留空。
+func feedCoverFor(entry *BlogFeedEntry, cover *blogCover, base string) {
+	if entry == nil {
+		return
+	}
+	if cover != nil && cover.URL != "" {
+		entry.CoverURL = absolutizeBlogURL(cover.URL, base)
+		entry.CoverMIME = cover.MIME
+		if entry.CoverMIME == "" {
+			entry.CoverMIME = blogFeedFallbackCoverMIME
+		}
+		return
+	}
+	// ContentHTML is already absolutized, so the extracted address needs no further rewrite.
+	// ContentHTML 已是绝对地址，因此提取出的地址不需要再改写。
+	if src := firstBlogImageSrc(entry.ContentHTML); src != "" {
+		entry.CoverURL = absolutizeBlogURL(src, base)
+		entry.CoverMIME = blogFeedFallbackCoverMIME
+	}
+}
+
+// absolutizeBlogURL prefixes one root-relative address with the site's base.
+//
+// Protocol-relative addresses ("//host/x") are returned untouched: they are already absolute, and
+// prefixing them would produce "https://blog//host/x".
+//
+// absolutizeBlogURL 给单个根相对地址加上站点基础地址。
+//
+// 协议相对地址（"//host/x"）原样返回：它们本就是绝对的，加前缀会得到 "https://blog//host/x"。
+func absolutizeBlogURL(u, base string) string {
+	u = strings.TrimSpace(u)
+	base = strings.TrimRight(strings.TrimSpace(base), "/")
+	if u == "" || base == "" {
+		return u
+	}
+	if !strings.HasPrefix(u, "/") || strings.HasPrefix(u, "//") {
+		return u
+	}
+	return base + u
 }
 
 // renderBlogPostHTML renders one article exactly as the site renders it.

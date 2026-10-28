@@ -238,6 +238,39 @@ func (r *fileRepository) GetByPathLike(ctx context.Context, path string, vaultID
 	return r.toDomain(m, uid), nil
 }
 
+// ListByPathSuffix returns every live file whose path ends with the given suffix.
+//
+// GetByPathLike answers the same question but takes the first row, so when a vault holds two
+// files with the same name the winner is decided by storage order — stable in practice, arbitrary
+// in principle, and silently wrong. Callers that must not pick the wrong file (a cover image is
+// attached to one specific note) need the whole candidate set so they can choose by proximity.
+//
+// ListByPathSuffix 返回路径以给定后缀结尾的全部未删除文件。
+//
+// GetByPathLike 回答同一个问题但只取第一行，因此当一个仓库里存在两个同名文件时，
+// 胜出者由存储顺序决定——实践中稳定，原则上任意，而且错得悄无声息。
+// 不能选错文件的调用方（封面图属于某一篇特定笔记）需要完整的候选集，才能按贴近程度选择。
+func (r *fileRepository) ListByPathSuffix(ctx context.Context, suffix string, vaultID, uid int64, limit int) ([]*domain.File, error) {
+	u := r.file(uid).File
+	q := u.WithContext(ctx).Where(
+		u.VaultID.Eq(vaultID),
+		u.Path.Like("%"+suffix),
+		u.Action.Neq("delete"),
+	).Order(u.Path)
+	if limit > 0 {
+		q = q.Limit(limit)
+	}
+	mList, err := q.Find()
+	if err != nil {
+		return nil, err
+	}
+	list := make([]*domain.File, 0, len(mList))
+	for _, m := range mList {
+		list = append(list, r.toDomain(m, uid))
+	}
+	return list, nil
+}
+
 // Create creates a file
 // Create 创建文件
 func (r *fileRepository) Create(ctx context.Context, file *domain.File, uid int64) (*domain.File, error) {

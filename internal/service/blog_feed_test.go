@@ -170,3 +170,146 @@ func TestBlogPlainTextUsesWikiFix(t *testing.T) {
 		t.Errorf("别名没有被采用：%q", got)
 	}
 }
+
+// firstBlogImageSrc must return the first real image, skip inline data URIs, and stop at the tag
+// boundary rather than scanning on to a later element's src.
+//
+// The tag-boundary case is the one that breaks with a lazy `.*?`: this note renders as a single
+// long line, so the match would start at an <a> and end at whatever came next.
+//
+// firstBlogImageSrc 必须返回第一张真实图片、跳过内联 data URI，并在标签边界停下，
+// 而不是继续扫到后面某个元素的 src。
+//
+// 标签边界这一条正是惰性 `.*?` 会出错的地方：这篇笔记渲染成一整行，
+// 匹配会从一个 <a> 开始、止于后面任意一个元素。
+func TestFirstBlogImageSrc(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{
+			name: "取第一张",
+			in:   `<p>文</p><img src="/api/share/file?id=1"><img src="/api/share/file?id=2">`,
+			want: "/api/share/file?id=1",
+		},
+		{
+			name: "跳过 data URI",
+			in:   `<img src="data:image/png;base64,AAA"><img src="/api/share/file?id=3">`,
+			want: "/api/share/file?id=3",
+		},
+		{
+			name: "不跨标签",
+			in:   `<a href="/x"><img src="/a.png"></a>`,
+			want: "/a.png",
+		},
+		{
+			name: "没有图片",
+			in:   `<p>只有文字</p>`,
+			want: "",
+		},
+		{
+			name: "属性顺序颠倒也认",
+			in:   `<img alt="图" src="/b.png" width="10">`,
+			want: "/b.png",
+		},
+		{
+			name: "只有 data URI",
+			in:   `<img src="data:image/gif;base64,BBB">`,
+			want: "",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := firstBlogImageSrc(c.in); got != c.want {
+				t.Errorf("firstBlogImageSrc(%q) = %q, want %q", c.in, got, c.want)
+			}
+		})
+	}
+}
+
+// absolutizeBlogURL prefixes root-relative addresses and leaves everything else alone.
+//
+// Protocol-relative is the case worth naming: "//host/x" already names a host, and prefixing it
+// produces "https://blog//host/x", which resolves to the blog's own origin and 404s.
+//
+// absolutizeBlogURL 给根相对地址加前缀，其余一律原样返回。
+//
+// 协议相对是值得单独点出的那一例："//host/x" 本身已经指明了主机，加前缀会得到
+// "https://blog//host/x"，它会被解析成博客自己的域名然后 404。
+func TestAbsolutizeBlogURL(t *testing.T) {
+	const base = "https://yaowendao.asia"
+	cases := []struct{ in, want string }{
+		{"/api/share/file?id=1", base + "/api/share/file?id=1"},
+		{"//cdn.example.com/x.png", "//cdn.example.com/x.png"},
+		{"https://other/x.png", "https://other/x.png"},
+		{"", ""},
+		{"/", base + "/"},
+	}
+	for _, c := range cases {
+		if got := absolutizeBlogURL(c.in, base); got != c.want {
+			t.Errorf("absolutizeBlogURL(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+	if got := absolutizeBlogURL("/x", ""); got != "/x" {
+		t.Errorf("空 base 应原样返回，得到 %q", got)
+	}
+	if got := absolutizeBlogURL("/x", base+"/"); got != base+"/x" {
+		t.Errorf("base 尾斜杠应被吸收，得到 %q", got)
+	}
+}
+
+// The declared cover must win over the body's first image: that is the whole point of the
+// frontmatter key, and the reason the editor exists.
+//
+// 显式声明的封面必须优先于正文第一张图：这正是 frontmatter 键存在的全部意义，
+// 也是那个编辑器的存在理由。
+func TestFeedCoverPrefersDeclaredOverBody(t *testing.T) {
+	entry := &BlogFeedEntry{
+		ContentHTML: `<img src="https://x/body.png">`,
+	}
+	feedCoverFor(entry, &blogCover{
+		URL: "/api/share/file?id=9", Kind: "image", MIME: "image/webp",
+	}, "https://x")
+
+	if entry.CoverURL != "https://x/api/share/file?id=9" {
+		t.Errorf("没有采用声明的封面: %q", entry.CoverURL)
+	}
+	if entry.CoverMIME != "image/webp" {
+		t.Errorf("MIME 没有跟着声明走: %q", entry.CoverMIME)
+	}
+}
+
+// With no declaration the body's first image is the cover, and it is already absolute because
+// ContentHTML was rewritten before this runs.
+//
+// 没有声明时正文第一张图就是封面，而它已经是绝对地址，因为 ContentHTML 在此之前已改写。
+func TestFeedCoverFallsBackToBodyImage(t *testing.T) {
+	entry := &BlogFeedEntry{
+		ContentHTML: `<p>x</p><img src="https://x/body.png">`,
+	}
+	feedCoverFor(entry, nil, "https://x")
+
+	if entry.CoverURL != "https://x/body.png" {
+		t.Errorf("没有退化到正文图片: %q", entry.CoverURL)
+	}
+	if entry.CoverMIME != blogFeedFallbackCoverMIME {
+		t.Errorf("兜底 MIME = %q, want %q", entry.CoverMIME, blogFeedFallbackCoverMIME)
+	}
+}
+
+// A cover whose file went missing resolves to an empty URL, so the entry must fall through to the
+// body image rather than emitting an enclosure pointing at nothing.
+//
+// 封面文件丢失时解析出的 URL 为空，因此条目必须继续退化到正文图片，
+// 而不是发出一个指向空无的附件。
+func TestFeedCoverIgnoresUnresolvedDeclaration(t *testing.T) {
+	entry := &BlogFeedEntry{
+		ContentHTML: `<img src="https://x/body.png">`,
+	}
+	feedCoverFor(entry, &blogCover{URL: "", Kind: "image"}, "https://x")
+
+	if entry.CoverURL != "https://x/body.png" {
+		t.Errorf("未解析的封面挡住了正文图片: %q", entry.CoverURL)
+	}
+}

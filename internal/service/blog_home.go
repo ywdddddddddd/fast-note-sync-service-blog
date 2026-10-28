@@ -235,6 +235,15 @@ var (
 	fmPageRegex   = regexp.MustCompile(`(?mi)^page:[ \t]*([A-Za-z][A-Za-z0-9_-]*)[ \t]*$`)
 	fmAvatarRegex = regexp.MustCompile(`(?mi)^avatar:[ \t]*(.+?)[ \t]*$`)
 	fmTitleRegex  = regexp.MustCompile(`(?mi)^title:[ \t]*(.+?)[ \t]*$`)
+
+	// Cover keys. Anchored so `cover:` cannot match `cover-focus:` — the short key must not
+	// swallow its own modifier.
+	//
+	// 封面的三个键。锚定写法使 `cover:` 不会命中 `cover-focus:` ——
+	// 主键不能吞掉自己的修饰键。
+	fmCoverRegex      = regexp.MustCompile(`(?mi)^cover:[ \t]*(.+?)[ \t]*$`)
+	fmCoverFocusRegex = regexp.MustCompile(`(?mi)^cover-focus:[ \t]*(.+?)[ \t]*$`)
+	fmCoverZoomRegex  = regexp.MustCompile(`(?mi)^cover-zoom:[ \t]*(.+?)[ \t]*$`)
 )
 
 // blogPageAliases is the whitelist of page aliases this server actually renders a route for.
@@ -448,6 +457,11 @@ type blogHomeSource struct {
 	// Avatar is the frontmatter avatar path; only meaningful for pages.
 	// Avatar 是 frontmatter 里声明的头像路径，仅对页面有意义。
 	Avatar string
+	// Cover is the author-declared cover, already resolved to a served URL, or nil when the note
+	// declares none or the file cannot be found.
+	//
+	// Cover 是作者声明的封面，已经解析为可访问的 URL；没有声明或文件找不到时为 nil。
+	Cover *blogCover
 }
 
 // loadBlogSources resolves every published note the blog may render.
@@ -540,6 +554,23 @@ func (s *shareService) loadBlogSources(ctx context.Context, uid int64) ([]*blogH
 			Words:     blogCountChars(note.Content),
 			Page:      blogNotePage(note.Content),
 			Avatar:    blogNoteAvatar(note.Content),
+		}
+
+		// Cover resolution is deliberately best-effort and silent: a note whose cover points at
+		// a deleted file renders exactly like a note that never had one. Making this fatal would
+		// let a stray frontmatter line take the whole home page down.
+		//
+		// 封面解析刻意是尽力而为且静默的：封面指向一个已删除文件的笔记，表现与从未设置封面的
+		// 笔记完全相同。让这里变成致命错误，等于允许一行手滑的 frontmatter 打掉整个首页。
+		if ref, cover := parseBlogCover(note.Content, note.Path); cover != nil {
+			if file, cerr := s.resolveBlogCoverFile(ctx, uid, note.VaultID, note.Path, ref); cerr == nil && file != nil {
+				if s.ensureCoverResource(ctx, uid, sh, file) {
+					if token, terr := s.tokenManager.ShareGenerate(sh.ID, uid, sh.Resources); terr == nil {
+						cover.URL = buildSharedFileAPIURL(file.ID, token, "")
+						src.Cover = cover
+					}
+				}
+			}
 		}
 		for tag, n := range blogParseTags(note.Content) {
 			tagCount[tag] += n
@@ -752,6 +783,7 @@ func (s *shareService) GetBlogHome(ctx context.Context, uid int64, baseURL strin
 			LinksIn:   linksIn[src.NoteID],
 			CreatedAt: src.CreatedAt,
 			Vault:     src.Vault,
+			Cover:     blogCoverDTO(src.Cover),
 		})
 		home.Stats.Words += src.Words
 		totalLinks += linksOut[src.NoteID]

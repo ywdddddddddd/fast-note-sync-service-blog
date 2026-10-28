@@ -47,6 +47,7 @@ type rssFeed struct {
 	Version string     `xml:"version,attr"`
 	Atom    string     `xml:"xmlns:atom,attr"`
 	Content string     `xml:"xmlns:content,attr"`
+	Media   string     `xml:"xmlns:media,attr"`
 	Channel rssChannel `xml:"channel"`
 }
 
@@ -67,13 +68,45 @@ type rssAtom struct {
 }
 
 type rssItem struct {
-	Title       string      `xml:"title"`
-	Link        string      `xml:"link"`
-	GUID        rssGUID     `xml:"guid"`
-	PubDate     string      `xml:"pubDate,omitempty"`
-	Description string      `xml:"description,omitempty"`
-	Author      string      `xml:"author,omitempty"`
-	Content     *rssEncoded `xml:"content:encoded,omitempty"`
+	Title       string            `xml:"title"`
+	Link        string            `xml:"link"`
+	GUID        rssGUID           `xml:"guid"`
+	PubDate     string            `xml:"pubDate,omitempty"`
+	Description string            `xml:"description,omitempty"`
+	Author      string            `xml:"author,omitempty"`
+	Enclosure   *rssEnclosure     `xml:"enclosure,omitempty"`
+	Media       []rssMediaContent `xml:"media:content,omitempty"`
+	Content     *rssEncoded       `xml:"content:encoded,omitempty"`
+}
+
+// rssEnclosure is the RSS 2.0 covers mechanism, and media:content is the Media RSS one.
+//
+// Both are emitted for the same image, deliberately. The two dialects have different audiences:
+// plain <enclosure> is what every RSS 2.0 parser understands and what most readers use to build
+// the thumbnail strip, while <media:content> is what Media RSS consumers (Feedly, Inoreader,
+// NetNewsWire) prefer and what lets us also say "this is an image, not a podcast episode". Sending
+// only one of them loses thumbnail rendering in some reader somewhere; sending both costs about
+// 200 bytes per item, which is nothing next to a 25 KB article body.
+//
+// rssEnclosure 是 RSS 2.0 的封面机制，media:content 是 Media RSS 的。
+//
+// 同一张图刻意两种都发。两种方言面向不同的读者：纯 <enclosure> 是每个 RSS 2.0 解析器都认识的，
+// 也是多数阅读器用来搭缩略图条的依据；<media:content> 则是 Media RSS 消费者（Feedly、
+// Inoreader、NetNewsWire）偏好的，并且允许我们额外说明「这是图片，不是播客音频」。
+// 只发其中一个，就会在某个阅读器里丢掉缩略图；两个都发，每条多约 200 字节，
+// 相对一篇 25 KB 的正文可以忽略。
+type rssEnclosure struct {
+	URL    string `xml:"url,attr"`
+	Type   string `xml:"type,attr"`
+	Length string `xml:"length,attr"`
+}
+
+// rssMediaContent carries Medium as well as Type, so a reader can tell an image cover from a video.
+// rssMediaContent 同时带 Medium 与 Type，使阅读器能区分图片封面和视频封面。
+type rssMediaContent struct {
+	URL    string `xml:"url,attr"`
+	Type   string `xml:"type,attr"`
+	Medium string `xml:"medium,attr"`
 }
 
 // rssEncoded carries full article HTML in the content module's element.
@@ -160,6 +193,24 @@ func buildBlogFeed(entries []*service.BlogFeedEntry, siteTitle, baseURL string) 
 		if e.ContentHTML != "" {
 			item.Content = &rssEncoded{Value: cdataSafe(e.ContentHTML)}
 		}
+		if e.CoverURL != "" {
+			mimeType := e.CoverMIME
+			if mimeType == "" {
+				mimeType = "image/jpeg"
+			}
+			// length is required by the RSS 2.0 schema but nothing checks it: the attribute dates
+			// from the era of dial-up pre-flight and every modern reader streams the body instead
+			// of reserving space for it. "0" is the conventional way to say "unknown".
+			//
+			// length 在 RSS 2.0 模式里是必填的，但没有谁校验它：这个属性来自拨号上网的年代，
+			// 用来预先分配空间，而现代阅读器一律流式取正文。"0" 是表示「未知」的惯例写法。
+			item.Enclosure = &rssEnclosure{URL: e.CoverURL, Type: mimeType, Length: "0"}
+			item.Media = []rssMediaContent{{
+				URL:    e.CoverURL,
+				Type:   mimeType,
+				Medium: blogFeedMedium(mimeType),
+			}}
+		}
 		items = append(items, item)
 	}
 
@@ -177,6 +228,7 @@ func buildBlogFeed(entries []*service.BlogFeedEntry, siteTitle, baseURL string) 
 		Version: "2.0",
 		Atom:    "http://www.w3.org/2005/Atom",
 		Content: "http://purl.org/rss/1.0/modules/content/",
+		Media:   "http://search.yahoo.com/mrss/",
 		Channel: channel,
 	}, "", "  ")
 	if err != nil {
@@ -189,6 +241,25 @@ func buildBlogFeed(entries []*service.BlogFeedEntry, siteTitle, baseURL string) 
 	out = append(out, body...)
 	out = append(out, '\n')
 	return out, nil
+}
+
+// blogFeedMedium maps a MIME type onto Media RSS's medium vocabulary.
+//
+// The vocabulary is small and closed ("image", "video", "audio", "document", "executable"), and
+// readers use it to decide which of the three layouts to render. Anything that is not a video is
+// declared an image: covers in this blog are pictures, and an unknown medium makes some readers
+// fall back to no thumbnail at all.
+//
+// blogFeedMedium 把 MIME 类型映射到 Media RSS 的 medium 词汇。
+//
+// 这个词汇表很小且封闭（"image"、"video"、"audio"、"document"、"executable"），阅读器用它决定
+// 渲染三种版式中的哪一种。非视频一律声明为图片：这个博客的封面就是图片，
+// 而未知的 medium 会让部分阅读器干脆不显示缩略图。
+func blogFeedMedium(mimeType string) string {
+	if strings.HasPrefix(strings.ToLower(mimeType), "video/") {
+		return "video"
+	}
+	return "image"
 }
 
 // cdataSafe rewrites the one sequence a CDATA section cannot contain.

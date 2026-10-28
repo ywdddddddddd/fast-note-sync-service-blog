@@ -65,6 +65,14 @@ type FileRepository interface {
 	// GetByPathLike 根据路径后缀获取文件
 	GetByPathLike(ctx context.Context, path string, vaultID, uid int64) (*File, error)
 
+	// ListByPathSuffix 返回路径以给定后缀结尾的全部未删除文件。
+	//
+	// 与 GetByPathLike 的区别是它不替调用方做选择：同名文件同时存在时，
+	// 让调用方按自己的规则（例如与笔记路径的贴近程度）决定用哪一个，而不是由存储顺序决定。
+	//
+	// ListByPathSuffix returns every live file whose path ends with the given suffix.
+	ListByPathSuffix(ctx context.Context, suffix string, vaultID, uid int64, limit int) ([]*File, error)
+
 	// Create 创建文件
 	Create(ctx context.Context, file *File, uid int64) (*File, error)
 

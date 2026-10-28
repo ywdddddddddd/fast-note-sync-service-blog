@@ -55,6 +55,14 @@ func (m *MockFileRepository) GetByPathLike(ctx context.Context, path string, vau
 	return args.Get(0).(*domain.File), args.Error(1)
 }
 
+func (m *MockFileRepository) ListByPathSuffix(ctx context.Context, suffix string, vaultID, uid int64, limit int) ([]*domain.File, error) {
+	args := m.Called(ctx, suffix, vaultID, uid, limit)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]*domain.File), args.Error(1)
+}
+
 func (m *MockFileRepository) Create(ctx context.Context, file *domain.File, uid int64) (*domain.File, error) {
 	args := m.Called(ctx, file, uid)
 	if args.Get(0) == nil {

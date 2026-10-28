@@ -226,3 +226,102 @@ func TestBuildBlogFeedPublishesExcerptWhenBodyMissing(t *testing.T) {
 		t.Error("空正文不该产出一个空的 content:encoded 元素")
 	}
 }
+
+// A cover has to reach the reader in both dialects, and the document must declare the Media RSS
+// namespace or the prefixed element is not well-formed.
+//
+// 封面必须同时以两种方言送达阅读器，且文档必须声明 Media RSS 命名空间，否则带前缀的元素
+// 就不是格式良好的。
+func TestBuildBlogFeedCarriesCover(t *testing.T) {
+	body, err := buildBlogFeed([]*service.BlogFeedEntry{{
+		Title: "有封面", Link: "https://x/blog/1", GUID: "https://x/blog/1",
+		CoverURL:  "https://x/api/share/file?id=7&share_token=t",
+		CoverMIME: "image/png",
+	}}, "问道", "https://x")
+	if err != nil {
+		t.Fatalf("buildBlogFeed: %v", err)
+	}
+
+	var doc struct {
+		XMLName xml.Name `xml:"rss"`
+		Channel struct {
+			Items []struct {
+				Enclosure struct {
+					URL    string `xml:"url,attr"`
+					Type   string `xml:"type,attr"`
+					Length string `xml:"length,attr"`
+				} `xml:"enclosure"`
+				Media struct {
+					URL    string `xml:"url,attr"`
+					Type   string `xml:"type,attr"`
+					Medium string `xml:"medium,attr"`
+				} `xml:"content"`
+			} `xml:"item"`
+		} `xml:"channel"`
+	}
+	if err := xml.Unmarshal(body, &doc); err != nil {
+		t.Fatalf("生成的文档无法解析: %v\n%s", err, body)
+	}
+	if len(doc.Channel.Items) != 1 {
+		t.Fatalf("items = %d, want 1", len(doc.Channel.Items))
+	}
+
+	it := doc.Channel.Items[0]
+	const wantURL = "https://x/api/share/file?id=7&share_token=t"
+	if it.Enclosure.URL != wantURL {
+		t.Errorf("enclosure url = %q, want %q", it.Enclosure.URL, wantURL)
+	}
+	if it.Enclosure.Type != "image/png" {
+		t.Errorf("enclosure type = %q, want image/png", it.Enclosure.Type)
+	}
+	// The schema requires length, and "0" is the conventional unknown.
+	// 模式要求 length，而 "0" 是惯例的未知值。
+	if it.Enclosure.Length != "0" {
+		t.Errorf("enclosure length = %q, want 0", it.Enclosure.Length)
+	}
+	if it.Media.URL != wantURL {
+		t.Errorf("media:content url = %q, want %q", it.Media.URL, wantURL)
+	}
+	if it.Media.Medium != "image" {
+		t.Errorf("media:content medium = %q, want image", it.Media.Medium)
+	}
+}
+
+// An article with no image at all must omit both cover elements rather than emit an empty url
+// attribute, which some readers treat as a broken enclosure and drop the whole item.
+//
+// 完全没有图片的文章必须两个封面元素都不发，而不是发出一个空的 url 属性——
+// 部分阅读器会把它当成损坏的附件，进而丢掉整条内容。
+func TestBuildBlogFeedOmitsCoverWhenAbsent(t *testing.T) {
+	body, err := buildBlogFeed([]*service.BlogFeedEntry{{
+		Title: "无图", Link: "https://x/blog/1", GUID: "https://x/blog/1",
+	}}, "问道", "https://x")
+	if err != nil {
+		t.Fatalf("buildBlogFeed: %v", err)
+	}
+	s := string(body)
+	if strings.Contains(s, "<enclosure") {
+		t.Errorf("无封面的条目不该产出 enclosure\n%s", s)
+	}
+	if strings.Contains(s, "<media:content") {
+		t.Errorf("无封面的条目不该产出 media:content\n%s", s)
+	}
+}
+
+// A video cover must be declared as video, or readers render it in an image layout and show a
+// broken frame.
+//
+// 视频封面必须声明为视频，否则阅读器会用图片版式渲染它，显示成一个碎掉的画框。
+func TestBuildBlogFeedMarksVideoCover(t *testing.T) {
+	body, err := buildBlogFeed([]*service.BlogFeedEntry{{
+		Title: "视频封面", Link: "https://x/blog/1", GUID: "https://x/blog/1",
+		CoverURL:  "https://x/api/share/file?id=8&share_token=t",
+		CoverMIME: "video/mp4",
+	}}, "问道", "https://x")
+	if err != nil {
+		t.Fatalf("buildBlogFeed: %v", err)
+	}
+	if !strings.Contains(string(body), `medium="video"`) {
+		t.Errorf("视频封面没有声明 medium=video\n%s", body)
+	}
+}

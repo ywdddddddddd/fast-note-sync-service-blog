@@ -12,6 +12,33 @@ type BlogEntryDTO struct {
 	LinksOut  int    `json:"linksOut"`  // Outgoing wiki links // 出链数
 	LinksIn   int    `json:"linksIn"`   // Incoming wiki links // 入链数
 	Vault     string `json:"vault"`     // Vault name // 仓库名
+
+	// Cover is the resolved cover image or video, or nil when the note declares none — or
+	// declares one that could not be found. An absent cover is not an error state; the card
+	// draws a placeholder instead.
+	//
+	// Cover 是解析出的封面图片或视频；笔记没有声明、或声明的文件找不到时都是 nil。
+	// 没有封面不是错误状态，卡片会画一个占位。
+	Cover *BlogCoverDTO `json:"cover,omitempty"`
+}
+
+// BlogCoverDTO is one article's cover plus the crop the author chose.
+//
+// The fields map 1:1 onto CSS: URL becomes the img/video src, FocusX/FocusY become
+// object-position, and Zoom becomes the scale applied inside the square. Keeping them separate
+// rather than pre-composing a transform string means the template never has to parse anything.
+//
+// BlogCoverDTO 是一篇文章的封面以及作者选择的裁切。
+//
+// 字段与 CSS 一一对应：URL 成为 img/video 的 src，FocusX/FocusY 成为 object-position，
+// Zoom 成为正方形内部施加的缩放。把它们分开而不是预先拼成一个 transform 字符串，
+// 使模板永远不需要解析任何东西。
+type BlogCoverDTO struct {
+	URL    string  `json:"url"`
+	Kind   string  `json:"kind"`   // image | video // 图片或视频
+	FocusX float64 `json:"focusX"` // percent, 0-100 // 百分比
+	FocusY float64 `json:"focusY"` // percent, 0-100 // 百分比
+	Zoom   float64 `json:"zoom"`   // multiplier, 1-4 // 倍数
 }
 
 // BlogNavItem one note inside a navigation group

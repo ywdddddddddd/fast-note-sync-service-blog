@@ -450,6 +450,28 @@ func (s *shareService) ShareGenerate(ctx context.Context, uid int64, vaultName s
 			if err != nil {
 				s.logger.Warn("ShareGenerate resolveSharedNoteFiles failed", zap.Error(err), zap.String("notePath", note.Path))
 			} else {
+				// The article cover is authorized alongside the body's own references.
+				//
+				// Without this the cover breaks in a way that is very hard to diagnose: the blog
+				// renders <img src="/api/share/file?id=…&share_token=…"> for the declared cover,
+				// and /api/share/file authorizes against the share record's Resources — not
+				// against the token. A cover picked from outside the article body is therefore
+				// never in that list, so the image 403s while every body image works. Measured
+				// before this fix: a note whose cover pointed at an unused vault image served a
+				// broken cover and logged nothing at all.
+				//
+				// 封面与正文自身的引用一起被授权。
+				//
+				// 没有这一步，封面的失效方式极难诊断：博客为声明的封面渲染
+				// <img src="/api/share/file?id=…&share_token=…">，而 /api/share/file 是按分享
+				// 记录的 Resources 授权，不是按 token。因此从正文之外挑来的封面永远不在那份
+				// 清单里，于是图片 403，而正文里每一张图都正常。修复前实测：一篇封面指向
+				// 仓库中未被正文使用图片的笔记，封面是破的，而且什么都没记进日志。
+				if ref, cover := parseBlogCover(note.Content, note.Path); cover != nil && fileRefs != nil {
+					if file, cerr := s.resolveBlogCoverFile(ctx, uid, note.VaultID, note.Path, ref); cerr == nil && file != nil {
+						fileRefs[file.Path] = file
+					}
+				}
 				for _, file := range fileRefs {
 					fileIDStr := strconv.FormatInt(file.ID, 10)
 					// Avoid duplicate authorization
