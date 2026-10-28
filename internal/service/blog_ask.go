@@ -75,6 +75,13 @@ type AskRoute struct {
 	// Headers are extra request headers. Values may contain ${uuid}, replaced per request.
 	// Headers 是额外的请求头。值中的 ${uuid} 每次请求替换为新生成的 UUIDv4。
 	Headers map[string]string
+
+	// ExtraBody is merged into the request JSON after every built-in key.
+	// See config.AIRouteSetting.ExtraBody for why this exists and who wins on conflicts.
+	//
+	// ExtraBody 在所有内置键之后合并进请求 JSON。
+	// 存在理由与冲突规则见 config.AIRouteSetting.ExtraBody。
+	ExtraBody map[string]any
 }
 
 // AskOptions everything a single question needs. Assembled by the router layer from config, so
@@ -643,56 +650,181 @@ func askExpandLinks(ctx context.Context, s *shareService, uid int64, c *askCorpu
 // contents, so anchoring the window on the matched term is what makes the excerpt actually
 // answer the question.
 //
-// askExcerpt 在首个检索词命中处切出一段可读窗口。
+// askExcerpt 在检索词命中处切出若干可读窗口。
 //
 // 笔记开头 200 字往往是 frontmatter、标题重复或目录，因此把窗口锚定在命中词上，
 // 摘录内容才真的与问题相关。
+//
+// 为什么是「若干窗口」而不是一个：旧实现只取**最靠前**的那个命中点
+// （`if best < 0 || idx < best`），然后截 1200 字。一篇两万字的笔记里，
+// 同一个词往往散落在多个章节，取第一个等于赌"答案在开头"。
+//
+// 2026-10-28 实测的翻车：问「拔牙的并发症有哪些」，《第4章：牙及牙槽外科》21153 字，
+// 「并发症」出现在适应证章节（讲什么情况下不宜拔牙），而真正的并发症正文在
+// 2321 / 6603 / 21001 字三处。「出血」在 2321，「干槽症」在 6603。
+// 旧算法锚在最靠前的命中，窗口落在适应证那一段，模型只看到一句
+// 「拔牙造成菌血症发生率 50%~80%」，于是如实回答"其余没有相关内容" ——
+// 它没说错，是我们只给了它那一小段。
+//
+// 现在收集全部命中点，按"窗口内命中数"排序挑选，窗口之间不重叠，
+// 直到用完预算。多个不连续的窗口之间用「…」连接，让模型知道这里有省略。
+//
+// askExcerpt returns several non-overlapping windows anchored on query terms, instead of one
+// window at the earliest hit. Spreading the budget across a long note is what lets the model
+// see that the same topic is discussed in more than one section.
 func askExcerpt(plain string, tokens []string, budget int) string {
 	if plain == "" {
 		return ""
 	}
 	runes := []rune(plain)
+	if budget <= 0 {
+		budget = 1200
+	}
 	if len(runes) <= budget {
 		return plain
 	}
 
 	lower := []rune(strings.ToLower(plain))
-	best := -1
+
+	// 每个检索词的所有命中位置。上限 24 个/词，避免极短词（如「的」被误当关键词时）
+	// 在长文里产生成百上千个候选窗口，把选窗这一步拖慢。
+	const perTokenCap = 24
+	var hits []int
 	for _, t := range tokens {
 		tr := []rune(t)
 		if len(tr) == 0 {
 			continue
 		}
-		if idx := runeIndex(lower, tr); idx >= 0 {
-			if best < 0 || idx < best {
-				best = idx
+		found := 0
+		for i := 0; i+len(tr) <= len(lower) && found < perTokenCap; i++ {
+			if lower[i] == tr[0] && runeIndex(lower[i:], tr) == 0 {
+				hits = append(hits, i)
+				found++
+				i += len(tr) - 1
 			}
 		}
 	}
-	if best < 0 {
+	if len(hits) == 0 {
 		return string(runes[:budget]) + "…"
 	}
 
-	start := best - budget/3
-	if start < 0 {
-		start = 0
+	// 候选窗口以每个命中点为中心。窗口宽度按「预算 / 期望覆盖的窗口数」推算，
+	// 而不是固定比例 —— 固定比例会让 3 个窗口就吃满预算，第 4 个命中永远进不来。
+	//
+	// wantWins 是希望在预算内铺开的窗口数：3 个起步，命中多时最多 5 个。
+	// 下限 300 字：再窄就切断了上下文，读起来是断句而不是段落。
+	wantWins := 3
+	if len(hits) >= 6 {
+		wantWins = 5
+	} else if len(hits) >= 4 {
+		wantWins = 4
 	}
-	end := start + budget
-	if end > len(runes) {
-		end = len(runes)
-		start = end - budget
+	// 每个窗口之间留一点余量给省略标记与重叠损失。
+	share := budget/wantWins - 20
+	if share < 300 {
+		share = 300
+	}
+	if share > budget {
+		share = budget
+	}
+
+	type cand struct {
+		start, end int
+		score      int
+	}
+	cands := make([]cand, 0, len(hits))
+	for _, h := range hits {
+		// 命中点落在窗口偏前（1/5 处）而不是居中：一个孤立的命中（例如只出现一次的
+		// "菌血症"）前面通常就是它的上下文定义句，后面则是一长段无关内容。
+		// 居中对齐会让这种单点命中分到一半无用的尾巴。
+		start := h - share/5
 		if start < 0 {
 			start = 0
 		}
+		end := start + share
+		if end > len(runes) {
+			end = len(runes)
+			start = end - share
+			if start < 0 {
+				start = 0
+			}
+		}
+		// 窗口内命中次数：密度高的窗口更可能是一整节相关内容，而不是顺带提一句。
+		score := 0
+		for _, h2 := range hits {
+			if h2 >= start && h2 < end {
+				score++
+			}
+		}
+		cands = append(cands, cand{start: start, end: end, score: score})
 	}
-	out := string(runes[start:end])
-	if start > 0 {
-		out = "…" + out
+	// 选取：先把命中点按位置聚类，保证**每个区段都分到一个窗口**，
+	// 余下的预算才用来看谁的命中更密集。
+	//
+	// 为什么必须这样做：一篇长笔记里，同一个词常常在两处含义完全不同
+	// （「并发症」在适应证章节是"什么情况不宜拔牙"，在并发症章节才是答案）。
+	// 纯按密度挑，会把预算全给到出现次数多的那一节，开头那句概述反而落选 ——
+	// 而那句往往是最短、最直接的答案。
+	sort.SliceStable(cands, func(i, j int) bool { return cands[i].start < cands[j].start })
+
+	// 相邻候选窗口的起点相距超过 share 就算另一个区段。
+	var picked []cand
+	used := 0
+	pushWin := func(c cand) bool {
+		w := c.end - c.start
+		// 预留省略标记与分隔符的空间（"…" + "\n…\n"，约 8 字）。
+		if w <= 0 || used+w+8 > budget {
+			return false
+		}
+		for _, p := range picked {
+			if c.start < p.end && p.start < c.end {
+				return false
+			}
+		}
+		picked = append(picked, c)
+		used += w + 8
+		return true
 	}
-	if end < len(runes) {
-		out += "…"
+
+	// 第一轮：沿文档推进，每个"新区段"先拿一个窗口。
+	lastEnd := -1
+	for _, c := range cands {
+		if c.start < lastEnd {
+			continue
+		}
+		if pushWin(c) {
+			lastEnd = c.end
+		}
 	}
-	return out
+	// 第二轮：预算还有剩，按命中密度补窗口。
+	for _, c := range cands {
+		if used >= budget*9/10 {
+			break
+		}
+		pushWin(c)
+	}
+	if len(picked) == 0 {
+		return string(runes[:budget]) + "…"
+	}
+	if len(picked) == 0 {
+		return string(runes[:budget]) + "…"
+	}
+	sort.Slice(picked, func(i, j int) bool { return picked[i].start < picked[j].start })
+
+	var b strings.Builder
+	for i, p := range picked {
+		if i > 0 {
+			b.WriteString("\n…\n")
+		}
+		if p.start > 0 {
+			b.WriteString("…")
+		}
+		b.WriteString(string(runes[p.start:p.end]))
+		if p.end < len(runes) {
+			b.WriteString("…")
+		}
+	}
+	return b.String()
 }
 
 func runeIndex(haystack, needle []rune) int {
@@ -908,6 +1040,17 @@ func (s *shareService) askCallRoute(ctx context.Context, r AskRoute, msgs []upst
 		set("thinking", map[string]string{"type": askRouteThinkingMode(r)})
 	} else {
 		set("enable_thinking", r.EnableThinking)
+	}
+
+	// Route-specific body fields go last so an explicit config value wins over the defaults
+	// above. Without this, a provider whose "thinking depth" lives in a field we never modelled
+	// (or in a nested object) silently runs at whatever its own default is.
+	//
+	// 线路自定义字段放在最后合并，使配置值覆盖上面的默认值。
+	// 否则，那些「思考深度」住在我们没建模的字段里（或嵌套对象里）的供应商，
+	// 会静默地按它自己的默认值运行。
+	for k, v := range r.ExtraBody {
+		payload[k] = v
 	}
 
 	body, _ := json.Marshal(payload)
@@ -1131,7 +1274,24 @@ func (s *shareService) Ask(ctx context.Context, opts AskOptions, emit func(AskEv
 		return emit(AskEvent{Type: "done", ElapsedMS: time.Since(start).Milliseconds()})
 	}
 
-	// Excerpt budget is split evenly, with a floor so a many-hit question still gets substance.
+	// 排名靠前的笔记直接给**全文**，其余按预算切片段。
+	//
+	// 为什么：一篇两万字的笔记里，同一主题常分散在多个章节（适应证 / 并发症 / 各类牙拔除术）。
+	// 只给片段就是赌"答案在被选中的那一段"，赌错时模型会如实说"没有相关内容"——
+	// 它没说错，是我们只给了它一小块。
+	//
+	// 2026-10-28 实测：问「拔牙的并发症有哪些」，《第4章：牙及牙槽外科》21153 字，
+	// 「出血」在 2321 字、「干槽症」在 6603 字、文末还有一份考点清单，
+	// 而 1200 字的摘录窗口落在开头的适应证段，只捞到一句"菌血症 50%~80%"。
+	//
+	// 全文优先的取舍：上下文更贵，但答案对不对是第一位的；而且长上下文线路
+	// （当前主线路 1M）本来就有余量。剩下的名额仍走片段，保证覆盖面。
+	//
+	// Top-ranked notes get their full text; the remainder are excerpted. A long note often
+	// discusses one topic in several sections, and a single window bets on the wrong one.
+	const fullTextRanks = 3
+	const fullTextCap = 30000 // 单篇上限，防止一篇超长笔记吃掉整个预算
+
 	per := budget / len(hits)
 	if per < 400 {
 		per = 400
@@ -1142,8 +1302,24 @@ func (s *shareService) Ask(ctx context.Context, opts AskOptions, emit func(AskEv
 
 	excerpts := make(map[int64]string, len(hits))
 	sources := make([]*AskSource, 0, len(hits))
-	for _, h := range hits {
-		ex := askExcerpt(h.note.Plain, tokens, per)
+	// fullUsed 记录前三名吃掉的字数，从剩余预算里扣掉，避免"前三给全文"把后面的名额挤成 0。
+	fullUsed := 0
+	for i, h := range hits {
+		var ex string
+		plain := h.note.Plain
+		plainLen := len([]rune(plain))
+		if i < fullTextRanks && plainLen > 0 {
+			if plainLen <= fullTextCap {
+				ex = plain
+				fullUsed += plainLen
+			} else {
+				// 超长笔记：切到上限，但仍用多窗口而不是单窗口。
+				ex = askExcerpt(plain, tokens, fullTextCap)
+				fullUsed += len([]rune(ex))
+			}
+		} else {
+			ex = askExcerpt(plain, tokens, per)
+		}
 		excerpts[h.note.ID] = ex
 		title := h.note.Title
 		if title == "" {
@@ -1159,6 +1335,7 @@ func (s *shareService) Ask(ctx context.Context, opts AskOptions, emit func(AskEv
 			Excerpt: blogPlainText(ex, 160),
 		})
 	}
+	_ = fullUsed
 
 	if err := emit(AskEvent{Type: "retrieval", Sources: sources, Terms: tokens}); err != nil {
 		return err

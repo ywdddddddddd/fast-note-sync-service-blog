@@ -215,6 +215,29 @@ type AIRouteSetting struct {
 	// Retries 是本线路在传输层失败（TLS 重置、流中途断连）时的额外尝试次数。
 	// 长思考流最容易撞上这类问题，因此留一次重试是值得的。
 	Retries *int `yaml:"retries" default:"1"`
+
+	// ExtraBody is merged into the request JSON verbatim, after every built-in key.
+	//
+	// Each provider spells "how hard should you think" differently, and some put it in a nested
+	// object (reasoning: {effort: high}) rather than a top-level field. Adding a dedicated field
+	// per provider would turn the config model into a vendor inventory, so this is the escape
+	// hatch: the config states the exact JSON fragment, the service only merges it.
+	//
+	// Top-level keys in ExtraBody WIN over built-in ones. That is deliberate — an explicit
+	// setting in the config file should never be silently overridden by a default the code
+	// happened to pick. Nested objects are replaced wholesale, not deep-merged: predicting
+	// half-merged shapes across providers is how you get "it worked for one vendor".
+	//
+	// ExtraBody 会被原样合并进请求 JSON，位置在所有内置键之后。
+	//
+	// 各家对「推理强度」的叫法与位置都不同，有的还塞在嵌套对象里
+	// （reasoning: {effort: high}）而不是顶层字段。为每家加一个专用字段，会让配置模型
+	// 逐渐变成供应商清单，所以这里留一个逃生口：配置直接写它要的 JSON 片段，服务只负责合并。
+	//
+	// 顶层同名键 **ExtraBody 优先**。这是刻意的：配置文件里的显式设置，
+	// 不该被代码里某个默认值悄悄盖掉。嵌套对象整体替换、不做深合并——
+	// 猜「两边各留一半」的形状，正是"只对一家好用"的来源。
+	ExtraBody map[string]any `yaml:"extra-body"`
 }
 
 // AIRouteMaxTokens returns the token budget, defaulting when unset.

@@ -230,6 +230,7 @@ func buildAskRoutes(cfg config.AISettings) []service.AskRoute {
 			EnableThinking: r.AIRouteThinking(),
 			ThinkingLevel:  r.ThinkingLevel,
 			Headers:        r.Headers,
+			ExtraBody:      r.ExtraBody,
 			Retries:        r.AIRouteRetries(),
 		})
 	}
