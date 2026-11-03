@@ -443,6 +443,7 @@ var blogPostTmpl = template.Must(template.New("blog-post").Funcs(blogAssetFuncs)
     {{template "nav" .}}
     <main class="content">
       <article class="card post">
+        <a class="back-pill" href="/blog/all"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M7.78 12.53a.75.75 0 0 1-1.06 0L2.47 8.28a.75.75 0 0 1 0-1.06l4.25-4.25a.751.751 0 0 1 1.042.018.751.751 0 0 1 .018 1.042L4.81 7h7.44a.75.75 0 0 1 0 1.5H4.81l2.97 2.97a.75.75 0 0 1 0 1.06Z"/></svg>返回全部笔记</a>
         <h1 class="pt">{{.PostTitle}}</h1>
         <div class="post-meta">
           {{range .PostMeta}}<span>{{.}}</span>{{end}}
@@ -573,6 +574,13 @@ var blogPostTmpl = template.Must(template.New("blog-post").Funcs(blogAssetFuncs)
     {{template "footer-legal" .}}
   </footer>
 </div>
+<button type="button" class="read-prog" id="fns-prog" aria-label="阅读进度，点击回到顶部">
+  <svg viewBox="0 0 42 42" aria-hidden="true">
+    <circle class="rp-track" cx="21" cy="21" r="18"></circle>
+    <circle class="rp-bar" cx="21" cy="21" r="18"></circle>
+  </svg>
+  <svg class="rp-ico" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 3.5 3.5 8l.9.9L7.5 5.8V13h1V5.8l3.1 3.1.9-.9Z"/></svg>
+</button>
 <script>
 /* 目录滚动高亮 —— 渐进增强：脚本不执行时目录链接仍可点击跳转。
 
@@ -582,22 +590,63 @@ var blogPostTmpl = template.Must(template.New("blog-post").Funcs(blogAssetFuncs)
    图谱的平移与缩放现在由 d3-zoom 独家负责（见 graph-engine）；这段代码已删除。 */
 (function () {
   var links = document.querySelectorAll('.toc a[href^="#"]');
-  if (links.length) {
-    var pairs = [];
-    Array.prototype.forEach.call(links, function (a) {
-      var el = document.getElementById(a.getAttribute('href').slice(1));
-      if (el) pairs.push({ a: a, el: el });
+  var pairs = [];
+  Array.prototype.forEach.call(links, function (a) {
+    var el = document.getElementById(a.getAttribute('href').slice(1));
+    if (el) pairs.push({ a: a, el: el });
+  });
+
+  // ── 顶栏两态 + 阅读进度环 ─────────────────────────────────────────
+  //
+  // 一个滚动监听同时喂三件事：顶栏进入「浮动」态、圆环的进度、目录的已读标记。
+  // 分成三个监听会让同一帧里读三次布局，而且三者的判断阈值必须一致才有意义——
+  // 圆环走到一半、目录却还停在前言，那种不同步比少一个功能更让人分心。
+  //
+  // One scroll listener feeds three things: the bar's floating state, the ring's progress and the
+  // outline's read marks. Three listeners would read layout three times per frame, and more to the
+  // point the thresholds have to agree — a ring at halfway with the outline still on the intro is
+  // worse than having no ring at all.
+  var bar = document.querySelector('.topbar');
+  var prog = document.getElementById('fns-prog');
+  var barEl = prog ? prog.querySelector('.rp-bar') : null;
+  var R = 18, C = 2 * Math.PI * R;
+  if (barEl) {
+    barEl.style.strokeDasharray = C.toFixed(2);
+    barEl.style.strokeDashoffset = C.toFixed(2);
+  }
+
+  function onScroll() {
+    var y = window.scrollY || document.documentElement.scrollTop || 0;
+    if (bar) { bar.classList.toggle('is-scrolled', y > 8); }
+
+    if (prog) {
+      // The ring only appears once the reader has committed to reading; showing it on the first
+      // screenful puts a control over the title for no reason.
+      prog.classList.toggle('is-on', y > 240);
+      var span = document.documentElement.scrollHeight - window.innerHeight;
+      var p = span > 0 ? Math.min(1, Math.max(0, y / span)) : 0;
+      if (barEl) { barEl.style.strokeDashoffset = (C * (1 - p)).toFixed(2); }
+    }
+
+    var probe = y + 130, cur = -1;
+    for (var i = 0; i < pairs.length; i++) {
+      if (pairs[i].el.getBoundingClientRect().top + y <= probe) { cur = i; }
+    }
+    for (var j = 0; j < pairs.length; j++) {
+      pairs[j].a.classList.toggle('on', j === cur);
+      pairs[j].a.classList.toggle('readed', j < cur);
+    }
+  }
+
+  window.addEventListener('scroll', onScroll, { passive: true });
+  window.addEventListener('resize', onScroll, { passive: true });
+  onScroll();
+
+  if (prog) {
+    prog.addEventListener('click', function () {
+      var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      window.scrollTo({ top: 0, behavior: reduce ? 'auto' : 'smooth' });
     });
-    var spy = function () {
-      var y = window.scrollY + 130, cur = null;
-      for (var i = 0; i < pairs.length; i++) {
-        if (pairs[i].el.getBoundingClientRect().top + window.scrollY <= y) cur = pairs[i].a;
-      }
-      Array.prototype.forEach.call(links, function (a) { a.classList.remove('on'); });
-      if (cur) cur.classList.add('on');
-    };
-    window.addEventListener('scroll', spy, { passive: true });
-    spy();
   }
 })();
 </script>

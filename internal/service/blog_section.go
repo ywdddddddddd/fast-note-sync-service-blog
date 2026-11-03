@@ -4,6 +4,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"unicode"
 
 	"github.com/haierkeys/fast-note-sync-service/internal/dto"
 )
@@ -99,6 +100,45 @@ func blogEntrySection(path string) string {
 		return blogSectionName(p[:i])
 	}
 	return blogRootSectionLabel
+}
+
+// blogEntryInitial returns the character a placeholder cover draws and the hue it tints.
+//
+// The hue is derived from the character rather than from the title's length or a counter, so the
+// same note always gets the same colour: a placeholder that changed between requests would read as
+// a loading artefact. The range is deliberately narrow (24–52, a warm sand) because the site's
+// palette is warm grey — a full colour wheel would turn a page of placeholders into confetti.
+//
+// blogEntryInitial 返回占位封面绘制的字符与它的着色色相。
+//
+// 色相由该字符推导，而不是由标题长度或计数器决定，因此同一篇笔记永远得到同一个颜色：
+// 一个在请求之间会变的占位块读起来像是加载失败的产物。区间有意收窄（24–52，暖沙色），
+// 因为站点调色板是暖灰——整圈色轮会把一页占位块变成彩纸屑。
+func blogEntryInitial(title string) (string, int) {
+	for _, r := range title {
+		if unicode.IsSpace(r) || unicode.IsDigit(r) || unicode.IsPunct(r) || unicode.IsSymbol(r) {
+			continue
+		}
+		// Chapter numbering is the most common opening in this vault ("第6章：口腔颌面部感染").
+		// Without this skip every card in a series would carry the same 第, which is exactly the
+		// "all placeholders look alike" failure the block is meant to avoid.
+		//
+		// 章节编号是这个仓库最常见的开头（「第6章：口腔颌面部感染」）。不跳过这些字，
+		// 同一系列的每张卡都会顶着同一个「第」，而那正是这块占位要避免的「全都一样」。
+		if blogInitialSkip[r] {
+			continue
+		}
+		return string(r), 24 + int(r)%29
+	}
+	return "·", 34
+}
+
+// blogInitialSkip lists characters that carry no identity: they are numbering furniture, not the
+// title's own words.
+// blogInitialSkip 列出没有辨识度的字符：它们是编号的家具，不是标题自己的字。
+var blogInitialSkip = map[rune]bool{
+	'第': true, '章': true, '节': true, '篇': true, '卷': true,
+	'讲': true, '课': true, '回': true, '序': true, '附': true, '录': true,
 }
 
 // buildBlogSections turns the top level of the folder tree into sections.

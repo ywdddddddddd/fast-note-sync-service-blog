@@ -86,7 +86,7 @@ var blogChromePartials = `
 
 {{define "card"}}<li class="post-card">
   <a class="card-link" href="/blog/{{.Slug}}">
-    {{if .Cover}}{{if eq .Cover.Kind "video"}}<video class="cover" src="{{.Cover.URL}}" muted playsinline preload="metadata" aria-hidden="true"></video>{{else}}<img class="cover" src="{{.Cover.URL}}" alt="" loading="lazy" width="1200" height="630" style="object-position:{{.Cover.FocusX}}% {{.Cover.FocusY}}%">{{end}}{{end}}
+    {{if .Cover}}{{if eq .Cover.Kind "video"}}<video class="cover" src="{{.Cover.URL}}" muted playsinline preload="metadata" aria-hidden="true"></video>{{else}}<img class="cover" src="{{.Cover.URL}}" alt="" loading="lazy" width="1200" height="630" style="object-position:{{.Cover.FocusX}}% {{.Cover.FocusY}}%">{{end}}{{else}}<div class="cover-ph" style="--ph:{{.InitialHue}}" aria-hidden="true"><b>{{.Initial}}</b></div>{{end}}
     <span class="card-date">{{.CreatedAt}}</span>
     <div class="card-body">
       <h2 class="card-h">{{.Title}}</h2>

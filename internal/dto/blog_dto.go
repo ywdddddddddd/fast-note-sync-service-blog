@@ -20,6 +20,24 @@ type BlogEntryDTO struct {
 	// Cover 是解析出的封面图片或视频；笔记没有声明、或声明的文件找不到时都是 nil。
 	// 没有封面不是错误状态，卡片会画一个占位。
 	Cover *BlogCoverDTO `json:"cover,omitempty"`
+
+	// Initial and InitialHue drive the placeholder cover a card draws when the note has no image.
+	//
+	// The reference site gives every card a faded cover; this vault has a cover declared on two
+	// notes out of nine hundred, so most cards would be plain text and the whole card rhythm would
+	// disappear. Rather than invent an image, the card draws a warm gradient block with the
+	// title's first character. The hue is derived from that character, so cards differ from each
+	// other while staying inside the site's warm range — and the moment a note gains a real cover
+	// the placeholder is simply not rendered.
+	//
+	// Initial 与 InitialHue 驱动卡片在没有图片时绘制的占位封面。
+	//
+	// 参照站每张卡都有淡化封面；这个仓库九百多篇里只有两篇声明了 cover，
+	// 于是多数卡片会是纯文字，整页的卡片节奏就消失了。与其凭空造一张图，
+	// 卡片画一块暖色渐变 + 标题首字。色相由该字推导，使卡片彼此不同又都落在站点的暖色区间——
+	// 而一篇笔记一旦有了真封面，占位块就不再渲染。
+	Initial    string `json:"initial,omitempty"`
+	InitialHue int    `json:"initialHue,omitempty"`
 }
 
 // BlogCoverDTO is one article's cover plus the crop the author chose.

@@ -773,17 +773,20 @@ func (s *shareService) GetBlogHome(ctx context.Context, uid int64, baseURL strin
 	dayCount := map[string]int{}
 
 	for _, src := range sources {
+		initial, hue := blogEntryInitial(src.Title)
 		home.Entries = append(home.Entries, &dto.BlogEntryDTO{
-			Slug:      src.Slug,
-			Title:     src.Title,
-			Path:      src.Path,
-			Summary:   src.Summary,
-			Words:     src.Words,
-			LinksOut:  linksOut[src.NoteID],
-			LinksIn:   linksIn[src.NoteID],
-			CreatedAt: src.CreatedAt,
-			Vault:     src.Vault,
-			Cover:     blogCoverDTO(src.Cover),
+			Slug:       src.Slug,
+			Title:      src.Title,
+			Path:       src.Path,
+			Summary:    src.Summary,
+			Words:      src.Words,
+			LinksOut:   linksOut[src.NoteID],
+			LinksIn:    linksIn[src.NoteID],
+			CreatedAt:  src.CreatedAt,
+			Vault:      src.Vault,
+			Cover:      blogCoverDTO(src.Cover),
+			Initial:    initial,
+			InitialHue: hue,
 		})
 		home.Stats.Words += src.Words
 		totalLinks += linksOut[src.NoteID]

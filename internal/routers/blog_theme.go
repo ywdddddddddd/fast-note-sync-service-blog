@@ -3084,6 +3084,35 @@ html.is-wx .ask-panel{left:.45rem;right:.45rem;width:auto}
   transition:opacity .3s ease;pointer-events:none;
 }
 .post-card:hover .cover{opacity:.62}
+/* Placeholder cover: a warm gradient block carrying the title's first character.
+   It exists because only two notes in this vault declare a cover, and a page of plain-text cards
+   loses the card rhythm the reference site has. The hue comes from the character, so the block
+   varies note by note while staying inside the warm range; a real cover replaces it wholesale. */
+.cover-ph{
+  position:absolute;inset-block-start:0;inset-inline-end:0;
+  height:100%;width:60%;border-radius:16px;pointer-events:none;
+  background:linear-gradient(135deg,
+    hsl(var(--ph,34) 26% 94%) 0%,
+    hsl(var(--ph,34) 22% 88%) 52%,
+    hsl(var(--ph,34) 18% 80%) 100%);
+  -webkit-mask-image:linear-gradient(90deg,transparent 0,rgba(0,0,0,.18) 28%,#000 70%);
+  mask-image:linear-gradient(90deg,transparent 0,rgba(0,0,0,.18) 28%,#000 70%);
+  display:flex;align-items:flex-end;justify-content:flex-end;
+  padding:.9rem 1.2rem 1rem;
+  transition:filter .3s ease;
+}
+.cover-ph b{
+  font-size:3.4rem;line-height:1;font-weight:700;
+  color:hsl(var(--ph,34) 30% 32%);opacity:.28;letter-spacing:-.04em;
+}
+.post-card:hover .cover-ph{filter:saturate(1.15) brightness(.99)}
+@media (prefers-color-scheme:dark){
+  .cover-ph{background:linear-gradient(135deg,
+    hsl(var(--ph,34) 12% 16%) 0%,
+    hsl(var(--ph,34) 10% 14%) 55%,
+    hsl(var(--ph,34) 8% 11%) 100%)}
+  .cover-ph b{color:hsl(var(--ph,34) 22% 82%);opacity:.22}
+}
 .card-date{display:block;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
   font-size:.75rem;color:var(--muted-foreground);min-width:95px;padding:.15rem 0;transition:color .15s ease}
 .card-h{margin:.1rem 0 0;font-size:1rem;font-weight:600;line-height:1.5;transition:color .15s ease}
@@ -3245,6 +3274,13 @@ body.drawer-rec .sheet-rec{transform:translateY(0)}
   }
   .card-link{padding:1rem;padding-top:7rem;grid-template-columns:1fr;min-height:0;gap:0}
   .card-date{padding-bottom:.2rem}
+  .cover-ph{
+    height:56%;width:100%;
+    -webkit-mask-image:linear-gradient(180deg,#000 0%,rgba(0,0,0,.45) 52%,transparent 94%);
+    mask-image:linear-gradient(180deg,#000 0%,rgba(0,0,0,.45) 52%,transparent 94%);
+    border-radius:16px 16px 0 0;align-items:flex-start;padding:.7rem 1rem;
+  }
+  .cover-ph b{font-size:2.4rem}
   .card-sum{padding-inline-end:0}
   .card-meta{font-style:normal}
   .arc-wm{font-size:clamp(56px,18vw,96px);top:-1rem;opacity:.07}
@@ -3252,7 +3288,55 @@ body.drawer-rec .sheet-rec{transform:translateY(0)}
   .footer-duo{padding:1.4rem 1rem 1.8rem}
 }
 
+/* ── 文章页增强（交接-15 批次二） ─────────────────────────────────────── */
+
+/* Back pill. The article page is a dead end by design — the reader arrives from a list and the
+   next thing they want is that list again, not the browser's back button guessing at it. */
+.back-pill{
+  display:inline-flex;align-items:center;gap:.4rem;margin:0 0 1.15rem;
+  padding:.38rem .7rem;border:1px solid var(--border);border-radius:999px;
+  font-size:.8125rem;line-height:1;color:var(--muted-foreground);text-decoration:none;
+  background:var(--card);transition:color .15s ease,border-color .15s ease,background .15s ease;
+}
+.back-pill:hover{color:var(--foreground);border-color:color-mix(in srgb,var(--border) 40%,var(--foreground))}
+.back-pill svg{width:12px;height:12px}
+
+/* Reading progress ring. It doubles as the back-to-top button: a ring that only reports turns
+   into a control the reader can actually use, and one control is one target to hit. */
+.read-prog{
+  position:fixed;right:1.15rem;bottom:4.6rem;z-index:62;
+  width:42px;height:42px;border-radius:50%;border:1px solid var(--border);
+  background:color-mix(in srgb,var(--card) 86%,transparent);
+  -webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);
+  display:flex;align-items:center;justify-content:center;cursor:pointer;
+  color:var(--foreground);opacity:0;transform:translateY(8px);pointer-events:none;
+  transition:opacity .25s ease,transform .25s ease;
+}
+.read-prog.is-on{opacity:1;transform:none;pointer-events:auto}
+.read-prog svg{position:absolute;inset:0;width:100%;height:100%;transform:rotate(-90deg)}
+.read-prog circle{fill:none;stroke-width:2.5}
+.read-prog .rp-track{stroke:color-mix(in srgb,var(--border) 85%,transparent)}
+.read-prog .rp-bar{stroke:var(--foreground);stroke-linecap:round;transition:stroke-dashoffset .08s linear}
+.read-prog .rp-ico{position:relative;z-index:1;width:13px;height:13px}
+
+/* TOC read state. The existing diamond marker stays — it is this site's vocabulary, not the
+   reference site's 2px bar — but an entry the reader has scrolled past fades, which is what makes
+   a long outline readable as "where I have been" rather than a flat list. */
+.toc a.readed{color:var(--muted-foreground);opacity:.6}
+.toc a.readed::before{opacity:.22}
+
+/* Top bar after scrolling: the glass gains a hairline highlight and a shadow, and the inner row
+   loses a little height. Both are the same idea as the reference site's two-state header — the
+   bar should look different once it is floating over text. */
+.topbar.is-scrolled{
+  box-shadow:inset 0 1px 0 #ffffffa6,0 0 0 1px #0000000a,
+             0 10px 15px -3px #00000014,0 4px 6px -4px #00000014;
+}
+.topbar.is-scrolled .topbar-inner{padding-top:.42rem;padding-bottom:.42rem}
+
 @media (prefers-reduced-motion:reduce){
+  .read-prog{transition:none}
+  .topbar.is-scrolled .topbar-inner{transition:none}
   [data-anim]{animation:none}
   .card-sheet{transition:none}
   .post-card,.post-card .cover,.pill{transition:none}
