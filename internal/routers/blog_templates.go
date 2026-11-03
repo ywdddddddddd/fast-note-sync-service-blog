@@ -676,6 +676,7 @@ var blogPostTmpl = template.Must(template.New("blog-post").Funcs(blogAssetFuncs)
 {{end}}
 <script src="/blog/feed.js?v={{assetVer}}" defer></script>
 <script src="/blog/lightbox.js?v={{assetVer}}" defer></script>
+<script src="/blog/code.js?v={{assetVer}}" defer></script>
 
   <!-- Mobile edge tabs and their drawers.
        Only rendered on reading pages: the home page has no in-page outline, and its side columns
@@ -1006,6 +1007,7 @@ var blogPageTmpl = template.Must(template.New("blog-page").Funcs(blogAssetFuncs)
 {{end}}
 <script src="/blog/feed.js?v={{assetVer}}" defer></script>
 <script src="/blog/lightbox.js?v={{assetVer}}" defer></script>
+<script src="/blog/code.js?v={{assetVer}}" defer></script>
 
   <!-- Mobile edge tabs and their drawers.
        Only rendered on reading pages: the home page has no in-page outline, and its side columns

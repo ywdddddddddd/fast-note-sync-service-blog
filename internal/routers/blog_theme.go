@@ -3199,10 +3199,15 @@ html.is-wx .ask-panel{left:.45rem;right:.45rem;width:auto}
 .dd-sum{
   list-style:none;cursor:pointer;display:inline-flex;align-items:center;gap:.25rem;
   padding:.3rem .5rem;border-radius:8px;font-size:.875rem;color:var(--foreground);
+  /* A <button>, so the UA border has to be removed explicitly — otherwise a 2px outset frame
+     appears around the label and looks like a focus ring that never goes away. */
+  /* 这是 <button>，必须显式去掉 UA 边框——否则标签外会出现一圈 2px outset 的框，
+     看起来像一个永远不会消失的焦点环。 */
+  border:0;background:transparent;font-family:inherit;line-height:1.4;
   transition:background .18s ease;
 }
-.dd-sum::-webkit-details-marker{display:none}
 .dd-sum:hover{background:var(--muted)}
+.dd-sum:focus-visible{outline:2px solid var(--primary);outline-offset:2px}
 .dd-caret{width:12px;height:12px;opacity:.6;transition:transform .18s ease}
 .dd[open] .dd-caret{transform:rotate(180deg)}
 .dd-body{
@@ -3335,6 +3340,53 @@ body.drawer-rec .sheet-rec{transform:translateY(0)}
   .dock.dock-collapsible,.dock.dock-collapsible .dock-b{transition:none}
 }
 
+/* Code blocks. A frame, a language label, a gutter and a copy button are added around the bare
+   <pre><code> ByTemd emits — see blogCodeJS. Everything here is styling only, so a reader without
+   JavaScript keeps a plain, readable code block.
+   The gutter's line-height must equal the code's exactly (1.75) or the numbers drift off their
+   lines after the first screen. */
+.code-block{
+  margin:1.15rem 0;border:1px solid var(--border);border-radius:12px;
+  background:color-mix(in srgb,var(--foreground) 3.5%,var(--card));
+  overflow:hidden;
+}
+.code-head{
+  display:flex;align-items:center;justify-content:space-between;gap:.75rem;
+  padding:.38rem .7rem;border-bottom:1px solid var(--border);
+  background:color-mix(in srgb,var(--foreground) 3%,transparent);
+  font-size:.6875rem;letter-spacing:.07em;color:var(--muted-foreground);
+}
+.code-lang{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-weight:600}
+.code-copy{
+  border:1px solid var(--border);border-radius:6px;background:var(--card);
+  padding:.12rem .5rem;font-family:inherit;font-size:.6875rem;color:var(--muted-foreground);
+  cursor:pointer;opacity:0;
+  transition:opacity .15s ease,color .15s ease,border-color .15s ease;
+}
+.code-block:hover .code-copy,.code-copy:focus-visible{opacity:1}
+.code-copy.is-done{color:var(--foreground);border-color:color-mix(in srgb,var(--border) 40%,var(--foreground))}
+.code-body{display:flex;align-items:stretch}
+.code-ln{
+  flex:0 0 44px;padding:.9rem .5rem .9rem 0;text-align:right;
+  font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  font-size:.75rem;line-height:1.75;color:var(--muted-foreground);opacity:.5;
+  white-space:pre;user-select:none;
+  border-inline-end:1px solid var(--border);
+}
+.code-block pre{
+  flex:1;min-width:0;margin:0;padding:.9rem 3rem .9rem .85rem;
+  overflow-x:auto;background:transparent;border:0;border-radius:0;
+  font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  font-size:.8125rem;line-height:1.75;
+}
+.code-block pre code{font-family:inherit;font-size:inherit;background:transparent;padding:0;
+  border:0;line-height:inherit}
+@media (max-width:860px){
+  .code-ln{flex-basis:34px;padding-inline-end:.4rem}
+  .code-block pre{padding:.8rem 1rem .8rem .6rem;font-size:.78125rem}
+  .code-copy{opacity:1}
+}
+
 /* Transient line above the capsule (see blogDockJS). It sits above the dock and below panels,
    and it fades rather than slides: it is a message, not a panel. */
 .dock-toast{
@@ -3409,13 +3461,24 @@ body.drawer-rec .sheet-rec{transform:translateY(0)}
   .topnav{display:none}
   .burger{display:inline-flex}
   .mnav{
-    display:none;position:fixed;top:var(--topbar-h);inset-inline:0;z-index:45;
+    display:block;position:fixed;top:var(--topbar-h);inset-inline:0;z-index:45;
     background:color-mix(in srgb,var(--card) 96%,transparent);
     -webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px);
     border-bottom:1px solid var(--border);
-    padding:.6rem 1rem 1rem;max-height:70vh;overflow-y:auto;
+    /* Closed is a state, not an absence: the panel keeps its box and animates out, so opening and
+       closing read as the same movement in two directions. display:none cannot be transitioned —
+       that is why the previous version had no motion at all.
+       关闭是一个状态而不是「不存在」：面板保留盒子并动画退场，于是开与合读成同一个动作的两个方向。
+       display:none 无法过渡——这正是上一版完全没有动效的原因。 */
+    padding:0 1rem;max-height:0;overflow:hidden;opacity:0;
+    transform:translateY(-10px);pointer-events:none;
+    transition:max-height .34s cubic-bezier(.22,1,.36,1),opacity .22s ease,
+               transform .34s cubic-bezier(.22,1,.36,1),padding .34s cubic-bezier(.22,1,.36,1);
   }
-  body.mnav-open .mnav{display:block}
+  body.mnav-open .mnav{
+    max-height:70vh;opacity:1;transform:none;padding:.6rem 1rem 1rem;
+    overflow-y:auto;pointer-events:auto;
+  }
   .mnav a{display:flex;align-items:center;justify-content:space-between;gap:.75rem;
     padding:.55rem .6rem;border-radius:8px;font-size:.9375rem;text-decoration:none;color:var(--foreground)}
   .mnav a:hover{background:var(--muted)}

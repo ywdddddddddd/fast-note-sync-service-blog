@@ -48,6 +48,20 @@ func registerBlogAskRoutes(r *gin.Engine, appContainer *app.App) {
 		c.String(http.StatusOK, blogAskScript)
 	})
 
+	// Code blocks: the frame, language label, gutter and copy button. Gated by the blog switch
+	// only — it decorates markup that is already there and needs no upstream configuration.
+	//
+	// 代码块：外框、语言标签、行号槽与复制按钮。只受博客总开关约束——
+	// 它装饰的是本来就存在的标记，不需要任何上游配置。
+	r.GET("/blog/code.js", func(c *gin.Context) {
+		if _, ok := blogEnabled(c, appContainer); !ok {
+			return
+		}
+		c.Header("Content-Type", "application/javascript; charset=utf-8")
+		c.Header("Cache-Control", "no-cache")
+		c.String(http.StatusOK, blogCodeJS())
+	})
+
 	// The lightbox is gated by the blog switch only. It needs no upstream configuration, so
 	// tying it to the Q&A flag would make the images stop opening whenever the model is off.
 	// 灯箱只受博客总开关约束。它不需要任何上游配置，把它绑在问答开关上会导致
