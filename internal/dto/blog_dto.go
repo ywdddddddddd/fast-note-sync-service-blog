@@ -291,6 +291,16 @@ type BlogHomeDTO struct {
 	// Profile 是从简历笔记解析出的名片身份。
 	Sections []*BlogSectionDTO `json:"sections,omitempty"`
 	Profile  *BlogProfileDTO   `json:"profile,omitempty"`
+
+	// Pills is Profile already arranged into the pill row, in the order the card renders it. It is
+	// assembled here rather than in the router because the order is a presentation rule that must
+	// not be re-derived by every caller — and because the RSS pill needs the same base URL the
+	// home assembly already receives.
+	//
+	// Pills 是已经把 Profile 排成药丸行的结果，顺序即名片渲染的顺序。它在这里组装而不是在路由层，
+	// 因为顺序是一条不该被每个调用方重新推导的呈现规则——也因为 RSS 那枚药丸需要首页组装
+	// 本来就收到的同一个 base URL。
+	Pills []BlogProfileLinkDTO `json:"pills,omitempty"`
 }
 
 // BlogPostDTO a rendered blog post
@@ -415,6 +425,21 @@ type BlogProfileLinkDTO struct {
 	Kind  string `json:"kind"` // link | mail | rss | qr // 行为类型
 }
 
+// BlogProfileMetaDTO is one key/value row of the card's "关于" block.
+//
+// The résumé note already carries these as `- 所在地 **浙江 · 金华**`. Rendering them as rows
+// instead of a paragraph is the reference site's About/Education shape: a label column of fixed
+// width and a value column that aligns down the page.
+//
+// BlogProfileMetaDTO 是名片「关于」区块里的一行键值。
+//
+// 简历笔记里本来就有这些，写成 `- 所在地 **浙江 · 金华**`。把它们渲染成行而不是一段文字，
+// 正是参照站 About/Education 的形状：固定宽度的标签列 + 沿页面对齐的值列。
+type BlogProfileMetaDTO struct {
+	Label string `json:"label"`
+	Value string `json:"value"`
+}
+
 // BlogProfileDTO is the identity block the card page shows.
 //
 // Every field is optional. The block is parsed out of the résumé page note, and a note that has
@@ -432,6 +457,13 @@ type BlogProfileDTO struct {
 	Avatar   string               `json:"avatar"`
 	Links    []BlogProfileLinkDTO `json:"links"`
 	QRImage  string               `json:"qrImage"`
+	// Meta keeps the résumé's short facts in their authored order. It is not sorted: the author
+	// wrote them in the order they want them read, and a "natural" sort would put 年龄 before 性别
+	// for no reason a reader could name.
+	//
+	// Meta 按作者书写顺序保留简历里的短事实。它不排序：作者是按想被阅读的顺序写的，
+	// 而一次「自然」排序会把年龄排到性别前面，读者说不出这有什么道理。
+	Meta []BlogProfileMetaDTO `json:"meta"`
 }
 
 // BlogPageLinkDTO is one page-number button in the pager.
@@ -470,6 +502,12 @@ type BlogListDTO struct {
 	//
 	// ArchiveYears 为 /blog/archives 按年分组；其它页面为空。
 	ArchiveYears []*BlogArchiveYearDTO
+
+	// AllEntries is the full filtered set, carried only so the router can rank recommendations
+	// against everything rather than against the current page. It never reaches a client.
+	//
+	// AllEntries 是过滤后的全集，只为让路由层依据全部条目而不是当前页来排推荐。它从不抵达客户端。
+	AllEntries []*BlogEntryDTO `json:"-"`
 }
 
 // BlogArchiveYearDTO is one year block on the archives page.

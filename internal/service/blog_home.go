@@ -847,8 +847,18 @@ func (s *shareService) GetBlogHome(ctx context.Context, uid int64, baseURL strin
 	// nil and the template omits the whole block rather than rendering an empty shell.
 	//
 	// 名片身份从简历页笔记解析。缺这篇笔记时 Profile 为 nil，模板整块省略，而不是渲染一个空壳。
-	if about, _ := pageNote(sources, "about"); about != nil {
+	// The card page identity is parsed out of the résumé page note. It must look in `all`, not in
+	// `sources`: the line above deliberately drops page notes from the article set, so the filtered
+	// slice can never contain the note this is looking for. A missing note leaves Profile nil and
+	// the template omits the whole block rather than rendering an empty shell.
+	//
+	// 名片身份从简历页笔记解析。它必须在 `all` 里找，而不是 `sources`：上一行有意把页面笔记
+	// 从文章集合里剔掉，因此过滤后的切片永远不可能包含它要找的那篇笔记。
+	// 缺这篇笔记时 Profile 为 nil，模板整块省略，而不是渲染一个空壳。
+	if about, _ := pageNote(all, "about"); about != nil {
 		home.Profile = parseBlogProfile(about.Content)
+		feed := strings.TrimRight(baseURL, "/") + "/blog/rss.xml"
+		home.Pills = blogProfilePills(home.Profile, feed)
 	}
 
 	home.Stats.Links = totalLinks

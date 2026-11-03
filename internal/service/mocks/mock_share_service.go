@@ -136,6 +136,26 @@ func (m *MockShareService) RenderBlogBySlug(ctx context.Context, slug string) (*
 }
 
 // GetBlogReactions 返回赞/踩计数与累计访问次数。
+// GetBlogList 组装 /blog/all 或版块列表的一页。
+func (m *MockShareService) GetBlogList(ctx context.Context, uid int64, baseURL string, publishedOnly bool, section string, page int) (*dto.BlogListDTO, error) {
+	args := m.Called(ctx, uid, baseURL, publishedOnly, section, page)
+	if v := args.Get(0); v != nil {
+		return v.(*dto.BlogListDTO), args.Error(1)
+	}
+	return nil, args.Error(1)
+}
+
+// GetBlogArchives 返回按年份分组的全部已发布笔记。
+func (m *MockShareService) GetBlogArchives(ctx context.Context, uid int64, baseURL string, publishedOnly bool) ([]*dto.BlogArchiveYearDTO, int, error) {
+	args := m.Called(ctx, uid, baseURL, publishedOnly)
+	var years []*dto.BlogArchiveYearDTO
+	if v := args.Get(0); v != nil {
+		years = v.([]*dto.BlogArchiveYearDTO)
+	}
+	total, _ := args.Get(1).(int)
+	return years, total, args.Error(2)
+}
+
 func (m *MockShareService) GetBlogReactions() *dto.BlogReactionsDTO {
 	args := m.Called()
 	if v := args.Get(0); v != nil {

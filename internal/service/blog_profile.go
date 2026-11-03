@@ -106,6 +106,7 @@ func parseBlogProfile(content string) *dto.BlogProfileDTO {
 		for _, line := range blogProfileMetaLine.FindAllStringSubmatch(m[1], -1) {
 			label := strings.TrimSpace(line[1])
 			value := stripProfileMarkup(strings.TrimSpace(line[2]))
+			p.Meta = append(p.Meta, dto.BlogProfileMetaDTO{Label: label, Value: value})
 			for _, key := range profileLocationKeys {
 				if strings.Contains(label, key) && p.Location == "" {
 					p.Location = value

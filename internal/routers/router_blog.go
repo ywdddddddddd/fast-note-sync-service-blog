@@ -240,59 +240,50 @@ func registerBlogRoutes(r *gin.Engine, appContainer *app.App) {
 		// 到手时是空的——原因是 GetBlogHome 在填好 Pages 之后又把整个 Nav 结构体替换掉了，
 		// 现在已在源头修好。
 
-		// The particle count is the published-note count. home.Stats.Notes is exactly that number,
-		// and it is already computed for the dashboard — so the field and the seventh figure can
-		// never disagree about how many notes there are.
+		// The card page carries no graph, no particle field and no article list, so the graph SVG,
+		// the particle configuration and the entries JSON are no longer assembled here. What is
+		// left is identity, statistics, heat and the capsule.
 		//
-		// 粒子数等于已发布笔记数。home.Stats.Notes 正是这个数字，而且它已经为仪表盘算好了 ——
-		// 因此这片场与第七个数字永远不会在「有多少篇笔记」上互相矛盾。
-		particlesCfg, _ := json.Marshal(map[string]any{
-			"count": home.Stats.Notes,
-		})
-
-		svg, note := renderGraphSVG(home.Graph)
-
-		// Render into memory first. Executing straight into the response writer means a
-		// mid-template error leaves a half-written page and the error is invisible — which is
-		// exactly how a missing struct field turned into a silently truncated page.
-		// 先渲染到内存。直接写响应的话，模板中途出错会留下半截页面，而且错误看不到——
-		// 之前一个缺失的结构体字段就是这样变成了静默截断的页面。
+		// 名片页没有图谱、没有粒子场、没有文章列表，因此图谱 SVG、粒子配置与条目 JSON 都不再在这里组装。
+		// 剩下的是身份、统计、热力图与胶囊。
 		homeURL := strings.TrimRight(base, "/") + "/blog"
 		homeDesc := fmt.Sprintf("%s — 共 %d 篇公开笔记。", siteTitle, len(home.Entries))
+		feedURL := homeURL + "/rss.xml"
 
+		card := blogCardView{
+			blogChrome: blogChrome{
+				Title:       siteTitle,
+				SiteName:    siteTitle,
+				ICP:         icp,
+				MPS:         mps,
+				MPSCode:     mpCode,
+				Indexable:   blogIndexable(cfg.Indexable),
+				Canonical:   homeURL,
+				Description: homeDesc,
+				FeedURL:     feedURL,
+				JSONLD:      blogHomeJSONLD(siteTitle, homeURL, homeDesc, len(home.Entries)),
+				CSS:         template.CSS(blogCSS),
+				Pages:       home.Nav.Pages,
+				HasShelf:    shelfHasBooks(),
+				Sections:    home.Sections,
+				Nav:         home.Nav.Tree,
+				TintJS:      template.JS(blogTintJS()),
+				WarpJS:      template.JS(blogWarpJS()),
+			},
+			Stats:      home.Stats,
+			Profile:    home.Profile,
+			Pills:      home.Pills,
+			Activity:   home.Activity,
+			Hot:        blogHotList(reactions, home.Entries, blogHotLimit),
+			DockJS:     template.JS(blogDockJS()),
+			AskEnabled: blogAskEnabled(appContainer),
+		}
+
+		// Render into memory first: a mid-template error would otherwise leave a half-written page
+		// and the error invisible.
+		// 先渲染到内存：模板中途出错会留下半截页面，而且错误看不到。
 		var buf bytes.Buffer
-		if err := blogHomeTmpl.Execute(&buf, blogHomeView{
-			Title:        siteTitle,
-			SiteName:     siteTitle,
-			ICP:          icp,
-			MPS:          mps,
-			MPSCode:      mpCode,
-			Indexable:    blogIndexable(cfg.Indexable),
-			Canonical:    homeURL,
-			Description:  homeDesc,
-			FeedURL:      homeURL + "/rss.xml",
-			JSONLD:       blogHomeJSONLD(siteTitle, homeURL, homeDesc, len(home.Entries)),
-			CSS:          template.CSS(blogCSS),
-			Stats:        home.Stats,
-			Tags:         home.Tags,
-			Entries:      home.Entries,
-			Nav:          home.Nav.Tree,
-			Pages:        home.Nav.Pages,
-			HasShelf:     shelfHasBooks(),
-			GraphSVG:     svg,
-			GraphNote:    note,
-			Truncated:    home.Graph != nil && home.Graph.Truncated,
-			Activity:     home.Activity,
-			ShowGraph:    cfg.ShowGraph,
-			AskEnabled:   blogAskEnabled(appContainer),
-			Visits:       reactions.Visits,
-			Hot:          blogHotList(reactions, home.Entries, blogHotLimit),
-			ReactionJS:   template.JS(blogReactionJS()),
-			EntriesJSON:  blogEntriesJSON(home.Entries),
-			WarpJS:       template.JS(blogWarpJS()),
-			ParticlesJS:  template.JS(blogParticlesJS()),
-			ParticlesCfg: template.JS(particlesCfg),
-		}); err != nil {
+		if err := blogCardTmpl.Execute(&buf, card); err != nil {
 			blogFail(c, appContainer, err.Error())
 			return
 		}
@@ -301,6 +292,35 @@ func registerBlogRoutes(r *gin.Engine, appContainer *app.App) {
 		c.Header("Cache-Control", "no-cache")
 		c.Status(http.StatusOK)
 		_, _ = c.Writer.Write(buf.Bytes())
+	})
+
+	// ── List, section and archive pages ──
+	// ── 列表、版块与归档页 ──
+	//
+	// Registered before "/blog/:slug" so the static segments are unmistakably intended: gin prefers
+	// a static child over a parameter either way, but the order documents that /blog/all is a page
+	// and not a note whose slug happens to be "all".
+	//
+	// 注册在 "/blog/:slug" 之前，使这些静态段的意图不会含糊：gin 无论如何都优先静态子节点，
+	// 但顺序说明了 /blog/all 是一个页面，而不是一篇 slug 恰好叫 all 的笔记。
+	blog.GET("/blog/all", func(c *gin.Context) {
+		serveBlogList(c, appContainer, shareSvc, "", 1)
+	})
+	blog.GET("/blog/all/:page", func(c *gin.Context) {
+		if n, ok := blogPageParam(c, appContainer, "全部笔记"); ok {
+			serveBlogList(c, appContainer, shareSvc, "", n)
+		}
+	})
+	blog.GET("/blog/c/:section", func(c *gin.Context) {
+		serveBlogList(c, appContainer, shareSvc, c.Param("section"), 1)
+	})
+	blog.GET("/blog/c/:section/:page", func(c *gin.Context) {
+		if n, ok := blogPageParam(c, appContainer, "版块"); ok {
+			serveBlogList(c, appContainer, shareSvc, c.Param("section"), n)
+		}
+	})
+	blog.GET("/blog/archives", func(c *gin.Context) {
+		serveBlogArchives(c, appContainer, shareSvc)
 	})
 
 	// Page aliases. Registered before the :slug catch-all for readability; gin's tree prefers a

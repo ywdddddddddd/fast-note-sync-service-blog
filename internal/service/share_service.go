@@ -131,6 +131,16 @@ type ShareService interface {
 	// （图谱、热力图、标签云、统计）的页面使用。
 	GetBlogNav(ctx context.Context, uid int64) (*dto.BlogNavDTO, error)
 
+	// GetBlogList assembles one page of /blog/all or /blog/c/<section>. An unknown section is
+	// reported as an error so the router can answer 404 rather than render an empty page.
+	// GetBlogList 组装 /blog/all 或 /blog/c/<版块> 的一页。
+	// 未知版块以错误形式报告，使路由层能返回 404 而不是渲染一个空页面。
+	GetBlogList(ctx context.Context, uid int64, baseURL string, publishedOnly bool, section string, page int) (*dto.BlogListDTO, error)
+
+	// GetBlogArchives returns every published note grouped by year, unpaged.
+	// GetBlogArchives 返回按年份分组的全部已发布笔记，不分页。
+	GetBlogArchives(ctx context.Context, uid int64, baseURL string, publishedOnly bool) ([]*dto.BlogArchiveYearDTO, int, error)
+
 	// GetLocalGraph builds the sub-graph around one article: the notes it links to plus the
 	// notes linking to it, expanded to the requested depth. Only published notes may appear.
 	// GetLocalGraph 构建单篇文章周围的子图：它链接到的笔记与链接到它的笔记，按指定深度展开。
