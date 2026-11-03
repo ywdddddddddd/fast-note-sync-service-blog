@@ -58,8 +58,33 @@ const blogCSS = `
      warm-grey palette. */
   --graph-accent:#4b7a43;
 }
+/* Manual theme override.
+   The system state adds neither class — the media query below decides. Dark and light pin the
+   variables so the reader's choice beats the OS, which is the whole point of the control: a
+   reader whose machine is in dark mode but who wants a light page must be able to say so.
+
+   手动主题覆盖。
+   跟随系统时两个类都不加——由下面的媒体查询决定。暗色与亮色把变量钉死，
+   使读者的选择压过操作系统，而这正是那个控件的意义：机器在暗色模式、但想读亮色页面的人，
+   必须能表达这件事。 */
+html.dark{
+  --background:#1a1a1a;--foreground:#ededed;--card:#222220;
+  --muted:#2a2a28;--muted-foreground:#a1a1a1;--border:#ffffff1f;
+  --primary:#ededed;--primary-foreground:#1a1a1a;--accent:#2a2a28;
+  --sidebar:#1e1e1c;--dot:#333;
+  --graph-accent:#7aa870;
+  --shadow-sm:0 1px 3px 0px #0000004d,0 1px 2px -1px #0000004d;
+  --shadow-md:0 1px 3px 0px #0000004d,0 2px 4px -1px #0000004d;
+}
+html.light{
+  --background:#fff;--foreground:#34322d;--card:#fff;
+  --muted:#f3f3f3;--muted-foreground:#858481;--border:#0000001f;
+  --primary:#34322d;--primary-foreground:#fff;--accent:#f3f3f3;
+  --sidebar:#fbfbfb;--dot:#d1d1d1;
+  --graph-accent:#4b7a43;
+}
 @media (prefers-color-scheme:dark){
-  :root{
+  html:not(.light){
     --background:#1a1a1a;--foreground:#ededed;--card:#222220;
     --muted:#2a2a28;--muted-foreground:#a1a1a1;--border:#ffffff1f;
     --primary:#ededed;--primary-foreground:#1a1a1a;--accent:#2a2a28;
@@ -3196,6 +3221,20 @@ html.is-wx .ask-panel{left:.45rem;right:.45rem;width:auto}
 .burger{display:none;width:36px;height:36px;align-items:center;justify-content:center;
   border:1px solid var(--border);border-radius:8px;background:var(--card);color:var(--foreground);cursor:pointer}
 .burger svg{width:16px;height:16px}
+/* Theme button. One button, three states, one icon visible at a time — the icon is the state, so
+   there is no label to read and no menu to open. */
+.theme-btn{
+  display:inline-flex;align-items:center;justify-content:center;
+  width:32px;height:32px;flex:0 0 32px;border:1px solid transparent;border-radius:8px;
+  background:transparent;color:var(--muted-foreground);cursor:pointer;
+  transition:background .18s ease,color .18s ease;
+}
+.theme-btn:hover{background:var(--muted);color:var(--foreground)}
+.theme-btn svg{width:15px;height:15px}
+.theme-btn .ti{display:none}
+.theme-btn[data-mode="system"] .ti-auto,
+.theme-btn[data-mode="dark"] .ti-dark,
+.theme-btn[data-mode="light"] .ti-light{display:block}
 .mnav{display:none}
 
 /* ── 双层页脚 ───────────────────────────────────────────────────────────── */
@@ -3285,10 +3324,35 @@ body.drawer-rec .sheet-rec{transform:translateY(0)}
   .card-meta{font-style:normal}
   .arc-wm{font-size:clamp(56px,18vw,96px);top:-1rem;opacity:.07}
   .arc-list a{grid-template-columns:76px 1fr;gap:.6rem}
-  .footer-duo{padding:1.4rem 1rem 1.8rem}
+  .footer-duo{padding:1.4rem 1rem 5.6rem}
+  /* The capsule is fixed at the bottom, so every scrolling column has to reserve its height —
+     otherwise the last card, the last statistic and the last paragraph sit under it. 7rem is the
+     capsule plus its shadow plus one line of breathing room. */
+  .card-wrap,.list-wrap,.arc-wrap{padding-bottom:7rem}
+  .content{padding-bottom:7rem}
+  .post{padding-bottom:2.5rem}
 }
 
 /* ── 文章页增强（交接-15 批次二） ─────────────────────────────────────── */
+
+/* Hero: main image plus a blurred copy of itself, offset 14px, so the edge reads as a glow rather
+   than a crop. The reference site does the same thing with a second <img>; a CSS background could
+   not give the halo its own blur radius without repainting the whole card. */
+.hero-cover{position:relative;margin:0 0 1.6rem;max-width:65ch}
+.hero-img{
+  position:relative;z-index:1;display:block;width:100%;
+  aspect-ratio:1200/630;object-fit:cover;border-radius:16px;
+}
+.hero-blur{
+  position:absolute;inset:0;z-index:0;width:100%;height:100%;
+  object-fit:cover;border-radius:24px;transform:translateY(14px) scale(1.015);
+  filter:blur(22px);opacity:.55;pointer-events:none;
+}
+@media (max-width:860px){
+  .hero-cover{max-width:none;margin-bottom:1.2rem}
+  .hero-img{border-radius:12px}
+  .hero-blur{border-radius:18px;filter:blur(16px);opacity:.45}
+}
 
 /* Back pill. The article page is a dead end by design — the reader arrives from a list and the
    next thing they want is that list again, not the browser's back button guessing at it. */

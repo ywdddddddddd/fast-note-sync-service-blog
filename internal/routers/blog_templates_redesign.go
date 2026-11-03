@@ -34,6 +34,83 @@ var blogChromePartials = `
 <meta name="twitter:title" content="{{.SiteName}}">
 <meta name="twitter:description" content="{{.Description}}">
 {{if .JSONLD}}<script type="application/ld+json">{{.JSONLD}}</script>{{end}}
+<script>
+/* Theme, applied before the stylesheet is parsed.
+   Reading localStorage and pinning html.dark/html.light here — in the head, synchronously — is
+   the only way to avoid the white flash a deferred script causes: by the time a deferred script
+   runs, the browser has already painted one frame of the wrong background.
+
+   主题，在样式表解析之前应用。
+   在 head 里同步读取 localStorage 并钉住 html.dark/html.light，是避免白闪的唯一办法：
+   延迟脚本运行的时候，浏览器已经画了一帧错误的底色。 */
+(function () {
+  var KEY = 'fns:theme';
+  function mode() { try { return localStorage.getItem(KEY) || 'system'; } catch (e) { return 'system'; } }
+  function darkNow(m) {
+    return m === 'dark' || (m === 'system' && window.matchMedia && window.matchMedia('(prefers-color-scheme:dark)').matches);
+  }
+  function apply(m) {
+    var h = document.documentElement;
+    h.classList.remove('dark', 'light');
+    if (m === 'dark') { h.classList.add('dark'); }
+    else if (m === 'light') { h.classList.add('light'); }
+    var meta = document.querySelector('meta[name="theme-color"]');
+    if (meta) { meta.setAttribute('content', darkNow(m) ? '#1a1a1a' : '#eae9e3'); }
+    var b = document.getElementById('fns-theme');
+    if (b) {
+      b.setAttribute('data-mode', m);
+      b.setAttribute('title', m === 'system' ? '主题：跟随系统' : (m === 'dark' ? '主题：暗色' : '主题：亮色'));
+    }
+  }
+  window.fnsApplyTheme = apply;
+  apply(mode());
+  document.addEventListener('DOMContentLoaded', function () {
+    var b = document.getElementById('fns-theme');
+    if (b) {
+      b.addEventListener('click', function () {
+        var order = ['system', 'dark', 'light'];
+        var next = order[(order.indexOf(mode()) + 1) % 3];
+        try { localStorage.setItem(KEY, next); } catch (e) {}
+        apply(next);
+      });
+    }
+    apply(mode());
+
+    // Mobile menu. The panel is a sibling of the bar and opened by a body class, so the same
+    // click also has to close it — a menu whose only exit is reloading the page is a trap.
+    //
+    // 移动菜单。面板是顶栏的兄弟节点、由 body 类控制开合，因此同一次点击也要能关掉它——
+    // 一个只能靠刷新退出的菜单是陷阱。
+    var burger = document.getElementById('fns-burger');
+    if (burger) {
+      burger.addEventListener('click', function () {
+        var on = document.body.classList.toggle('mnav-open');
+        burger.setAttribute('aria-expanded', on ? 'true' : 'false');
+      });
+      var panel = document.getElementById('fns-mnav');
+      if (panel) {
+        panel.addEventListener('click', function (ev) {
+          if (ev.target && ev.target.closest && ev.target.closest('a')) {
+            document.body.classList.remove('mnav-open');
+            burger.setAttribute('aria-expanded', 'false');
+          }
+        });
+      }
+      document.addEventListener('keydown', function (ev) {
+        if (ev.key === 'Escape') {
+          document.body.classList.remove('mnav-open');
+          burger.setAttribute('aria-expanded', 'false');
+        }
+      });
+    }
+  });
+  if (window.matchMedia && window.matchMedia('(prefers-color-scheme:dark)').addEventListener) {
+    window.matchMedia('(prefers-color-scheme:dark)').addEventListener('change', function () {
+      if (mode() === 'system') { apply('system'); }
+    });
+  }
+})();
+</script>
 <style>{{.CSS}}</style>
 </head>
 {{end}}
@@ -57,6 +134,11 @@ var blogChromePartials = `
     {{if .HasShelf}}<a href="/blog/shelf">资料</a>{{end}}
     {{if and .Indexable .FeedURL}}<button type="button" class="topnav-feed" data-feed="{{.FeedURL}}" aria-label="订阅《{{.SiteName}}》"><svg class="topnav-feed-icon" width="14" height="14" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M2.002 2.725a.75.75 0 0 1 .797-.699C8.79 2.42 13.58 7.21 13.974 13.201a.75.75 0 0 1-1.497.098 10.502 10.502 0 0 0-9.776-9.776.747.747 0 0 1-.7-.798ZM2.84 7.05h-.002a7.002 7.002 0 0 1 6.113 6.111.75.75 0 0 1-1.49.178 5.503 5.503 0 0 0-4.8-4.8.75.75 0 0 1 .179-1.489ZM2 13a1 1 0 1 1 2 0 1 1 0 0 1-2 0Z"/></svg><span class="topnav-feed-text">订阅</span></button>{{end}}
   </nav>
+  <button type="button" class="theme-btn" id="fns-theme" data-mode="system" aria-label="切换主题" title="主题：跟随系统">
+    <svg class="ti ti-auto" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0a8 8 0 1 0 0 16A8 8 0 0 0 8 0Zm5.9 5h-2.3A13 13 0 0 0 10.3 1.6 6.5 6.5 0 0 1 13.9 5ZM8 1.6c.6.8 1.2 2 1.6 3.4H6.4C6.8 3.6 7.4 2.4 8 1.6ZM6.1 1.6A13 13 0 0 0 4.8 5H2.1a6.5 6.5 0 0 1 4-3.4ZM1.6 6.5h2.8a15 15 0 0 0 0 3H1.6a6.5 6.5 0 0 1 0-3Zm3 4.5c.2 1 .5 2 1 2.9a6.5 6.5 0 0 1-3.5-2.9h2.5Zm3.4 3.4a11 11 0 0 1-1.6-3.4h3.2a11 11 0 0 1-1.6 3.4Zm2.3-4.4c.1-1 .1-2 0-3H5.7a13 13 0 0 0 0 3h4.6Zm.6 3.9c.4-.9.7-1.9.9-2.9h2.5a6.5 6.5 0 0 1-3.4 2.9Zm1.1-4.4c.1-1 .1-2 0-3h2.8a6.5 6.5 0 0 1 0 3h-2.8Z"/></svg>
+    <svg class="ti ti-dark" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M9.6.75a.75.75 0 0 1 .44.87 5.5 5.5 0 0 0 6.68 6.68.75.75 0 0 1 .87.44 7 7 0 1 1-7.99-7.99Z"/></svg>
+    <svg class="ti ti-light" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm0 1.5a.75.75 0 0 1 .75.75v1a.75.75 0 0 1-1.5 0v-1A.75.75 0 0 1 8 13.5Zm0-12a.75.75 0 0 1 .75.75v1a.75.75 0 0 1-1.5 0v-1A.75.75 0 0 1 8 1.5Zm6.5 6.5a.75.75 0 0 1-.75.75h-1a.75.75 0 0 1 0-1.5h1a.75.75 0 0 1 .75.75Zm-12 0a.75.75 0 0 1-.75.75h-1a.75.75 0 0 1 0-1.5h1a.75.75 0 0 1 .75.75Zm10.6-4.6a.75.75 0 0 1 0 1.06l-.7.71a.75.75 0 1 1-1.06-1.06l.7-.71a.75.75 0 0 1 1.06 0ZM4.66 9.94a.75.75 0 0 1 0 1.06l-.7.71A.75.75 0 0 1 2.9 10.65l.7-.71a.75.75 0 0 1 1.06 0Zm8.6 2.77a.75.75 0 0 1-1.06 0l-.7-.71a.75.75 0 1 1 1.06-1.06l.7.7a.75.75 0 0 1 0 1.07ZM4.66 6.06a.75.75 0 0 1-1.06 0l-.7-.7A.75.75 0 1 1 3.96 4.3l.7.7a.75.75 0 0 1 0 1.06Z"/></svg>
+  </button>
   <button type="button" class="burger" id="fns-burger" aria-label="菜单" aria-expanded="false" aria-controls="fns-mnav"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M1 2.75A.75.75 0 0 1 1.75 2h12.5a.75.75 0 0 1 0 1.5H1.75A.75.75 0 0 1 1 2.75Zm0 5A.75.75 0 0 1 1.75 7h12.5a.75.75 0 0 1 0 1.5H1.75A.75.75 0 0 1 1 7.75ZM1.75 12h12.5a.75.75 0 0 1 0 1.5H1.75a.75.75 0 0 1 0-1.5Z"/></svg></button>
 </div></header>
 <div class="mnav" id="fns-mnav" hidden>

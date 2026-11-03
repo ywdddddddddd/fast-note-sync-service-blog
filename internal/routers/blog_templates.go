@@ -164,6 +164,12 @@ type blogPostView struct {
 	ActiveSlug string
 	PostTitle  string
 	PostPath   string
+	// PostCover is the article hero, filled only for absolute cover references. See
+	// dto.BlogPostDTO.Cover for why a local attachment is not resolved here.
+	//
+	// PostCover 是文章 hero，仅对绝对的封面引用填充。
+	// 本地附件为何不在这里解析，见 dto.BlogPostDTO.Cover。
+	PostCover  *dto.BlogCoverDTO
 	PostMeta   []string
 	Body       template.HTML
 	TOC        []tocEntry
@@ -444,6 +450,19 @@ var blogPostTmpl = template.Must(template.New("blog-post").Funcs(blogAssetFuncs)
     <main class="content">
       <article class="card post">
         <a class="back-pill" href="/blog/all"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M7.78 12.53a.75.75 0 0 1-1.06 0L2.47 8.28a.75.75 0 0 1 0-1.06l4.25-4.25a.751.751 0 0 1 1.042.018.751.751 0 0 1 .018 1.042L4.81 7h7.44a.75.75 0 0 1 0 1.5H4.81l2.97 2.97a.75.75 0 0 1 0 1.06Z"/></svg>返回全部笔记</a>
+        {{if .PostCover}}
+        <!-- Hero: the image, plus a blurred copy of itself offset by a few pixels so the edge
+             glows instead of cutting. Two <img> elements rather than a CSS background because the
+             browser then decodes one bitmap for both and the alt text is real.
+             A note without a cover gets no hero at all — a colour block the size of a banner above
+             every article would be a placeholder for something that mostly does not exist.
+             （见交接-15：全库 947 篇里只有 2 篇声明了 cover，因此 hero 是例外而非常态。） -->
+        <div class="hero-cover">
+          <img class="hero-blur" src="{{.PostCover.URL}}" alt="" aria-hidden="true" loading="lazy">
+          <img class="hero-img" src="{{.PostCover.URL}}" alt=""
+               style="object-position:{{.PostCover.FocusX}}% {{.PostCover.FocusY}}%">
+        </div>
+        {{end}}
         <h1 class="pt">{{.PostTitle}}</h1>
         <div class="post-meta">
           {{range .PostMeta}}<span>{{.}}</span>{{end}}

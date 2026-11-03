@@ -1242,6 +1242,20 @@ func (s *shareService) RenderBlogBySlug(ctx context.Context, slug string) (*dto.
 		HTML:  html,
 		Path:  post.Path,
 	}
+	// An absolute cover reference works here; a local attachment does not, because resolving it
+	// needs a vault id this path does not carry. See BlogPostDTO.Cover.
+	// 绝对的封面引用在这里可用；本地附件不行，因为解析它需要一条本路径不携带的 vault id。
+	// 见 BlogPostDTO.Cover。
+	if ref, cov := parseBlogCover(post.Content, post.Path); cov != nil &&
+		(strings.HasPrefix(ref, "http://") || strings.HasPrefix(ref, "https://")) {
+		out.Cover = &dto.BlogCoverDTO{
+			URL:    ref,
+			Kind:   cov.Kind,
+			FocusX: cov.FocusX,
+			FocusY: cov.FocusY,
+			Zoom:   cov.Zoom,
+		}
+	}
 	if !share.CreatedAt.IsZero() {
 		out.CreatedAt = share.CreatedAt.Format("2006-01-02")
 	}

@@ -329,6 +329,22 @@ type BlogPostDTO struct {
 	HTML      string `json:"html"`      // Rendered HTML body // 渲染后的 HTML 正文
 	Path      string `json:"path"`      // Source note path // 来源笔记路径
 	CreatedAt string `json:"createdAt"` // Creation date // 创建日期
+
+	// Cover is the article hero image, or nil.
+	//
+	// Only an absolute http(s) reference is filled in here. A cover that points at a local
+	// attachment needs the file endpoint resolved against a vault id, which the article render
+	// path does not carry; those notes fall back to a title without a hero rather than to a
+	// broken image. The list cards solve the same problem differently — they resolve attachments
+	// because they already have the vault, and they draw a placeholder when there is none.
+	//
+	// Cover 是文章页的 hero 图，可能为 nil。
+	//
+	// 这里只填绝对的 http(s) 引用。指向本地附件的封面需要按 vault id 解析文件端点，
+	// 而文章渲染路径不携带它；那些笔记退化成没有 hero 的标题，而不是一张破图。
+	// 列表卡片用另一种办法解决同一个问题——它们本来就带着 vault，因此能解析附件，
+	// 而没有封面时画占位块。
+	Cover *BlogCoverDTO `json:"cover,omitempty"`
 }
 
 // BlogPageDTO a rendered page note (about). A page is a note that carries a `page:` marker in its

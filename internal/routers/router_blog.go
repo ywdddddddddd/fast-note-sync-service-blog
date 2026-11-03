@@ -526,6 +526,7 @@ func registerBlogRoutes(r *gin.Engine, appContainer *app.App) {
 			ActiveSlug:  slug,
 			PostTitle:   post.Title,
 			PostPath:    post.Path,
+			PostCover:   post.Cover,
 			PostMeta:    meta,
 			Body:        template.HTML(body), //nolint:gosec // rendered by goldmark from the user's own notes
 			TOC:         toc,
