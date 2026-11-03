@@ -822,6 +822,35 @@ func (s *shareService) GetBlogHome(ctx context.Context, uid int64, baseURL strin
 	home.Nav.Total = len(sources)
 	home.Activity = buildActivity(dayCount, earliest, 14, 53)
 
+	// ── Sections, card identity, day counter ──
+	// ── 版块、名片身份、天数 ──
+	//
+	// Sections come from the tree that was just built, so the dropdown, the rail and the sidebar
+	// all describe the same taxonomy by construction.
+	//
+	// 版块取自刚刚建好的这棵树，因此下拉、右栏与侧栏在构造上就描述同一套分类。
+	home.Sections = buildBlogSections(home.Nav.Tree)
+
+	// The start date is the earliest published note's timestamp — the same value the heat map
+	// already windows on. Deriving it means the card cannot claim a different history from the
+	// archive that sits under it on the same page.
+	//
+	// 起始日期取最早一篇已发布笔记的时间戳，也就是热力图已经在用来定窗口的那个值。
+	// 推导它意味着名片不可能宣称一段与它下方归档不同的历史。
+	if earliest > 0 {
+		start := time.UnixMilli(earliest)
+		home.Stats.Since = start.Format("2006-01-02")
+		home.Stats.DaysOnline = int(time.Since(start).Hours() / 24)
+	}
+
+	// The card page identity is parsed out of the résumé page note. A missing note leaves Profile
+	// nil and the template omits the whole block rather than rendering an empty shell.
+	//
+	// 名片身份从简历页笔记解析。缺这篇笔记时 Profile 为 nil，模板整块省略，而不是渲染一个空壳。
+	if about, _ := pageNote(sources, "about"); about != nil {
+		home.Profile = parseBlogProfile(about.Content)
+	}
+
 	home.Stats.Links = totalLinks
 	home.Stats.Folders = root.folderCount()
 	home.Stats.WordsText = blogCountText(home.Stats.Words)

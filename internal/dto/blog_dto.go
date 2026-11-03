@@ -259,6 +259,17 @@ type BlogStatsDTO struct {
 	// WordsText 是 Words 的人读形式（"82.8万"）。原始数字是六位数，塞不进移动端首页那一行
 	// 状态条——它在窄屏上取代了原来七格仪表盘。桌面端仍以原始数字为准。
 	WordsText string `json:"wordsText"`
+
+	// DaysOnline is how long the blog has existed, counted from the earliest published note to
+	// today. It stands in for the reference site's "Days Online" card: the start date is derived
+	// from data rather than configured, so it cannot drift away from the archive.
+	//
+	// DaysOnline 是博客存在的天数，从最早一篇已发布笔记算到今天。
+	// 它对应参照站的「Days Online」卡片：起始日期由数据推导而不是配置，因此不会与归档脱节。
+	DaysOnline int `json:"daysOnline"`
+	// Since is that earliest note's date, shown beside the day count so the number is checkable.
+	// Since 是最早一篇的日期，与天数并排显示，使这个数字可核对。
+	Since string `json:"since"`
 }
 
 // BlogHomeDTO everything the blog home page needs
@@ -272,6 +283,14 @@ type BlogHomeDTO struct {
 	Nav      *BlogNavDTO      `json:"nav"`
 	Graph    *BlogGraphDTO    `json:"graph"`
 	Activity *BlogActivityDTO `json:"activity"`
+
+	// Sections are the top-level folders, in the order the nav dropdown and the list rail show
+	// them. Profile is the card-page identity parsed from the résumé note.
+	//
+	// Sections 是顶层目录，顺序即顶栏下拉与列表页右栏的顺序。
+	// Profile 是从简历笔记解析出的名片身份。
+	Sections []*BlogSectionDTO `json:"sections,omitempty"`
+	Profile  *BlogProfileDTO   `json:"profile,omitempty"`
 }
 
 // BlogPostDTO a rendered blog post
@@ -353,6 +372,112 @@ type BlogHotItemDTO struct {
 	Slug  string `json:"slug"`
 	Title string `json:"title"`
 	Like  int64  `json:"like"`
+
+	// Summary is the plain-text excerpt the recommendation list shows under the title. The block
+	// is a recommendation, not a leaderboard: it deliberately hides Like, and a title alone reads
+	// as a link list rather than something worth opening.
+	//
+	// Summary 是推荐列表显示的纯文本摘要。这个区块是推荐而不是排行榜：
+	// 它有意隐藏 Like，而只有标题会读成一份链接清单，不像值得点开的东西。
+	Summary string `json:"summary"`
+}
+
+// BlogSectionDTO is one top-level folder rendered as a section (版块).
+//
+// The reference site calls these categories. Here they come straight from the folder tree, so a
+// new top-level folder becomes a section without any configuration — and a folder renamed by
+// accident becomes a section too, which is why Name is normalized before it reaches the template.
+//
+// BlogSectionDTO 是一个顶层目录，作为「版块」渲染。
+//
+// 参照站把它们叫分类。这里的版块直接来自目录树，因此新建一个顶层目录就多一个版块，无需配置；
+// 手滑改名的目录也会变成版块，所以 Name 在进入模板前会先归一化。
+type BlogSectionDTO struct {
+	Name  string `json:"name"`  // display name // 显示名
+	Slug  string `json:"slug"`  // URL segment, the raw folder name // URL 段，原目录名
+	Count int    `json:"count"` // published notes inside // 其下已发布笔记数
+}
+
+// BlogProfileLinkDTO is one pill under the name on the card page.
+//
+// Kind exists because the pills are not all links: the WeChat entry opens a QR overlay, and the
+// RSS entry opens an explanation card. Href is what a link needs; a pill whose Kind needs none
+// leaves it empty, and the template must not emit a dead href for it.
+//
+// BlogProfileLinkDTO 是名片页姓名下方的一枚药丸。
+//
+// Kind 的存在是因为药丸并不都是链接：微信那一枚打开二维码浮层，RSS 那一枚打开说明卡。
+// Href 是链接需要的；Kind 不需要 Href 的药丸留空，模板不能为它输出一个死链。
+type BlogProfileLinkDTO struct {
+	Label string `json:"label"`
+	Href  string `json:"href"`
+	Icon  string `json:"icon"` // octicon name the template maps to a path // 模板映射到 path 的图标名
+	Kind  string `json:"kind"` // link | mail | rss | qr // 行为类型
+}
+
+// BlogProfileDTO is the identity block the card page shows.
+//
+// Every field is optional. The block is parsed out of the résumé page note, and a note that has
+// been rewritten is allowed to lose a field: the template omits what is empty rather than showing
+// a placeholder, because a card page with "No name" on it is worse than one with no name line.
+//
+// BlogProfileDTO 是名片页展示的身份块。
+//
+// 每个字段都是可选的。这块数据从简历页笔记解析而来，一篇被改写过的笔记允许丢掉某个字段：
+// 模板会省略空值而不是显示占位文案 —— 一张写着「未命名」的名片页，比一张没有姓名行的更糟。
+type BlogProfileDTO struct {
+	Name     string               `json:"name"`
+	Tagline  string               `json:"tagline"`
+	Location string               `json:"location"`
+	Avatar   string               `json:"avatar"`
+	Links    []BlogProfileLinkDTO `json:"links"`
+	QRImage  string               `json:"qrImage"`
+}
+
+// BlogPageLinkDTO is one page-number button in the pager.
+// BlogPageLinkDTO 分页器里的一个页码按钮。
+type BlogPageLinkDTO struct {
+	Num     int    `json:"num"`
+	URL     string `json:"url"`
+	Current bool   `json:"current"`
+}
+
+// BlogListDTO is everything the /blog/all, section and archives pages need.
+//
+// Entries is already sliced to the current page; Total counts the whole set. Keeping both means
+// the template never has to know about paging arithmetic, and the empty state is just Total == 0.
+//
+// BlogListDTO 是 /blog/all、版块页与归档页所需的全部数据。
+//
+// Entries 已经切到当前页，Total 是全集大小。两者都给，模板就不必懂分页算术，
+// 空状态也就只是 Total == 0。
+type BlogListDTO struct {
+	Title      string
+	Kicker     string // 全部笔记 / 版块名 // section name or "全部笔记"
+	Section    string // current section slug, empty on /blog/all // 当前版块，全部页为空
+	Entries    []*BlogEntryDTO
+	Total      int
+	Sections   []*BlogSectionDTO
+	Hot        []*BlogHotItemDTO
+	Page       int
+	TotalPages int
+	Pages      []BlogPageLinkDTO
+	PrevURL    string
+	NextURL    string
+	Canonical  string
+
+	// ArchiveYears groups entries by year for /blog/archives. It is nil elsewhere.
+	//
+	// ArchiveYears 为 /blog/archives 按年分组；其它页面为空。
+	ArchiveYears []*BlogArchiveYearDTO
+}
+
+// BlogArchiveYearDTO is one year block on the archives page.
+// BlogArchiveYearDTO 归档页里的一个年份块。
+type BlogArchiveYearDTO struct {
+	Year    string
+	Count   int
+	Entries []*BlogEntryDTO
 }
 
 // BlogConfigDTO current blog settings, as reported to clients (e.g. the Obsidian plugin)

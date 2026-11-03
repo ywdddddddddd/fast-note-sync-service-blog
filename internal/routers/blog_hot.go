@@ -60,7 +60,7 @@ func blogHotList(reactions *dto.BlogReactionsDTO, entries []*dto.BlogEntryDTO, l
 		if tally == nil || tally.Like <= 0 {
 			continue
 		}
-		out = append(out, &dto.BlogHotItemDTO{Slug: e.Slug, Title: e.Title, Like: tally.Like})
+		out = append(out, &dto.BlogHotItemDTO{Slug: e.Slug, Title: e.Title, Like: tally.Like, Summary: e.Summary})
 	}
 	if len(out) == 0 {
 		// Nil rather than an empty slice: the template tests {{if .Hot}}, and both are falsy
