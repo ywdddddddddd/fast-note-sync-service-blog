@@ -3163,11 +3163,16 @@ html.is-wx .ask-panel{left:.45rem;right:.45rem;width:auto}
 .card-rail{border:1px solid var(--border);border-radius:12px;background:var(--card);padding:1rem 1.1rem 1.2rem}
 .rail-title{margin:0 0 .7rem;font-size:.75rem;font-weight:600;letter-spacing:.08em;
   color:var(--muted-foreground);text-transform:uppercase}
-.rec{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:.85rem}
-.rec a{font-size:.875rem;font-weight:500;line-height:1.5;color:var(--foreground);text-decoration:none}
+.rec{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:.95rem}
+.rec a{display:flex;align-items:baseline;gap:.5rem;justify-content:space-between;
+  font-size:.875rem;font-weight:500;line-height:1.5;color:var(--foreground);text-decoration:none}
 .rec a:hover{color:var(--tint,var(--foreground));text-decoration:underline;text-underline-offset:2px}
-.rec p{margin:.15rem 0 0;font-size:.75rem;line-height:1.6;color:var(--muted-foreground);
+.rec-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rec-upd{font-size:.6875rem;font-weight:400;color:var(--muted-foreground);
+  font-variant-numeric:tabular-nums;flex:0 0 auto}
+.rec p{margin:.2rem 0 0;font-size:.75rem;line-height:1.6;color:var(--muted-foreground);
   display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.rec-meta{display:block;margin-top:.2rem;font-size:.6875rem;color:var(--muted-foreground);opacity:.8}
 
 /* ── 归档页 ─────────────────────────────────────────────────────────────── */
 .arc-wrap{flex:1;width:100%;max-width:900px;margin:0 auto;padding:2.25rem var(--layout-pad) 4rem}
@@ -3206,12 +3211,19 @@ html.is-wx .ask-panel{left:.45rem;right:.45rem;width:auto}
   background:color-mix(in srgb,var(--card) 92%,transparent);
   -webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px);
   box-shadow:var(--shadow-md);
-  display:none;flex-direction:column;
+  display:flex;flex-direction:column;
+  /* Two-way motion. Opening has to be visible, so it starts as a 6px drop plus a 2% shrink and
+     lands; closing reverses the same path. The visibility switch is delayed on purpose: without
+     that delay the panel would disappear before the fade finished, which is the classic
+     "menu snaps shut" look. */
+  opacity:0;visibility:hidden;transform:translateY(-6px) scale(.98);transform-origin:top left;
+  transition:opacity .18s ease,transform .22s cubic-bezier(.22,1,.36,1),visibility 0s linear .22s;
 }
-.dd[open] .dd-body{display:flex}
-@media (hover:hover) and (pointer:fine){
-  .dd:hover .dd-body{display:flex}
+.dd.is-open .dd-body{
+  opacity:1;visibility:visible;transform:none;
+  transition:opacity .18s ease,transform .22s cubic-bezier(.22,1,.36,1),visibility 0s;
 }
+.dd.is-open .dd-caret{transform:rotate(180deg)}
 .dd-body a{
   display:flex;align-items:center;justify-content:space-between;gap:.75rem;
   padding:.4rem .55rem;border-radius:8px;font-size:.875rem;text-decoration:none;color:var(--foreground);
@@ -3257,6 +3269,128 @@ html.is-wx .ask-panel{left:.45rem;right:.45rem;width:auto}
 }
 body.drawer-nav .sheet-nav{transform:translateY(0)}
 body.drawer-rec .sheet-rec{transform:translateY(0)}
+
+/* The folder tree inside a card sheet must be a plain block.
+   On mobile the same .aside element is the page-level drawer: position:fixed, height:var(--sheet-h),
+   translateY(101%). Dropping that element inside a sheet put two positioning systems on one node and
+   the panel collapsed to 44px — tall enough for its title, which is why it looked empty while 176
+   folder nodes were present in the DOM. These rules put it back into normal flow.
+   Specificity (0,2,0) beats body.is-home .aside (0,1,1), so no !important is needed.
+
+   卡片面板里的目录树必须是普通块级元素。
+   在移动端，同一个 .aside 元素是页面级抽屉：position:fixed、height:var(--sheet-h)、
+   translateY(101%)。把它塞进 sheet 等于给一个节点装了两套定位系统，面板因此塌成 44px——
+   刚好只装得下标题，这就是「里面 176 个目录节点都在、看起来却空白」的原因。
+   下面这几条把它放回正常文档流。特异性 (0,2,0) 高于 body.is-home .aside (0,1,1)，
+   因此不需要 !important。 */
+.card-sheet .aside{
+  position:static!important;inset:auto!important;transform:none!important;
+  height:auto!important;max-height:none!important;width:auto!important;
+  margin:0!important;padding:0!important;border:0!important;border-radius:0!important;
+  background:transparent!important;box-shadow:none!important;overflow:visible!important;
+  display:block!important;
+}
+.card-sheet .aside::before{display:none}
+.card-sheet .aside>.panel{
+  position:static;max-height:none;overflow:visible;
+  border:0;background:transparent;box-shadow:none;padding:0;
+}
+
+/* Collapsible capsule.
+   The five keys take a third of a phone's width and they are only useful some of the time, so the
+   capsule starts as one round key and grows into the row on demand. The width is animated rather
+   than the transform: scaling a row of icons makes them blur and change hit-area, while width keeps
+   every key at its real size for the whole transition.
+
+   可收起的胶囊。
+   五个键占掉手机三分之一宽度，而它们只在某些时刻有用，因此胶囊初始是一个圆键，
+   需要时长成一条。动画走 width 而不是 transform：缩放一整排图标会把它们拉糊、命中区也跟着变，
+   而 width 让每个键在整个过程中保持真实尺寸。 */
+.dock.dock-collapsible{
+  width:48px;overflow:hidden;
+  background:color-mix(in srgb,var(--card) 66%,transparent);
+  -webkit-backdrop-filter:blur(24px) saturate(1.7);
+  backdrop-filter:blur(24px) saturate(1.7);
+  transition:width .42s cubic-bezier(.22,1,.36,1),background .3s ease;
+}
+.dock.dock-collapsible.is-open{width:202px}
+.dock.dock-collapsible .dock-b{opacity:0;pointer-events:none;transition:opacity .22s ease}
+.dock.dock-collapsible.is-open .dock-b{opacity:.58;pointer-events:auto}
+.dock.dock-collapsible.is-open .dock-b[aria-expanded="true"]{opacity:1}
+.dock.dock-collapsible .dock-thumb{opacity:0}
+.dock.dock-collapsible.is-open .dock-thumb{opacity:1}
+.dock-orb{
+  position:absolute;left:50%;top:50%;z-index:2;
+  width:38px;height:38px;padding:0;border:0;border-radius:50%;background:transparent;
+  display:flex;align-items:center;justify-content:center;cursor:pointer;color:var(--foreground);
+  transform:translate(-50%,-50%) scale(1);
+  transition:opacity .2s ease,transform .42s cubic-bezier(.22,1,.36,1);
+}
+.dock-orb svg{width:23px;height:23px;display:block}
+.dock-orb:active{transform:translate(-50%,-50%) scale(.92)}
+.dock.dock-collapsible.is-open .dock-orb{
+  opacity:0;pointer-events:none;transform:translate(-50%,-50%) scale(.55);
+}
+@media (prefers-reduced-motion:reduce){
+  .dock.dock-collapsible,.dock.dock-collapsible .dock-b{transition:none}
+}
+
+/* Transient line above the capsule (see blogDockJS). It sits above the dock and below panels,
+   and it fades rather than slides: it is a message, not a panel. */
+.dock-toast{
+  position:fixed;left:50%;bottom:calc(5.4rem + env(safe-area-inset-bottom,0px));
+  transform:translate(-50%,6px);z-index:70;max-width:min(90vw,26rem);
+  padding:.5rem .85rem;border-radius:10px;border:1px solid var(--border);
+  background:color-mix(in srgb,var(--card) 92%,transparent);
+  -webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px);
+  box-shadow:var(--shadow-md);color:var(--foreground);
+  font-size:.8125rem;line-height:1.5;text-align:center;
+  opacity:0;pointer-events:none;transition:opacity .2s ease,transform .2s ease;
+}
+.dock-toast.is-on{opacity:1;transform:translate(-50%,0)}
+
+/* Stats as one row of three cells.
+   Three stacked cards at ~90px each ate most of a phone screen for three numbers. One row keeps
+   the same information in a third of the height, and the numbers read as a set rather than as
+   three separate claims.
+
+   统计做成一行三格。
+   三张竖卡各约 90px，为三个数字吃掉了大半屏。一行把同样的信息压到三分之一高度，
+   而且三个数字读起来是一组，而不是三条各自独立的声明。 */
+.stats-row{
+  display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:0;
+  border:1px solid var(--border);border-radius:12px;background:var(--card);
+  box-shadow:var(--shadow-sm);overflow:hidden;
+}
+.stat-card{
+  border:0;border-radius:0;background:transparent;box-shadow:none;
+  padding:.85rem 1rem;gap:.1rem;
+  border-inline-start:1px solid var(--border);
+}
+.stat-card:first-child{border-inline-start:0}
+.stat-ico{display:none}
+/* One size for all three figures.
+   The date was deliberately smaller so ten characters would fit; the result was a row where one
+   number looked like a caption and two looked like figures. Equal size reads as three facts of the
+   same weight, which is what they are — and on mobile each cell owns a whole line, so there is
+   room for it.
+
+   三个数字同一字号。
+   日期原本被单独调小以便十个字符塞得下；结果是一行里一个数字像注解、两个像正文。
+   等大读起来才是三条同等分量的事实，而它们本来就是——移动端每格独占一行，也放得下。 */
+.stat-num{font-size:1.3rem}
+.stat-label{font-size:.6875rem}
+.stat-sub{font-size:.625rem;opacity:.72}
+@media (max-width:860px){
+  .stats-row{grid-template-columns:1fr}
+  .stat-card{
+    flex-direction:row;align-items:baseline;gap:.5rem;padding:.55rem .85rem;
+    border-inline-start:0;border-top:1px solid var(--border);
+  }
+  .stat-card:first-child{border-top:0}
+  .stat-num{font-size:1.5rem}
+  .stat-sub{margin-inline-start:auto}
+}
 
 /* ── 入场序列（fade-in-up，延迟 50/100/150/200ms） ─────────────────────── */
 @keyframes fnsFadeUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}

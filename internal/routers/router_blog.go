@@ -226,11 +226,10 @@ func registerBlogRoutes(r *gin.Engine, appContainer *app.App) {
 		// 见 blogReactionLog.addVisit。
 		shareSvc.AddBlogVisit()
 
-		// Reaction tallies: the dashboard's seventh figure and the popular list both come from
-		// this one read.
+		// Reaction tallies are no longer read here: the card page shows no like count and its
+		// recommendation sheet shows folders, not articles.
 		//
-		// 反应计数：仪表盘的第七个数字与热门列表都来自这同一次读取。
-		reactions := shareSvc.GetBlogReactions()
+		// 这里不再读取反应计数：名片页不显示赞数，它的推荐面板展示的是文件夹而不是文章。
 
 		// Page entry points come from the home assembly itself. They used to be re-fetched from
 		// GetBlogNav because Nav.Pages arrived empty — the cause was GetBlogHome replacing the
@@ -274,7 +273,7 @@ func registerBlogRoutes(r *gin.Engine, appContainer *app.App) {
 			Profile:    home.Profile,
 			Pills:      home.Pills,
 			Activity:   home.Activity,
-			Hot:        blogHotList(reactions, home.Entries, blogHotLimit),
+			Recs:       home.Recs,
 			DockJS:     template.JS(blogDockJS()),
 			AskEnabled: blogAskEnabled(appContainer),
 		}

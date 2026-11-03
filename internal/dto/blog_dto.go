@@ -319,6 +319,10 @@ type BlogHomeDTO struct {
 	// 因为顺序是一条不该被每个调用方重新推导的呈现规则——也因为 RSS 那枚药丸需要首页组装
 	// 本来就收到的同一个 base URL。
 	Pills []BlogProfileLinkDTO `json:"pills,omitempty"`
+
+	// Recs are the second-level folders with recent activity; see blogSectionRecs.
+	// Recs 是最近有变动的二级文件夹；见 blogSectionRecs。
+	Recs []*BlogSectionRecDTO `json:"recs,omitempty"`
 }
 
 // BlogPostDTO a rendered blog post
@@ -459,6 +463,26 @@ type BlogProfileLinkDTO struct {
 	Kind  string `json:"kind"` // link | mail | rss | qr // 行为类型
 }
 
+// BlogSectionRecDTO is one recommendation: a second-level folder with recent activity.
+//
+// Slug points at the newest article inside the folder. There is no per-folder route, and inventing
+// one would add a page whose only content is a subset of a section page; landing on the newest
+// article is what "recently updated" promises anyway.
+//
+// BlogSectionRecDTO 是一条推荐：一个最近有变动的二级文件夹。
+//
+// Slug 指向该文件夹里最新的一篇文章。没有按文件夹的独立路由，为它新建一条只会多出一个
+// 「内容是一张版块页子集」的页面；而「最近更新」本来承诺的就是最新那一篇。
+type BlogSectionRecDTO struct {
+	Name    string `json:"name"`    // 二级目录名 // second-level folder name
+	Parent  string `json:"parent"`  // 一级目录名，用于分组展示 // parent section
+	Desc    string `json:"desc"`    // 手写的一句话 // hand-written one-liner
+	Slug    string `json:"slug"`    // 该栏目最新一篇的 slug // newest article in the folder
+	Count   int    `json:"count"`   // 已发布篇数 // published notes inside
+	Words   int    `json:"words"`   // 该栏目总字数 // total characters inside
+	Updated string `json:"updated"` // 该栏目最新变更日期 // newest change date
+}
+
 // BlogProfileMetaDTO is one key/value row of the card's "关于" block.
 //
 // The résumé note already carries these as `- 所在地 **浙江 · 金华**`. Rendering them as rows
@@ -542,6 +566,10 @@ type BlogListDTO struct {
 	//
 	// AllEntries 是过滤后的全集，只为让路由层依据全部条目而不是当前页来排推荐。它从不抵达客户端。
 	AllEntries []*BlogEntryDTO `json:"-"`
+
+	// Recs are the same second-level folder recommendations the card page shows.
+	// Recs 与名片页相同的那组二级栏目推荐。
+	Recs []*BlogSectionRecDTO `json:"recs,omitempty"`
 }
 
 // BlogArchiveYearDTO is one year block on the archives page.

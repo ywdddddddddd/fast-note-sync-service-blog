@@ -7,6 +7,64 @@ package routers
 // 名片页的两个脚本放在这里而不是模板里，是为了让标记保持可读：
 // 单是胶囊接线就有一百行状态机，内联它会把页面模板推到 HTML 无法扫读的长度。
 
+// blogNavDockJS is the capsule used on the list and archive pages.
+//
+// Those pages have no sheets to open — the folder tree, the recommendations and the heat map all
+// live on the card page — so their keys are plain links back to the places those things actually
+// are. It is honest about it: the labels say where they go, and there is no key that pretends to
+// open something on a page that does not contain it.
+//
+// blogNavDockJS 是列表页与归档页使用的胶囊。
+//
+// 这两页没有可打开的面板——目录树、推荐、热力图都在名片页——因此它们的键是普通链接，
+// 指回那些东西真正所在的地方。这一点是诚实的：标签写着它们去哪，
+// 也没有任何一个键假装在这一页上打开一个它并不包含的东西。
+func blogNavDockJS() string {
+	return `(function () {
+  var dock = document.getElementById('fns-dock');
+  if (!dock) { return; }
+  var orb = document.getElementById('fns-orb');
+  function setOpen(on) {
+    dock.classList.toggle('is-open', on);
+    if (orb) { orb.setAttribute('aria-expanded', on ? 'true' : 'false'); }
+  }
+  if (orb) {
+    orb.addEventListener('click', function (ev) {
+      ev.stopPropagation();
+      setOpen(!dock.classList.contains('is-open'));
+    });
+  }
+  document.addEventListener('click', function (ev) {
+    if (dock.classList.contains('is-open') && !dock.contains(ev.target)) { setOpen(false); }
+  });
+  Array.prototype.forEach.call(dock.querySelectorAll('a.dock-b'), function (a) {
+    a.addEventListener('click', function () { setOpen(false); });
+  });
+
+  var toastTimer = 0;
+  function toast(msg) {
+    var el = document.getElementById('fns-dock-toast');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'fns-dock-toast';
+      el.className = 'dock-toast';
+      el.setAttribute('role', 'status');
+      document.body.appendChild(el);
+    }
+    el.textContent = msg;
+    el.classList.add('is-on');
+    if (toastTimer) { clearTimeout(toastTimer); }
+    toastTimer = setTimeout(function () { el.classList.remove('is-on'); }, 2800);
+  }
+  var ask = document.getElementById('dock-ask');
+  if (ask && ask.hasAttribute('data-ask-off')) {
+    ask.addEventListener('click', function () {
+      toast(ask.getAttribute('title') || '问答未启用');
+    });
+  }
+})();`
+}
+
 // blogDockJS wires the five-key capsule on the card page.
 //
 // Three behaviours differ from the previous page, and each one follows from the card page having
@@ -40,6 +98,26 @@ func blogDockJS() string {
 
   function hum(ms) { if (navigator.vibrate) { try { navigator.vibrate(ms); } catch (e) {} } }
   function slide(i) { dock.style.setProperty('--slot', i); }
+
+  // One transient line above the capsule. It exists because the capsule has a fixed shape but not
+  // every key can always act, and "nothing happened" is the worst possible answer.
+  // 胶囊上方的一行临时提示。它存在的原因是：胶囊形状固定，但并非每个键随时都能行动，
+  // 而「什么都没发生」是最糟的答复。
+  var toastTimer = 0;
+  function toast(msg) {
+    var el = document.getElementById('fns-dock-toast');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'fns-dock-toast';
+      el.className = 'dock-toast';
+      el.setAttribute('role', 'status');
+      document.body.appendChild(el);
+    }
+    el.textContent = msg;
+    el.classList.add('is-on');
+    if (toastTimer) { clearTimeout(toastTimer); }
+    toastTimer = setTimeout(function () { el.classList.remove('is-on'); }, 2800);
+  }
 
   function close() {
     document.body.classList.remove('drawer-nav', 'drawer-rec');
@@ -88,7 +166,61 @@ func blogDockJS() string {
     var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     el.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'center' });
   });
-  bind('dock-ask', 4, null);
+
+  // 问道：只有 AI 真的启用时才有挂载点与脚本。
+  // 未启用时按钮仍然存在（胶囊是五键的固定形状），但点它必须给出解释——
+  // 一个按下毫无反应的键，读者只会以为站点坏了。
+  //
+  // 问道 only works when AI is enabled: only then are the mount point and the script rendered.
+  // The key stays (the capsule is a fixed five-key shape), but pressing it has to explain itself —
+  // a key that does nothing reads as a broken site.
+  var ask = document.getElementById('dock-ask');
+  if (ask && ask.hasAttribute('data-ask-off')) {
+    ask.addEventListener('click', function () {
+      toast(ask.getAttribute('title') || '问答未启用');
+    });
+  } else {
+    bind('dock-ask', 4, null);
+  }
+
+  // Collapsed capsule: one round key until the reader asks for the row.
+  //
+  // It starts collapsed on every load and collapses again as soon as a click lands outside it. Both
+  // rules come from the same observation: a five-key bar parked over the bottom of a phone screen
+  // is a permanent obstruction for the moments when none of the five is wanted.
+  //
+  // 收起的胶囊：在读者要那一排之前，它只是一个圆键。
+  //
+  // 每次载入都从收起态开始，并且任何落在它外面的点击都会让它重新收起。两条规则出自同一个观察：
+  // 一条常驻在手机屏幕底部的五键栏，在五个键都用不上的时候就是一种长期遮挡。
+  var orb = document.getElementById('fns-orb');
+  var collapsible = dock.classList.contains('dock-collapsible');
+  function setDockOpen(on) {
+    dock.classList.toggle('is-open', on);
+    if (orb) { orb.setAttribute('aria-expanded', on ? 'true' : 'false'); }
+  }
+  if (collapsible && orb) {
+    orb.addEventListener('click', function (ev) {
+      ev.stopPropagation();
+      setDockOpen(!dock.classList.contains('is-open'));
+    });
+    document.addEventListener('click', function (ev) {
+      if (!dock.classList.contains('is-open')) { return; }
+      if (dock.contains(ev.target)) { return; }
+      setDockOpen(false);
+    });
+    // Any key that opens a sheet closes the capsule behind it: leaving the row open under an open
+    // sheet means the reader has to dismiss two things to get back to the page.
+    //
+    // 任何打开面板的键都在身后把胶囊收起：在面板打开时还让这一排留在原地，
+    // 意味着读者要关两次才能回到页面。
+    Array.prototype.forEach.call(dock.querySelectorAll('.dock-b'), function (b) {
+      b.addEventListener('click', function () {
+        if (b.hasAttribute('data-ask-off') || b.hasAttribute('data-ask-open')) { return; }
+        setDockOpen(false);
+      });
+    });
+  }
 
   if (scrim) { scrim.addEventListener('click', close); }
   document.addEventListener('keydown', function (e) { if (e.key === 'Escape') { close(); } });

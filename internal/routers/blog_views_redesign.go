@@ -64,14 +64,10 @@ type blogCardView struct {
 	Profile   *dto.BlogProfileDTO
 	Pills     []dto.BlogProfileLinkDTO
 	Activity  *dto.BlogActivityDTO
-	// Hot feeds the recommendation sheet the capsule opens. The card page itself shows no
-	// recommendation block — that was an explicit decision — but the capsule's second key still
-	// needs something to open, and a key that opens an empty sheet is the same apology as an
-	// empty block.
+	// Recs feed the recommendation sheet the capsule opens and the rail on list pages.
 	//
-	// Hot 供胶囊打开的推荐面板使用。名片页本身不展示推荐区块——那是明确的决定——
-	// 但胶囊的第二个键仍需要有东西可开，而一个打开空面板的键，与一个空区块是同一种道歉。
-	Hot        []*dto.BlogHotItemDTO
+	// Recs 供胶囊打开的推荐面板与列表页右栏使用。
+	Recs       []*dto.BlogSectionRecDTO
 	StatsJS    template.JS
 	DockJS     template.JS
 	AskEnabled bool
@@ -97,7 +93,10 @@ type blogListView struct {
 	PagerLinks []dto.BlogPageLinkDTO
 	PrevURL    string
 	NextURL    string
-	Hot        []*dto.BlogHotItemDTO
+	// Recs is the same second-level folder list the card page's capsule shows.
+	// Recs 与名片页胶囊展示的是同一组二级栏目。
+	Recs       []*dto.BlogSectionRecDTO
+	DockJS     template.JS
 	AskEnabled bool
 }
 
@@ -105,8 +104,15 @@ type blogListView struct {
 // blogArchiveView 是 /blog/archives：每年一块，带水印年份。
 type blogArchiveView struct {
 	blogChrome
-	Years []*dto.BlogArchiveYearDTO
-	Total int
+	Years  []*dto.BlogArchiveYearDTO
+	Total  int
+	DockJS template.JS
+	// AskEnabled is read by the shared navdock partial; a view without it fails at execute time
+	// rather than at compile time, which is exactly how /blog/archives turned into a 500.
+	//
+	// AskEnabled 由共用的 navdock 片段读取；缺少这个字段的 view 会在执行时失败而不是编译时，
+	// /blog/archives 变 500 就是这么来的。
+	AskEnabled bool
 }
 
 // blogNavPageURL builds the address of a page-note entry.

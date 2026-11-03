@@ -76,13 +76,41 @@ var blogChromePartials = `
     }
     apply(mode());
 
+    // Blog dropdown: click to open, click outside or Esc to close. It is a button rather than a
+    // <details> element because details cannot animate its close — the content is display:none the
+    // instant it is toggled, so the panel would vanish instead of retracting.
+    //
+    // 博客下拉：点击展开，点外部或 Esc 收起。用按钮而不是 <details>，
+    // 因为 details 的收起无法做动画——切换那一刻内容就是 display:none，
+    // 面板会瞬间消失而不是收回。
+    var dd = document.getElementById('fns-dd');
+    var ddBtn = document.getElementById('fns-dd-btn');
+    if (dd && ddBtn) {
+      ddBtn.addEventListener('click', function (ev) {
+        ev.stopPropagation();
+        var on = dd.classList.toggle('is-open');
+        ddBtn.setAttribute('aria-expanded', on ? 'true' : 'false');
+      });
+      document.addEventListener('click', function (ev) {
+        if (dd.classList.contains('is-open') && !dd.contains(ev.target)) {
+          dd.classList.remove('is-open');
+          ddBtn.setAttribute('aria-expanded', 'false');
+        }
+      });
+      document.addEventListener('keydown', function (ev) {
+        if (ev.key === 'Escape') {
+          dd.classList.remove('is-open');
+          ddBtn.setAttribute('aria-expanded', 'false');
+        }
+      });
+    }
+
     // Mobile menu. The panel is a sibling of the bar and opened by a body class, so the same
     // click also has to close it — a menu whose only exit is reloading the page is a trap.
     //
     // 移动菜单。面板是顶栏的兄弟节点、由 body 类控制开合，因此同一次点击也要能关掉它——
     // 一个只能靠刷新退出的菜单是陷阱。
-    var burger = document.getElementById('fns-burger');
-    if (burger) {
+    var burger = document.getElementById('fns-burger');    if (burger) {
       burger.addEventListener('click', function () {
         var on = document.body.classList.toggle('mnav-open');
         burger.setAttribute('aria-expanded', on ? 'true' : 'false');
@@ -122,14 +150,14 @@ var blogChromePartials = `
   </a>
   <div class="topbar-spacer"></div>
   <nav class="topnav" aria-label="主导航">
-    <details class="dd">
-      <summary class="dd-sum">博客<svg class="dd-caret" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M4.427 6.427a.75.75 0 0 1 1.06 0L8 8.94l2.513-2.513a.75.75 0 1 1 1.06 1.06L8.53 10.53a.75.75 0 0 1-1.06 0L4.427 7.487a.75.75 0 0 1 0-1.06Z"/></svg></summary>
-      <div class="dd-body">
+    <div class="dd" id="fns-dd">
+      <button type="button" class="dd-sum" id="fns-dd-btn" aria-expanded="false" aria-controls="fns-dd-body" aria-haspopup="true">博客<svg class="dd-caret" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M4.427 6.427a.75.75 0 0 1 1.06 0L8 8.94l2.513-2.513a.75.75 0 1 1 1.06 1.06L8.53 10.53a.75.75 0 0 1-1.06 0L4.427 7.487a.75.75 0 0 1 0-1.06Z"/></svg></button>
+      <div class="dd-body" id="fns-dd-body">
         <a href="/blog/all">全部笔记</a>
         {{range .Sections}}<a href="/blog/c/{{.Slug}}">{{.Name}}<span class="dd-n">{{.Count}}</span></a>{{end}}
         <a href="/blog/archives">归档</a>
       </div>
-    </details>
+    </div>
     {{range .Pages}}<a href="{{.URL}}">{{.Title}}</a>{{end}}
     {{if .HasShelf}}<a href="/blog/shelf">资料</a>{{end}}
     {{if and .Indexable .FeedURL}}<button type="button" class="topnav-feed" data-feed="{{.FeedURL}}" aria-label="订阅《{{.SiteName}}》"><svg class="topnav-feed-icon" width="14" height="14" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M2.002 2.725a.75.75 0 0 1 .797-.699C8.79 2.42 13.58 7.21 13.974 13.201a.75.75 0 0 1-1.497.098 10.502 10.502 0 0 0-9.776-9.776.747.747 0 0 1-.7-.798ZM2.84 7.05h-.002a7.002 7.002 0 0 1 6.113 6.111.75.75 0 0 1-1.49.178 5.503 5.503 0 0 0-4.8-4.8.75.75 0 0 1 .179-1.489ZM2 13a1 1 0 1 1 2 0 1 1 0 0 1-2 0Z"/></svg><span class="topnav-feed-text">订阅</span></button>{{end}}
@@ -165,6 +193,23 @@ var blogChromePartials = `
 {{define "pillicon"}}<svg class="pill-i" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">{{if eq .Icon "location"}}<path d="M8 16s6-5.686 6-10A6 6 0 0 0 2 6c0 4.314 6 10 6 10Zm0-7a3 3 0 1 1 0-6 3 3 0 0 1 0 6Z"/>{{else if eq .Icon "mark-github"}}<path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/>{{else if eq .Icon "mail"}}<path d="M1.75 2h12.5c.966 0 1.75.784 1.75 1.75v8.5A1.75 1.75 0 0 1 14.25 14H1.75A1.75 1.75 0 0 1 0 12.25v-8.5C0 2.784.784 2 1.75 2Zm.25 1.5v.56l6 3.75 6-3.75v-.56a.25.25 0 0 0-.25-.25H2.25a.25.25 0 0 0-.25.25Zm12.5 2.44-6 3.75-6-3.75v5.81c0 .138.112.25.25.25h11.5a.25.25 0 0 0 .25-.25V5.94Z"/>{{else if eq .Icon "mortar-board"}}<path d="M8 .5 0 4.5l8 4 8-4-8-4Zm-5.5 6.2v3.6c0 .4.2.7.6.9 1.4.8 3.1 1.3 4.9 1.3s3.5-.5 4.9-1.3c.4-.2.6-.5.6-.9V6.7L8 9.8 2.5 6.7Z"/>{{else if eq .Icon "rss"}}<path d="M2.002 2.725a.75.75 0 0 1 .797-.699C8.79 2.42 13.58 7.21 13.974 13.201a.75.75 0 0 1-1.497.098 10.502 10.502 0 0 0-9.776-9.776.747.747 0 0 1-.7-.798ZM2.84 7.05h-.002a7.002 7.002 0 0 1 6.113 6.111.75.75 0 0 1-1.49.178 5.503 5.503 0 0 0-4.8-4.8.75.75 0 0 1 .179-1.489ZM2 13a1 1 0 1 1 2 0 1 1 0 0 1-2 0Z"/>{{else if eq .Icon "qr"}}<path d="M1.5 1h4A.5.5 0 0 1 6 1.5v4a.5.5 0 0 1-.5.5h-4A.5.5 0 0 1 1 5.5v-4A.5.5 0 0 1 1.5 1Zm.5 1v3h3V2H2Zm8-1h4a.5.5 0 0 1 .5.5v4a.5.5 0 0 1-.5.5h-4a.5.5 0 0 1-.5-.5v-4a.5.5 0 0 1 .5-.5Zm.5 1v3h3V2h-3Zm-9.5 8h4a.5.5 0 0 1 .5.5v4a.5.5 0 0 1-.5.5h-4a.5.5 0 0 1-.5-.5v-4a.5.5 0 0 1 .5-.5Zm.5 1v3h3v-3H2Zm7-1h1.5v1.5H9V10h1.5Zm2.5 0H13v1.5h-1.5V10H11Zm-2.5 2.5H11V14H9.5v-1.5H9V11h1.5v1.5Zm2.5 0H13v1.5h-1.5v-1.5H11V11h1.5v1.5Z"/>{{else if eq .Icon "globe"}}<path d="M8 0a8 8 0 1 1 0 16A8 8 0 0 1 8 0Zm5.9 5H11.6a13.4 13.4 0 0 0-1.3-3.4A6.5 6.5 0 0 1 13.9 5ZM8 1.6c.6.8 1.2 2 1.6 3.4H6.4C6.8 3.6 7.4 2.4 8 1.6ZM6.1 1.6A13.4 13.4 0 0 0 4.8 5H2.1a6.5 6.5 0 0 1 4-3.4ZM1.6 6.5h2.8a15 15 0 0 0 0 3H1.6a6.5 6.5 0 0 1 0-3Zm3 4.5c.2 1 .5 2 1 2.9a6.5 6.5 0 0 1-3.5-2.9h2.5Zm3.4 3.4a11 11 0 0 1-1.6-3.4h3.2a11 11 0 0 1-1.6 3.4Zm2.3-4.4c.1-1 .1-2 0-3H5.7a13 13 0 0 0 0 3h4.6Zm.6 3.9c.4-.9.7-1.9.9-2.9h2.5a6.5 6.5 0 0 1-3.4 2.9Zm1.1-4.4c.1-1 .1-2 0-3h2.8a6.5 6.5 0 0 1 0 3h-2.8Z"/>{{else}}<path d="M7.775 3.275a.75.75 0 0 0 .45 0l2.7-1.2a.75.75 0 0 0 0-1.35l-5-2.2a.75.75 0 0 0-.45 0l-5 2.2a.75.75 0 0 0 0 1.35l2.7 1.2v3.4a.75.75 0 0 0 .37.65l2.5 1.4a.75.75 0 0 0 .75 0l2.5-1.4a.75.75 0 0 0 .37-.65v-3.4Z" transform="translate(3.1 5.6)"/>{{end}}</svg>{{end}}
 
 {{define "pill"}}{{if eq .Kind "text"}}<span class="pill">{{template "pillicon" .}}<b>{{.Label}}</b></span>{{else if eq .Kind "rss"}}<button type="button" class="pill" data-feed="{{.Href}}">{{template "pillicon" .}}<b>{{.Label}}</b></button>{{else if eq .Kind "qr"}}<button type="button" class="pill" data-qr="1">{{template "pillicon" .}}<b>{{.Label}}</b></button>{{else}}<a class="pill" href="{{.Href}}"{{if eq .Kind "mail"}}{{else}} target="_blank" rel="noopener noreferrer"{{end}}>{{template "pillicon" .}}<b>{{.Label}}</b></a>{{end}}{{end}}
+
+{{define "navdock"}}<div class="dock dock-collapsible" id="fns-dock" role="group" aria-label="页面入口" data-slot="0">
+  <button type="button" class="dock-orb" id="fns-orb" aria-label="展开页面入口" aria-expanded="false">
+    <svg class="taiji" viewBox="0 0 24 24" aria-hidden="true">
+      <circle cx="12" cy="12" r="9.1" fill="none" stroke="currentColor" stroke-width="1.35"/>
+      <path d="M12 2.9a4.55 4.55 0 0 1 0 9.1 4.55 4.55 0 0 0 0 9.1" fill="currentColor"/>
+      <circle cx="12" cy="7.45" r="1.3" fill="var(--card)"/>
+      <circle cx="12" cy="16.55" r="1.3" fill="currentColor"/>
+    </svg>
+  </button>
+  <span class="dock-thumb" aria-hidden="true"></span>
+  <a class="dock-b" href="/blog" aria-label="名片页 · 目录与推荐" title="目录与推荐在名片页"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M0 1.75A.75.75 0 0 1 .75 1h4.253c1.227 0 2.317.59 3 1.501A3.743 3.743 0 0 1 11.006 1h4.245a.75.75 0 0 1 .75.75v10.5a.75.75 0 0 1-.75.75h-4.507a2.25 2.25 0 0 0-1.591.659l-.622.621a.75.75 0 0 1-1.06 0l-.622-.621A2.25 2.25 0 0 0 5.258 13H.75a.75.75 0 0 1-.75-.75Zm7.251 10.324.004-5.073-.002-2.253A2.25 2.25 0 0 0 5.003 2.5H1.5v9h3.757a3.75 3.75 0 0 1 1.994.574ZM8.755 4.75l-.004 7.322a3.752 3.752 0 0 1 1.992-.572H14.5v-9h-3.495a2.25 2.25 0 0 0-2.25 2.25Z"/></svg></a>
+  <a class="dock-b" href="/blog" aria-label="推荐在名片页" title="推荐在名片页"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 .25a.75.75 0 0 1 .673.418l1.882 3.815 4.21.612a.75.75 0 0 1 .416 1.279l-3.046 2.97.719 4.192a.751.751 0 0 1-1.088.791L8 12.347l-3.766 1.98a.75.75 0 0 1-1.088-.79l.72-4.194L.818 6.374a.75.75 0 0 1 .416-1.28l4.21-.611L7.327.668A.75.75 0 0 1 8 .25Z"/></svg></a>
+  <a class="dock-b" href="/blog/walk" aria-label="漫游 · 随机打开一篇笔记"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M13.25 1c.966 0 1.75.784 1.75 1.75v10.5c0 .464-.184.909-.513 1.237A1.746 1.746 0 0 1 13.25 15H2.75c-.464 0-.909-.184-1.237-.513A1.746 1.746 0 0 1 1 13.25V2.75C1 1.784 1.784 1 2.75 1h10.5ZM2.75 2.5a.25.25 0 0 0-.25.25v10.5c0 .138.112.25.25.25h10.5a.25.25 0 0 0 .25-.25V2.75a.25.25 0 0 0-.25-.25H2.75Z"/><path d="M5 12a1 1 0 1 0 0-2 1 1 0 0 0 0 2Zm6-6a1 1 0 1 0 0-2 1 1 0 0 0 0 2ZM8 9a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z"/></svg></a>
+  <a class="dock-b" href="/blog" aria-label="活跃度在名片页" title="活跃度在名片页"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M6 2c.306 0 .582.187.696.471L10 10.731l1.304-3.26A.751.751 0 0 1 12 7h3.25a.75.75 0 0 1 0 1.5h-2.742l-1.812 4.528a.751.751 0 0 1-1.392 0L6 4.77 4.696 8.03A.75.75 0 0 1 4 8.5H.75a.75.75 0 0 1 0-1.5h2.742l1.812-4.529A.751.751 0 0 1 6 2Z"/></svg></a>
+  <button type="button" class="dock-b" id="dock-ask" aria-label="问道 · 向知识库提问" aria-expanded="false"{{if .AskEnabled}} data-ask-open{{else}} data-ask-off="1" title="问答未启用：需要在 config.yaml 里打开 ai.enabled"{{end}}><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M1.75 1h8.5c.966 0 1.75.784 1.75 1.75v5.5A1.75 1.75 0 0 1 10.25 10H7.061l-2.574 2.573A1.458 1.458 0 0 1 2 11.543V10h-.25A1.75 1.75 0 0 1 0 8.25v-5.5C0 1.784.784 1 1.75 1ZM1.5 2.75v5.5c0 .138.112.25.25.25h1a.75.75 0 0 1 .75.75v2.19l2.72-2.72a.749.749 0 0 1 .53-.22h3.5a.25.25 0 0 0 .25-.25v-5.5a.25.25 0 0 0-.25-.25h-8.5a.25.25 0 0 0-.25.25Zm13 2a.25.25 0 0 0-.25-.25h-.5a.75.75 0 0 1 0-1.5h.5c.966 0 1.75.784 1.75 1.75v5.5A1.75 1.75 0 0 1 14.25 12H14v1.543a1.458 1.458 0 0 1-2.487 1.03L9.22 12.28a.749.749 0 0 1 .326-1.275.749.749 0 0 1 .734.215l2.22 2.22v-2.19a.75.75 0 0 1 .75-.75h1a.25.25 0 0 0 .25-.25Z"/></svg></button>
+</div>{{end}}
 
 {{define "card"}}<li class="post-card">
   <a class="card-link" href="/blog/{{.Slug}}">
@@ -270,22 +315,30 @@ var blogCardTmpl = template.Must(template.New("blog-card").Funcs(blogAssetFuncs)
      正是那种会产生「点了没反应」的双所有者状态。 -->
 <div class="card-sheets">
   <aside class="card-sheet sheet-nav" aria-label="目录">{{template "blognav" .}}</aside>
-  {{if .Hot}}<aside class="card-sheet sheet-rec" aria-label="推荐">
-    <div class="nav-title">推荐</div>
+  {{if .Recs}}<aside class="card-sheet sheet-rec" aria-label="推荐">
+    <div class="nav-title">推荐 · 最近更新的栏目</div>
     <ul class="rec">
-      {{range .Hot}}<li><a href="/blog/{{.Slug}}">{{.Title}}</a>{{if .Summary}}<p>{{.Summary}}</p>{{end}}</li>{{end}}
+      {{range .Recs}}<li><a href="/blog/{{.Slug}}"><span class="rec-name">{{.Name}}</span><b class="rec-upd">{{.Updated}}</b></a>{{if .Desc}}<p>{{.Desc}}</p>{{end}}<span class="rec-meta">{{.Count}} 篇 · {{.Words}} 字</span></li>{{end}}
     </ul>
   </aside>{{end}}
 </div>
 
 <div class="fns-scrim" id="fns-scrim" hidden></div>
-<div class="dock" id="fns-dock" role="group" aria-label="页面入口" data-slot="0">
+<div class="dock dock-collapsible" id="fns-dock" role="group" aria-label="页面入口" data-slot="0">
+  <button type="button" class="dock-orb" id="fns-orb" aria-label="展开页面入口" aria-expanded="false">
+    <svg class="taiji" viewBox="0 0 24 24" aria-hidden="true">
+      <circle cx="12" cy="12" r="9.1" fill="none" stroke="currentColor" stroke-width="1.35"/>
+      <path d="M12 2.9a4.55 4.55 0 0 1 0 9.1 4.55 4.55 0 0 0 0 9.1" fill="currentColor"/>
+      <circle cx="12" cy="7.45" r="1.3" fill="var(--card)"/>
+      <circle cx="12" cy="16.55" r="1.3" fill="currentColor"/>
+    </svg>
+  </button>
   <span class="dock-thumb" aria-hidden="true"></span>
   <button type="button" class="dock-b" data-i="0" id="dock-nav" aria-label="目录" aria-expanded="false"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M0 1.75A.75.75 0 0 1 .75 1h4.253c1.227 0 2.317.59 3 1.501A3.743 3.743 0 0 1 11.006 1h4.245a.75.75 0 0 1 .75.75v10.5a.75.75 0 0 1-.75.75h-4.507a2.25 2.25 0 0 0-1.591.659l-.622.621a.75.75 0 0 1-1.06 0l-.622-.621A2.25 2.25 0 0 0 5.258 13H.75a.75.75 0 0 1-.75-.75Zm7.251 10.324.004-5.073-.002-2.253A2.25 2.25 0 0 0 5.003 2.5H1.5v9h3.757a3.75 3.75 0 0 1 1.994.574ZM8.755 4.75l-.004 7.322a3.752 3.752 0 0 1 1.992-.572H14.5v-9h-3.495a2.25 2.25 0 0 0-2.25 2.25Z"/></svg></button>
   <button type="button" class="dock-b" data-i="1" id="dock-hot" aria-label="推荐" aria-expanded="false"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 .25a.75.75 0 0 1 .673.418l1.882 3.815 4.21.612a.75.75 0 0 1 .416 1.279l-3.046 2.97.719 4.192a.751.751 0 0 1-1.088.791L8 12.347l-3.766 1.98a.75.75 0 0 1-1.088-.79l.72-4.194L.818 6.374a.75.75 0 0 1 .416-1.28l4.21-.611L7.327.668A.75.75 0 0 1 8 .25Z"/></svg></button>
   <button type="button" class="dock-b" data-i="2" id="dock-walk" aria-label="漫游 · 随机打开一篇笔记"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M13.25 1c.966 0 1.75.784 1.75 1.75v10.5c0 .464-.184.909-.513 1.237A1.746 1.746 0 0 1 13.25 15H2.75c-.464 0-.909-.184-1.237-.513A1.746 1.746 0 0 1 1 13.25V2.75C1 1.784 1.784 1 2.75 1h10.5ZM2.75 2.5a.25.25 0 0 0-.25.25v10.5c0 .138.112.25.25.25h10.5a.25.25 0 0 0 .25-.25V2.75a.25.25 0 0 0-.25-.25H2.75Z"/><path d="M5 12a1 1 0 1 0 0-2 1 1 0 0 0 0 2Zm6-6a1 1 0 1 0 0-2 1 1 0 0 0 0 2ZM8 9a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z"/></svg></button>
   <button type="button" class="dock-b" data-i="3" id="dock-live" aria-label="活跃度"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M6 2c.306 0 .582.187.696.471L10 10.731l1.304-3.26A.751.751 0 0 1 12 7h3.25a.75.75 0 0 1 0 1.5h-2.742l-1.812 4.528a.751.751 0 0 1-1.392 0L6 4.77 4.696 8.03A.75.75 0 0 1 4 8.5H.75a.75.75 0 0 1 0-1.5h2.742l1.812-4.529A.751.751 0 0 1 6 2Z"/></svg></button>
-  <button type="button" class="dock-b" data-i="4" id="dock-ask" aria-label="问道 · 向知识库提问" aria-expanded="false" data-ask-open><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M1.75 1h8.5c.966 0 1.75.784 1.75 1.75v5.5A1.75 1.75 0 0 1 10.25 10H7.061l-2.574 2.573A1.458 1.458 0 0 1 2 11.543V10h-.25A1.75 1.75 0 0 1 0 8.25v-5.5C0 1.784.784 1 1.75 1ZM1.5 2.75v5.5c0 .138.112.25.25.25h1a.75.75 0 0 1 .75.75v2.19l2.72-2.72a.749.749 0 0 1 .53-.22h3.5a.25.25 0 0 0 .25-.25v-5.5a.25.25 0 0 0-.25-.25h-8.5a.25.25 0 0 0-.25.25Zm13 2a.25.25 0 0 0-.25-.25h-.5a.75.75 0 0 1 0-1.5h.5c.966 0 1.75.784 1.75 1.75v5.5A1.75 1.75 0 0 1 14.25 12H14v1.543a1.458 1.458 0 0 1-2.487 1.03L9.22 12.28a.749.749 0 0 1 .326-1.275.749.749 0 0 1 .734.215l2.22 2.22v-2.19a.75.75 0 0 1 .75-.75h1a.25.25 0 0 0 .25-.25Z"/></svg></button>
+  <button type="button" class="dock-b" data-i="4" id="dock-ask" aria-label="问道 · 向知识库提问" aria-expanded="false"{{if .AskEnabled}} data-ask-open{{else}} data-ask-off="1" title="问答未启用：需要在 config.yaml 里打开 ai.enabled"{{end}}><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M1.75 1h8.5c.966 0 1.75.784 1.75 1.75v5.5A1.75 1.75 0 0 1 10.25 10H7.061l-2.574 2.573A1.458 1.458 0 0 1 2 11.543V10h-.25A1.75 1.75 0 0 1 0 8.25v-5.5C0 1.784.784 1 1.75 1ZM1.5 2.75v5.5c0 .138.112.25.25.25h1a.75.75 0 0 1 .75.75v2.19l2.72-2.72a.749.749 0 0 1 .53-.22h3.5a.25.25 0 0 0 .25-.25v-5.5a.25.25 0 0 0-.25-.25h-8.5a.25.25 0 0 0-.25.25Zm13 2a.25.25 0 0 0-.25-.25h-.5a.75.75 0 0 1 0-1.5h.5c.966 0 1.75.784 1.75 1.75v5.5A1.75 1.75 0 0 1 14.25 12H14v1.543a1.458 1.458 0 0 1-2.487 1.03L9.22 12.28a.749.749 0 0 1 .326-1.275.749.749 0 0 1 .734.215l2.22 2.22v-2.19a.75.75 0 0 1 .75-.75h1a.25.25 0 0 0 .25-.25Z"/></svg></button>
 </div>
 
 <script>{{.DockJS}}</script>
@@ -333,11 +386,11 @@ var blogListTmpl = template.Must(template.New("blog-list").Funcs(blogAssetFuncs)
   </main>
 
   <aside class="list-rail">
-    {{if .Hot}}
+    {{if .Recs}}
     <div class="card card-rail">
-      <h2 class="rail-title">推荐</h2>
+      <h2 class="rail-title">推荐 · 最近更新</h2>
       <ul class="rec">
-        {{range .Hot}}<li><a href="/blog/{{.Slug}}">{{.Title}}</a>{{if .Summary}}<p>{{.Summary}}</p>{{end}}</li>{{end}}
+        {{range .Recs}}<li><a href="/blog/{{.Slug}}"><span class="rec-name">{{.Name}}</span><b class="rec-upd">{{.Updated}}</b></a>{{if .Desc}}<p>{{.Desc}}</p>{{end}}<span class="rec-meta">{{.Count}} 篇 · {{.Words}} 字</span></li>{{end}}
       </ul>
     </div>
     {{end}}
@@ -346,6 +399,8 @@ var blogListTmpl = template.Must(template.New("blog-list").Funcs(blogAssetFuncs)
 
 {{template "blogfooter" .}}
 </div>
+{{template "navdock" .}}
+{{if .DockJS}}<script>{{.DockJS}}</script>{{end}}
 {{if .TintJS}}<script>{{.TintJS}}</script>{{end}}
 {{if .WarpJS}}<script>{{.WarpJS}}</script>{{end}}
 <script src="/blog/feed.js?v={{assetVer}}" defer></script>
@@ -387,6 +442,8 @@ var blogArchivesTmpl = template.Must(template.New("blog-archives").Funcs(blogAss
 
 {{template "blogfooter" .}}
 </div>
+{{template "navdock" .}}
+{{if .DockJS}}<script>{{.DockJS}}</script>{{end}}
 {{if .WarpJS}}<script>{{.WarpJS}}</script>{{end}}
 <script src="/blog/feed.js?v={{assetVer}}" defer></script>
 <script src="/blog/lightbox.js?v={{assetVer}}" defer></script>

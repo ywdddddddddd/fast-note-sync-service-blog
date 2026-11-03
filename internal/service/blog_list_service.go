@@ -78,6 +78,7 @@ func (s *shareService) GetBlogList(ctx context.Context, uid int64, baseURL strin
 		PrevURL:    prevURL,
 		NextURL:    nextURL,
 		AllEntries: entries,
+		Recs:       home.Recs,
 	}, nil
 }
 

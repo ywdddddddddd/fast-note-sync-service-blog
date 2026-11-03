@@ -64,14 +64,11 @@ func serveBlogList(c *gin.Context, appContainer *app.App, shareSvc service.Share
 		return
 	}
 
-	reactions := shareSvc.GetBlogReactions()
-	// The recommendation rail ranks against the whole set, not the current page: a short last page
-	// would otherwise produce a shorter rail than page one, and the rail's height would jump while
-	// the reader pages through.
+	// Recommendations rank folders, not articles, and they come from the whole published set —
+	// the same list the card page's capsule shows.
 	//
-	// 推荐右栏依据全集排序，而不是当前页：否则最后一页条目少时右栏会比第一页短，
-	// 读者翻页时右栏高度会跳。
-	list.Hot = blogHotList(reactions, list.AllEntries, blogHotLimit)
+	// 推荐排的是文件夹而不是文章，且来自整个已发布集合——与名片页胶囊展示的是同一份。
+	list.Hot = nil
 	canonical := strings.TrimRight(base, "/") + "/blog/all"
 	if section != "" {
 		canonical = strings.TrimRight(base, "/") + "/blog/c/" + section
@@ -110,7 +107,8 @@ func serveBlogList(c *gin.Context, appContainer *app.App, shareSvc service.Share
 		PagerLinks: list.Pages,
 		PrevURL:    list.PrevURL,
 		NextURL:    list.NextURL,
-		Hot:        list.Hot,
+		Recs:       list.Recs,
+		DockJS:     template.JS(blogNavDockJS()),
 		AskEnabled: blogAskEnabled(appContainer),
 	}); err != nil {
 		blogFail(c, appContainer, err.Error())
@@ -197,8 +195,10 @@ func serveBlogArchives(c *gin.Context, appContainer *app.App, shareSvc service.S
 			Nav:         home.Nav.Tree,
 			WarpJS:      template.JS(blogWarpJS()),
 		},
-		Years: years,
-		Total: total,
+		Years:      years,
+		Total:      total,
+		DockJS:     template.JS(blogNavDockJS()),
+		AskEnabled: blogAskEnabled(appContainer),
 	}); err != nil {
 		blogFail(c, appContainer, err.Error())
 		return
