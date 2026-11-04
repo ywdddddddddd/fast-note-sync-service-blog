@@ -115,8 +115,22 @@ const blogSheetScript = `
     // Only the top strip drags. Making the whole panel draggable would fight the content's own
     // scrolling: the reader would try to scroll a long nav tree and instead resize the sheet.
     //
+    // The strip has to be bounded on all four sides. This used to test only the bottom edge —
+    // ev.clientY - rect.top > DRAG_ZONE — which is negative for any press *above* the panel, so
+    // every click anywhere on the page sailed through: the press claimed the pointer with
+    // setPointerCapture, added is-dragging, and the element actually pressed never saw its click.
+    // With the panel open the whole page stopped responding, and the scrim — which closes the panel
+    // on click — stopped closing it too, because the scrim never received the click either.
+    //
     // 只有顶部一条可拖。整块可拖会和内容滚动打架：读者想滚长目录，结果把面板拉了。
-    if (ev.clientY - rect.top > DRAG_ZONE) return;
+    //
+    // 这条热区必须四边都卡住。这里曾经只判断下边界——
+    // ev.clientY - rect.top 大于 DRAG_ZONE——而点在面板**上方**时这个值是负数，于是整页任何一处
+    // 按下都能通过：那次按压会用 setPointerCapture 抢走指针、加上 is-dragging，
+    // 真正被按的元素再也收不到自己的 click。面板一开整页就失去响应，
+    // 连「点遮罩关面板」也失效了，因为遮罩同样收不到 click。
+    if (ev.clientX < rect.left || ev.clientX > rect.right) return;
+    if (ev.clientY < rect.top || ev.clientY > rect.top + DRAG_ZONE) return;
 
     drag = {
       el: el,
