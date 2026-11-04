@@ -1079,13 +1079,38 @@ const blogGraphEngineJS string = `import { forceSimulation, forceManyBody, force
   // 在同一帧里加，动画会从一个浏览器从未绘制过的状态开始。
   var OPEN = false;
 
+  // The backdrop belongs to the sheet, not to the panel.
+  //
+  // On a phone the panel rises from the bottom edge and covers most of the viewport; a scrim is how
+  // a sheet says "the page is behind me". On a desktop the same markup is a 24rem card parked in the
+  // bottom-right corner with the article still readable beside it. Putting a 34% foreground scrim
+  // over the whole page there does not describe a sheet — it just dims the article, and because the
+  // backdrop also owns a click handler that closes the panel, it swallows every click on the page.
+  // One press on anything outside the card closed the panel instead of doing what was pressed, and
+  // the page read as dead. That is what "cannot click" meant.
+  //
+  // 遮罩属于抽屉，不属于侧栏。
+  //
+  // 手机上这块面板从底边升起、占掉大半个视口，遮罩正是「抽屉把页面压到后面」的说法。
+  // 桌面上同一段标记是一张停在右下角的 24rem 卡片，正文就在它旁边、依然可读。
+  // 在那里盖一层 34% 前景色并不描述一个抽屉，它只是让文章变暗；
+  // 而遮罩本身还绑着「点击关闭面板」，于是它把页面上所有点击都吃掉了：
+  // 按卡片外面的任何东西都只是把面板关掉，而不是执行被按下的那件事，整页读起来是死的。
+  // 这就是「无法点击」的意思。
+  var SHEET = window.matchMedia('(max-width: 860px)');
+
+  function syncBackdrop() {
+    if (!backdrop) { return; }
+    backdrop.hidden = !(OPEN && SHEET.matches);
+  }
+
   function openPanel() {
     if (OPEN) { return; }
     OPEN = true;
-    if (backdrop) { backdrop.hidden = false; }
     panel.hidden = false;
     fab.setAttribute('aria-expanded', 'true');
     root.classList.add('gr-on');
+    syncBackdrop();
     requestAnimationFrame(function () { requestAnimationFrame(function () {
       root.classList.add('gr-in');
       // The card was display:none until this moment, so it measured 0x0 and nothing could be
@@ -1124,7 +1149,7 @@ const blogGraphEngineJS string = `import { forceSimulation, forceManyBody, force
       settled = true;
       clearTimeout(guard);
       panel.hidden = true;
-      if (backdrop) { backdrop.hidden = true; }
+      syncBackdrop();
       root.classList.remove('gr-on');
       panel.removeEventListener('transitionend', onEnd);
     };
@@ -1132,6 +1157,11 @@ const blogGraphEngineJS string = `import { forceSimulation, forceManyBody, force
     guard = setTimeout(done, 520);
     panel.addEventListener('transitionend', onEnd);
   }
+
+  // Crossing the breakpoint while open must re-decide the scrim, not leave the previous answer.
+  // 打开状态下跨过断点，要重新决定遮罩，而不是沿用上一次的答案。
+  if (SHEET.addEventListener) { SHEET.addEventListener('change', syncBackdrop); }
+  else if (SHEET.addListener) { SHEET.addListener(syncBackdrop); }
 
   fab.addEventListener('click', function () { if (OPEN) { closePanel(); } else { openPanel(); } });
   if (collapseBtn) { collapseBtn.addEventListener('click', closePanel); }
