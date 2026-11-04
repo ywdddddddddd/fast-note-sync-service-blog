@@ -362,12 +362,25 @@ func blogCoverDTO(c *blogCover) *dto.BlogCoverDTO {
 	if c == nil || c.URL == "" {
 		return nil
 	}
+	// A cover that never declared `cover-zoom` parses to the zero value, and the card applies this
+	// number as a CSS scale — zero would make the image disappear entirely. Clamp to the same
+	// range the parser accepts so "no zoom" means "1×" everywhere downstream.
+	//
+	// 没写 `cover-zoom` 的封面会解析成零值，而卡片把这个数字当作 CSS scale ——
+	// 零会让图片彻底消失。夹到解析器接受的同一区间，让「没有缩放」在下游一律等于 1×。
+	zoom := c.Zoom
+	if zoom < blogCoverMinZoom {
+		zoom = blogCoverMinZoom
+	}
+	if zoom > blogCoverMaxZoom {
+		zoom = blogCoverMaxZoom
+	}
 	return &dto.BlogCoverDTO{
 		URL:    c.URL,
 		Kind:   c.Kind,
 		FocusX: c.FocusX,
 		FocusY: c.FocusY,
-		Zoom:   c.Zoom,
+		Zoom:   zoom,
 	}
 }
 
