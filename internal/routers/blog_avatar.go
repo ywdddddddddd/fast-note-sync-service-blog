@@ -22,6 +22,37 @@ import (
 //go:embed assets/avatar.jpg
 var blogAvatarJPEG []byte
 
+// The site icon is the owner's own artwork, embedded for the same reasons as the portrait: it is
+// not vault content, it must survive a machine with empty storage, and a stable URL can be cached.
+//
+// 站点图标是站主自己的图案，嵌入的理由与头像相同：它不是仓库内容、在存储为空的机器上也必须能出图，
+// 而稳定的 URL 才可以放心缓存。
+//
+//go:embed assets/icon.svg
+var blogIconSVG []byte
+
+const blogIconURL = "/blog/icon.svg"
+
+// registerBlogIconRoute serves the embedded icon.
+// registerBlogIconRoute 提供内嵌站点图标。
+func registerBlogIconRoute(r *gin.Engine, appContainer *app.App) {
+	r.GET(blogIconURL, func(c *gin.Context) {
+		if _, ok := blogEnabled(c, appContainer); !ok {
+			return
+		}
+		c.Header("Cache-Control", "public, max-age=604800")
+		c.Data(http.StatusOK, "image/svg+xml", blogIconSVG)
+	})
+	// Browsers still ask for /favicon.ico unprompted, and a 404 there leaves a blank tab icon in
+	// clients that ignore the <link> element. Redirecting is enough: they follow it once.
+	//
+	// 浏览器仍会不请自来地请求 /favicon.ico，而那里的 404 会让忽略 link 元素的客户端留一个空白标签图标。
+	// 重定向就够了：它们会跟随一次。
+	r.GET("/favicon.ico", func(c *gin.Context) {
+		c.Redirect(http.StatusMovedPermanently, blogIconURL)
+	})
+}
+
 // blogAvatarURL is the single place the default portrait address is written.
 // blogAvatarURL 是默认头像地址的唯一出处。
 const blogAvatarURL = "/blog/avatar.jpg"

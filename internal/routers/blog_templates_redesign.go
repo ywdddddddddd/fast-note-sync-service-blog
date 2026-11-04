@@ -20,6 +20,8 @@ var blogChromePartials = `
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{{.Title}}</title>
+<link rel="icon" type="image/svg+xml" href="/blog/icon.svg">
+<link rel="apple-touch-icon" href="/blog/icon.svg">
 {{if not .Indexable}}<meta name="robots" content="noindex, nofollow">{{end}}
 <meta name="theme-color" content="#eae9e3">
 <meta name="description" content="{{.Description}}">

@@ -399,6 +399,8 @@ var blogPostTmpl = template.Must(template.New("blog-post").Funcs(blogAssetFuncs)
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
+<link rel="icon" type="image/svg+xml" href="/blog/icon.svg">
+<link rel="apple-touch-icon" href="/blog/icon.svg">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{{.Title}}</title>
 {{if not .Indexable}}<meta name="robots" content="noindex, nofollow">{{end}}
@@ -937,6 +939,8 @@ var blogPageTmpl = template.Must(template.New("blog-page").Funcs(blogAssetFuncs)
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
+<link rel="icon" type="image/svg+xml" href="/blog/icon.svg">
+<link rel="apple-touch-icon" href="/blog/icon.svg">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{{.PageTitle}} · {{.SiteName}}</title>
 {{if not .Indexable}}<meta name="robots" content="noindex, nofollow">{{end}}
@@ -1242,6 +1246,8 @@ var blogErrorTmpl = template.Must(template.New("blog-error").Funcs(blogAssetFunc
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
+<link rel="icon" type="image/svg+xml" href="/blog/icon.svg">
+<link rel="apple-touch-icon" href="/blog/icon.svg">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{{.Title}}</title>
 <meta name="robots" content="noindex, nofollow">

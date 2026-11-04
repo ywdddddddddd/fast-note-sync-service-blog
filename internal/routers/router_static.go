@@ -235,6 +235,7 @@ func registerShareRoutes(r *gin.Engine, frontendFiles embed.FS, appContainer *ap
 	// The embedded portrait for the card page. Gated by the same switch as the blog itself.
 	// 名片页的内嵌头像。与博客本身受同一个开关约束。
 	registerBlogAvatarRoute(r, appContainer)
+	registerBlogIconRoute(r, appContainer)
 
 	// Blog Q&A: streaming answer endpoint plus its front-end bundle (ai.enabled = true).
 	// 博客问答：流式回答端点及其前端脚本（ai.enabled = true）。
