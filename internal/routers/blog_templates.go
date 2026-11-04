@@ -23,6 +23,15 @@ var blogAssetVer = strconv.FormatInt(time.Now().Unix(), 36)
 // blogAssetFuncs 供模板把版本号拼进 src 属性。
 var blogAssetFuncs = template.FuncMap{
 	"assetVer": func() string { return blogAssetVer },
+	// The theme script is a template function rather than a field on every view: there are six
+	// separate <head> blocks across four files, and adding a field would have meant touching six
+	// view structs — every one of which could be forgotten, leaving that page stuck in light mode
+	// after the reader had chosen dark.
+	//
+	// 主题脚本做成模板函数而不是每个 view 的字段：四个文件里有六个独立 <head>，
+	// 加字段意味着改六个 view 结构体——而其中任何一个都可能被漏掉，
+	// 那一页就会在读者选了暗色之后依然停在亮色。
+	"themejs": func() template.JS { return template.JS(blogThemeScript) },
 }
 
 // Blog templates. Everything is rendered on the server, so the pages work with JavaScript
@@ -401,6 +410,7 @@ var blogPostTmpl = template.Must(template.New("blog-post").Funcs(blogAssetFuncs)
 <meta charset="utf-8">
 <link rel="icon" type="image/svg+xml" href="/blog/icon.svg">
 <link rel="apple-touch-icon" href="/blog/icon.svg">
+<script>{{themejs}}</script>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{{.Title}}</title>
 {{if not .Indexable}}<meta name="robots" content="noindex, nofollow">{{end}}
@@ -941,6 +951,7 @@ var blogPageTmpl = template.Must(template.New("blog-page").Funcs(blogAssetFuncs)
 <meta charset="utf-8">
 <link rel="icon" type="image/svg+xml" href="/blog/icon.svg">
 <link rel="apple-touch-icon" href="/blog/icon.svg">
+<script>{{themejs}}</script>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{{.PageTitle}} · {{.SiteName}}</title>
 {{if not .Indexable}}<meta name="robots" content="noindex, nofollow">{{end}}
@@ -1248,6 +1259,7 @@ var blogErrorTmpl = template.Must(template.New("blog-error").Funcs(blogAssetFunc
 <meta charset="utf-8">
 <link rel="icon" type="image/svg+xml" href="/blog/icon.svg">
 <link rel="apple-touch-icon" href="/blog/icon.svg">
+<script>{{themejs}}</script>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{{.Title}}</title>
 <meta name="robots" content="noindex, nofollow">
