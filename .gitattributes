@@ -1,0 +1,13 @@
+# Embedded site assets are byte-exact inputs to go:embed, not source files.
+#
+# Git's default core.autocrlf on Windows rewrites line endings on checkout, which would change the
+# bytes of everything under assets/ — the Lottie JSON keyframes and the minified player would come
+# back a few hundred bytes larger and different from what was downloaded. -text turns that off for
+# the whole directory so a fresh clone produces the same embed inputs.
+#
+# 内嵌站点资源是 go:embed 的逐字节输入，不是源码。
+#
+# Windows 上默认的 core.autocrlf 会在 checkout 时改写行尾，于是 assets/ 下每个文件的字节都会变——
+# Lottie 的关键帧与压缩过的播放器会变大几百字节，且与下载时不同。-text 对整个目录关掉这件事，
+# 使重新 clone 得到的仍是同一份 embed 输入。
+internal/routers/assets/** -text
