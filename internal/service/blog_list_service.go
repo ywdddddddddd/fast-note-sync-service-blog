@@ -98,6 +98,13 @@ func (s *shareService) GetBlogList(ctx context.Context, uid int64, baseURL strin
 		kicker = sub
 		basePath = root + "/blog/c/" + url.PathEscape(section) + "/" + url.PathEscape(sub)
 		entries = blogFilterSubSection(home.Entries, section, sub)
+		// A sub-section is the last level, so its notes are a sequence rather than a feed: order
+		// them by their own heading number. /blog/all keeps newest-first because "everything" has
+		// no sequence to preserve — its only useful order is recency.
+		//
+		// 二级栏目是最后一层，因此它的笔记是一个序列而不是一条信息流：按标题编号排。
+		// /blog/all 保持最新在前，因为「全部」没有序列要保住——它唯一有用的顺序就是新旧。
+		blogSortByHeading(entries)
 		size = blogSubPageSize
 		// No rail here: the reader has already narrowed to one course, and a list of sibling
 		// courses beside it would only invite them to leave.

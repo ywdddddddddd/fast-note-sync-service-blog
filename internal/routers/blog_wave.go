@@ -1,34 +1,44 @@
 package routers
 
-// The dot grid becomes a surface that keeps moving.
+// The dot grid becomes a lit surface.
 //
-// The static grid is a CSS radial-gradient repeating every 20px, and it stays exactly where it is
-// for narrow screens — a WebGL canvas that re-renders the whole viewport every frame is a bad trade
-// on a phone, and the grid reads fine at that size anyway. Above 861px it is replaced by a shader
-// that draws the same 20px pitch and lights the dots where a wave passes.
+// This is a port of the PatternWaves reference the owner supplied: a field pass computes, per grid
+// cell, a height from a layered silk wave, derives a normal from that height's gradient, and shades
+// it with a diffuse term plus a tight specular highlight. A second pass then draws each dot sized and
+// faded by the shaded level. The visible consequence is that the grid stops being flat texture and
+// starts behaving like a fabric being breathed on — bright ridges travel across it and the dots along
+// a ridge swell.
 //
-// The waves are self-touching: nothing emits them but the page itself. A backdrop that only reacts
-// to the pointer is motionless whenever the reader is reading, which is most of the time — so the
-// surface is given its own slow random heartbeat instead, at random positions, forever.
+// Three things are deliberately different from the reference:
 //
-// 点阵变成一片永不静止的表面。
+//   - No ogl. The reference depends on a WebGL wrapper for render targets and program setup; this is
+//     one self-contained script with the same three passes. A wrapper here would be a second runtime
+//     to keep alive for about forty lines of state.
+//   - The dot colour comes from the stylesheet's --dot, not from a prop. The static grid and the
+//     shader must be the same colour or the theme switch makes one of them wrong, and the stylesheet
+//     is where the theme already lives.
+//   - Ripples are self-touching as well as pointer-driven. A surface that only reacts to a pointer is
+//     motionless whenever nobody is pointing at it, which is most of the time.
 //
-// 静态网格是一条每 20px 重复的 CSS 径向渐变，它在窄屏上原样保留——每帧重绘整块视口的 WebGL
-// 画布在手机上是笔亏本买卖，而网格在那个尺寸下本来就够看。861px 以上才换成着色器：
-// 同样的 20px 间距，只在波经过的地方点亮那些点。
+// 点阵变成一片被打光的表面。
 //
-// 波是「自触」的：除了页面自己，没有别的东西发出它。一片只在指针动时才反应的背景，
-// 在读者真正阅读的时候就是静止的——而那占据了绝大部分时间。所以这片表面有自己的、
-// 缓慢随机的脉搏：随机位置、永不停歇。
+// 这是站主给的 PatternWaves 参考实现的移植：field 这一趟按格子算出 silk 波形的高度，由高度梯度
+// 求出法线，再用漫反射加一道很紧的高光上色；第二趟按着色后的亮度决定每个点的大小与浓淡。
+// 可见的变化是网格不再是平的纹理，而开始像一块被呼吸吹动的织物——亮的脊线会扫过它，
+// 脊线上的点随之涨大。
+//
+// 与参考实现有三处刻意不同：
+//
+//   - 不用 ogl。参考实现依赖一个 WebGL 封装来管理渲染目标与程序装配；这里是同一个三趟管线、
+//     一个自包含脚本。为了约四十行状态而引入第二个运行时并不划算。
+//   - 点色取自样式表的 --dot，而不是从属性传入。静态网格与着色器必须是同一种颜色，
+//     否则主题一换就有一个是错的，而主题本来就住在样式表里。
+//   - 涟漪既由指针驱动，也自己发生。一片只在有人指向时才动的表面，在没人指的时候就是静止的，
+//     而那是绝大部分时间。
 const blogWaveJS = `
 (function () {
   'use strict';
 
-  // Only the two pages that are read rather than scanned. A list page's background competing with
-  // fifteen cover images is noise; a card page has room for it.
-  //
-  // 只给两个「用来读」而不是「用来扫」的页面。列表页的背景与十五张封面抢注意力是噪音，
-  // 名片页有容得下它的空白。
   var body = document.body;
   if (!body) { return; }
   if (!body.classList.contains('is-home') && !body.classList.contains('is-page')) { return; }
@@ -40,47 +50,6 @@ const blogWaveJS = `
   var calm = window.matchMedia('(prefers-reduced-motion: reduce)');
   if (!desk.matches || calm.matches) { return; }
 
-  var VERT = [
-    'attribute vec2 aPos;',
-    'void main(){ gl_Position = vec4(aPos, 0.0, 1.0); }'
-  ].join('\n');
-
-  // The dot is drawn analytically rather than sampled from a texture: the grid is regular, so the
-  // distance to the nearest cell centre is all a fragment needs, and that stays crisp at any DPR
-  // without a single texel of storage.
-  //
-  // 点是解析式画出来的，不是从纹理采样：网格是规则的，因此一个片元只需要「到最近格心的距离」，
-  // 而这样在任意 DPR 下都锐利，且不占一个纹素。
-  var FRAG = [
-    'precision mediump float;',
-    'uniform vec2 uRes;',
-    'uniform float uDpr;',
-    'uniform vec3 uDot;',
-    'uniform float uPitch;',
-    'uniform float uTime;',
-    'uniform vec3 uWave[6];',
-    'uniform int uCount;',
-    'void main() {',
-    '  vec2 px = gl_FragCoord.xy / uDpr;',
-    '  px.y = uRes.y - px.y;',                 // WebGL 的原点在左下，翻成与 CSS 一致的从上往下
-    '  vec2 cell = mod(px, uPitch) - uPitch * 0.5;',
-    '  float d = length(cell);',
-    '  float dotMask = 1.0 - smoothstep(0.62, 1.30, d);',
-    '  float amp = 0.0;',
-    '  for (int i = 0; i < 6; i++) {',
-    '    if (i < uCount) {',
-    '      float age = uTime - uWave[i].z;',
-    '      if (age >= 0.0 && age <= 2.4) {',
-    '        float dist = length(px - uWave[i].xy);',
-    '        float band = (dist - age * 300.0) / 110.0;',
-    '        amp += exp(-band * band) * exp(-age * 1.15);',
-    '      }',
-    '    }',
-    '  }',
-    '  gl_FragColor = vec4(uDot, dotMask * (0.55 + amp * 2.40));',
-    '}'
-  ].join('\n');
-
   var canvas = document.createElement('canvas');
   canvas.className = 'wave-bg';
   canvas.setAttribute('aria-hidden', 'true');
@@ -88,201 +57,574 @@ const blogWaveJS = `
 
   var gl = null;
   try {
-    gl = canvas.getContext('webgl', { alpha: true, antialias: false, depth: false, stencil: false, powerPreference: 'low-power' });
+    gl = canvas.getContext('webgl2', {
+      alpha: true, antialias: false, depth: false, stencil: false,
+      premultipliedAlpha: true, powerPreference: 'low-power'
+    });
   } catch (e) { gl = null; }
 
-  function drop() {
-    if (canvas.parentNode) { canvas.parentNode.removeChild(canvas); }
-  }
+  function drop() { if (canvas.parentNode) { canvas.parentNode.removeChild(canvas); } }
   if (!gl) { drop(); return; }
+
+  // ── shaders ─────────────────────────────────────────────────────────
+  var VERT = [
+    '#version 300 es',
+    'in vec2 position;',
+    'void main() { gl_Position = vec4(position, 0.0, 1.0); }'
+  ].join('\n');
+
+  var FIELD = [
+    '#version 300 es',
+    'precision highp float;',
+    'precision highp int;',
+    'uniform vec2 uSize;',
+    'uniform float uDpr;',
+    'uniform vec2 uOrigin;',
+    'uniform vec2 uPitch;',
+    'uniform float uTime;',
+    'uniform float uUnit;',
+    'uniform vec2 uHeading;',
+    'uniform float uAmp;',
+    'uniform float uDepth;',
+    'uniform vec3 uLight;',
+    'uniform float uShine;',
+    'uniform float uContrast;',
+    'uniform float uOpacity;',
+    'uniform int uFade;',
+    'uniform float uFadeSize;',
+    'uniform float uAppear;',
+    'uniform sampler2D tRipple;',
+    'uniform float uRipple;',
+    'out vec4 fragColor;',
+    'const float FOLDS = 5.5;',
+    'uvec3 scramble(uvec3 v) {',
+    '  v = v * 1664525u + 1013904223u;',
+    '  v.x += v.y * v.z; v.y += v.z * v.x; v.z += v.x * v.y;',
+    '  v ^= v >> 16u;',
+    '  v.x += v.y * v.z; v.y += v.z * v.x; v.z += v.x * v.y;',
+    '  return v;',
+    '}',
+    'vec3 lattice(vec3 corner) {',
+    '  uvec3 h = scramble(uvec3(ivec3(corner) + 4096));',
+    '  return vec3(h & 65535u) / 32767.5 - 1.0;',
+    '}',
+    'float gradientNoise(vec3 p) {',
+    '  vec3 i = floor(p);',
+    '  vec3 f = p - i;',
+    '  vec3 u = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);',
+    '  float n000 = dot(lattice(i), f);',
+    '  float n100 = dot(lattice(i + vec3(1.0, 0.0, 0.0)), f - vec3(1.0, 0.0, 0.0));',
+    '  float n010 = dot(lattice(i + vec3(0.0, 1.0, 0.0)), f - vec3(0.0, 1.0, 0.0));',
+    '  float n110 = dot(lattice(i + vec3(1.0, 1.0, 0.0)), f - vec3(1.0, 1.0, 0.0));',
+    '  float n001 = dot(lattice(i + vec3(0.0, 0.0, 1.0)), f - vec3(0.0, 0.0, 1.0));',
+    '  float n101 = dot(lattice(i + vec3(1.0, 0.0, 1.0)), f - vec3(1.0, 0.0, 1.0));',
+    '  float n011 = dot(lattice(i + vec3(0.0, 1.0, 1.0)), f - vec3(0.0, 1.0, 1.0));',
+    '  float n111 = dot(lattice(i + vec3(1.0, 1.0, 1.0)), f - vec3(1.0, 1.0, 1.0));',
+    '  return mix(mix(mix(n000, n100, u.x), mix(n010, n110, u.x), u.y),',
+    '             mix(mix(n001, n101, u.x), mix(n011, n111, u.x), u.y), u.z);',
+    '}',
+    // One silk fold: a sine train along the heading, bent by noise across it, with a slow swell so
+    // the ridges do not arrive at a metronome's pace.
+    // 一道丝绸褶皱：沿朝向的正弦列，被横向的噪声弯曲，再叠一层很慢的涌浪，
+    // 使脊线不会以节拍器的节奏到达。
+    'float surface(vec2 p, float t) {',
+    '  vec2 side = vec2(-uHeading.y, uHeading.x);',
+    '  float u = dot(p, uHeading);',
+    '  float v = dot(p, side);',
+    '  float bend = gradientNoise(vec3(v * 0.85, u * 0.3, t * 0.05)) * 1.7 + 0.4 * sin(v * 1.6 + t * 0.2);',
+    '  float phase = u * FOLDS + bend - t * 0.45;',
+    '  float swell = 0.6 + 0.4 * gradientNoise(vec3(u * 0.55 + 3.0, v * 0.45, t * 0.04));',
+    '  float fold = sin(phase) + 0.32 * sin(2.0 * phase + 1.3);',
+    '  float grain = 0.16 * sin(u * FOLDS * 2.5 + bend * 1.9 - t * 0.9 + 2.1);',
+    '  return (fold + grain) * swell;',
+    '}',
+    'float heightAt(vec2 css) {',
+    '  float h = surface((css - 0.5 * uSize) / uUnit, uTime) * uAmp;',
+    '  if (uRipple > 0.0) { h += texture(tRipple, css / uSize).r * uRipple; }',
+    '  return h;',
+    '}',
+    'void main() {',
+    '  vec2 cell = floor(gl_FragCoord.xy);',
+    '  vec2 center = uOrigin + (cell + 0.5) * uPitch;',
+    '  vec2 css = center / uDpr;',
+    '  vec2 uv = css / uSize;',
+    '  float e = max(uPitch.y / uDpr, 4.0);',
+    '  float h = heightAt(css);',
+    '  float hx = (heightAt(css + vec2(e, 0.0)) - heightAt(css - vec2(e, 0.0))) / (2.0 * e);',
+    '  float hy = (heightAt(css + vec2(0.0, e)) - heightAt(css - vec2(0.0, e))) / (2.0 * e);',
+    '  vec2 grad = vec2(hx, hy) * uUnit * uDepth * 0.4;',
+    '  vec3 n = normalize(vec3(-grad, 1.0));',
+    '  float diffuse = clamp(dot(n, uLight), 0.0, 1.0);',
+    '  vec3 halfway = normalize(uLight + vec3(0.0, 0.0, 1.0));',
+    '  float spec = pow(clamp(dot(n, halfway), 0.0, 1.0), 160.0) * uShine * 1.15;',
+    // A second, far wider highlight. The tight one above fires only where a cell's normal points
+    // almost exactly at the halfway vector, which at a 5px pitch is a handful of cells per ridge —
+    // measured, it contributed nothing a reader could see. This one is a broad sheen along the
+    // whole ridge, which is what reads as light travelling across the surface.
+    //
+    // 第二道宽得多的高光。上面那道只在格子的法线几乎正对半角向量时才亮，
+    // 在 5px 间距下一条脊线上只有寥寥几格——实测它没有贡献任何读者看得见的东西。
+    // 这一道是沿整条脊线的柔光，那才是「光在表面上走」的观感来源。
+    '  float sheen = pow(clamp(dot(n, halfway), 0.0, 1.0), 8.0) * uShine * 0.42;',
+    '  float hollow = 0.7 + 0.3 * clamp(h * 0.5 + 0.5, 0.0, 1.0);',
+    '  float tone = clamp(diffuse * hollow * 0.78 + spec + sheen, 0.0, 1.0);',
+    '  tone = clamp((tone - 0.42) * uContrast + 0.42, 0.0, 1.0);',
+    '  float level = pow(tone, 2.2);',
+    '  float fade = 1.0;',
+    '  vec2 c = uv * 2.0 - 1.0;',
+    '  if (uFade == 1) {',
+    '    fade = 1.0 - smoothstep(1.0 - uFadeSize, 1.18, length(c));',
+    '  } else if (uFade == 2) {',
+    '    fade = smoothstep(0.0, uFadeSize, uv.y);',
+    '  }',
+    '  float reach = length(css - 0.5 * uSize) / max(0.5 * length(uSize), 1.0);',
+    '  float appear = smoothstep(reach - 0.05, reach + 0.3, uAppear * 1.35);',
+    '  float alpha = uOpacity * fade * appear;',
+    '  fragColor = vec4(level, alpha, clamp(spec * 1.6, 0.0, 1.0), clamp(h * uDepth * 0.42, -0.48, 0.48) + 0.5);',
+    '}'
+  ].join('\n');
+
+  var RIPPLE = [
+    '#version 300 es',
+    'precision highp float;',
+    'uniform sampler2D tState;',
+    'uniform vec2 uTexel;',
+    'uniform vec2 uSize;',
+    'uniform vec2 uFrom;',
+    'uniform vec2 uTo;',
+    'uniform float uRadius;',
+    'uniform float uImpulse;',
+    'uniform float uDamping;',
+    'out vec4 fragColor;',
+    'void main() {',
+    '  vec2 uv = gl_FragCoord.xy * uTexel;',
+    '  vec2 state = texture(tState, uv).rg;',
+    '  float left = texture(tState, uv - vec2(uTexel.x, 0.0)).r;',
+    '  float right = texture(tState, uv + vec2(uTexel.x, 0.0)).r;',
+    '  float below = texture(tState, uv - vec2(0.0, uTexel.y)).r;',
+    '  float above = texture(tState, uv + vec2(0.0, uTexel.y)).r;',
+    '  float next = ((left + right + below + above) * 0.5 - state.g) * uDamping;',
+    '  vec2 p = uv * uSize;',
+    '  vec2 segment = uTo - uFrom;',
+    '  float along = clamp(dot(p - uFrom, segment) / max(dot(segment, segment), 1e-4), 0.0, 1.0);',
+    '  float d = length(p - uFrom - segment * along) / uRadius;',
+    '  next -= uImpulse * exp(-d * d * 2.0);',
+    '  fragColor = vec4(next, state.r, 0.0, 1.0);',
+    '}'
+  ].join('\n');
+
+  var MARK = [
+    '#version 300 es',
+    'precision highp float;',
+    'uniform sampler2D tField;',
+    'uniform vec2 uOrigin;',
+    'uniform vec2 uPitch;',
+    'uniform vec2 uGrid;',
+    'uniform float uMarkSize;',
+    'uniform vec3 uColor;',
+    'uniform vec3 uFore;',
+    'out vec4 fragColor;',
+    'void main() {',
+    '  vec2 rel = gl_FragCoord.xy - uOrigin;',
+    '  float cx = floor(rel.x / uPitch.x);',
+    '  float row = floor(rel.y / uPitch.y);',
+    '  vec4 ink = vec4(0.0);',
+    '  if (cx >= 0.0 && cx < uGrid.x) {',
+    // The vertical offset of a dot depends on the height of the cell, so neighbouring rows are
+    // sampled too — otherwise a ridge would clip the dots just above and below it.
+    // 一个点的纵向偏移取决于该格的高度，因此也要采样相邻行；
+    // 否则一道脊线会把紧邻它上下两侧的点裁掉。
+    '    for (int k = -1; k <= 1; k++) {',
+    '      float cy = row + float(k);',
+    '      if (cy < 0.0 || cy >= uGrid.y) continue;',
+    '      vec4 f = texelFetch(tField, ivec2(int(cx), int(cy)), 0);',
+    '      if (f.g < 0.002) continue;',
+    '      vec2 center = (vec2(cx, cy) + 0.5) * uPitch + vec2(0.0, (f.a - 0.5) * uPitch.y);',
+    '      float span = uPitch.y * uMarkSize;',
+    '      float area = 0.62 + 0.38 * clamp(sqrt(f.r), 0.0, 1.0);',
+    '      float alpha = clamp(0.5 - (length(rel - center) - 0.5 * span * area), 0.0, 1.0);',
+    '      alpha *= f.g;',
+    '      if (alpha > ink.a) {',
+    '        vec3 tint = mix(uColor, uFore, clamp(f.r * 0.36, 0.0, 1.0));',
+    '        ink = vec4(tint * alpha, alpha);',
+    '      }',
+    '    }',
+    '  }',
+    '  fragColor = ink;',
+    '}'
+  ].join('\n');
 
   function compile(type, src) {
     var s = gl.createShader(type);
     gl.shaderSource(s, src);
     gl.compileShader(s);
-    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) { gl.deleteShader(s); return null; }
+    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) {
+      gl.deleteShader(s);
+      return null;
+    }
     return s;
   }
 
-  var vs = compile(gl.VERTEX_SHADER, VERT);
-  var fs = compile(gl.FRAGMENT_SHADER, FRAG);
-  if (!vs || !fs) { drop(); return; }
+  function program(fragSrc) {
+    var vs = compile(gl.VERTEX_SHADER, VERT);
+    var fs = compile(gl.FRAGMENT_SHADER, fragSrc);
+    if (!vs || !fs) { return null; }
+    var p = gl.createProgram();
+    gl.attachShader(p, vs);
+    gl.attachShader(p, fs);
+    gl.bindAttribLocation(p, 0, 'position');
+    gl.linkProgram(p);
+    if (!gl.getProgramParameter(p, gl.LINK_STATUS)) { return null; }
+    return p;
+  }
 
-  var prog = gl.createProgram();
-  gl.attachShader(prog, vs);
-  gl.attachShader(prog, fs);
-  gl.linkProgram(prog);
-  if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) { drop(); return; }
-  gl.useProgram(prog);
+  var fieldProg = program(FIELD);
+  var rippleProg = program(RIPPLE);
+  var markProg = program(MARK);
+  if (!fieldProg || !markProg) { drop(); return; }
 
-  // One oversized triangle covers the viewport with no index buffer and no seam down the diagonal
-  // that two triangles would have to share.
-  // 一个超大的三角形盖住整个视口：不需要索引缓冲，也没有两个三角形必须共享的那条对角线接缝。
-  var buf = gl.createBuffer();
-  gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+  // ── geometry ────────────────────────────────────────────────────────
+  var vao = gl.createVertexArray();
+  gl.bindVertexArray(vao);
+  var vbo = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
   gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
-  var aPos = gl.getAttribLocation(prog, 'aPos');
-  gl.enableVertexAttribArray(aPos);
-  gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
-  gl.enable(gl.BLEND);
-  gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+  gl.enableVertexAttribArray(0);
+  gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+  gl.bindVertexArray(null);
 
-  var uRes = gl.getUniformLocation(prog, 'uRes');
-  var uDpr = gl.getUniformLocation(prog, 'uDpr');
-  var uDot = gl.getUniformLocation(prog, 'uDot');
-  var uPitch = gl.getUniformLocation(prog, 'uPitch');
-  var uTime = gl.getUniformLocation(prog, 'uTime');
-  var uWave = gl.getUniformLocation(prog, 'uWave');
-  var uCount = gl.getUniformLocation(prog, 'uCount');
-  gl.uniform1f(uPitch, 20.0);
+  var uField = {};
+  var uRipple = {};
+  var uMark = {};
+  ['uSize', 'uDpr', 'uOrigin', 'uPitch', 'uTime', 'uUnit', 'uHeading', 'uAmp',
+   'uDepth', 'uLight', 'uShine', 'uContrast', 'uOpacity', 'uFade', 'uFadeSize',
+   'uAppear', 'tRipple', 'uRipple'].forEach(function (k) { uField[k] = gl.getUniformLocation(fieldProg, k); });
+  if (rippleProg) {
+    ['tState', 'uTexel', 'uSize', 'uFrom', 'uTo', 'uRadius', 'uImpulse', 'uDamping']
+      .forEach(function (k) { uRipple[k] = gl.getUniformLocation(rippleProg, k); });
+  }
+  ['tField', 'uOrigin', 'uPitch', 'uGrid', 'uMarkSize', 'uColor', 'uFore']
+    .forEach(function (k) { uMark[k] = gl.getUniformLocation(markProg, k); });
 
-  // Read the dot colour from the same custom property the static grid uses, so the two cannot drift
-  // apart when the theme changes.
-  // 点色取自静态网格用的同一个自定义属性，两者不会在主题切换时各走各的。
-  var dotRGB = [0.82, 0.82, 0.82];
-  function readDot() {
-    var raw = '';
-    try { raw = getComputedStyle(body).getPropertyValue('--dot').trim(); } catch (e) { raw = ''; }
-    var hex6 = /^#([0-9a-f]{6})$/i.exec(raw);
-    if (hex6) {
-      var n = parseInt(hex6[1], 16);
-      dotRGB = [((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255];
-      return;
+  // ── render targets ──────────────────────────────────────────────────
+  var floatOk = !!(gl.getExtension('EXT_color_buffer_float') || gl.getExtension('EXT_color_buffer_half_float'));
+
+  function makeTarget(w, h, half) {
+    var tex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    if (half) {
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RG16F, w, h, 0, gl.RG, gl.HALF_FLOAT, null);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    } else {
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
     }
-    var hex3 = /^#([0-9a-f]{3})$/i.exec(raw);
-    if (hex3) {
-      var h = hex3[1];
-      dotRGB = [parseInt(h[0] + h[0], 16) / 255, parseInt(h[1] + h[1], 16) / 255, parseInt(h[2] + h[2], 16) / 255];
-      return;
-    }
-    var rgb = /rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/.exec(raw);
-    if (rgb) { dotRGB = [+rgb[1] / 255, +rgb[2] / 255, +rgb[3] / 255]; }
-  }
-  readDot();
-
-  var dpr = Math.min(window.devicePixelRatio || 1, 2);
-  var W = 0, H = 0;
-  function resize() {
-    // Measure the element, not the window.
-    //
-    // window.innerWidth includes the classic scrollbar's 15px, while a position:fixed box spans
-    // only the viewport it can paint in (1440 vs 1425 on a 1440px window). Sizing the backing store
-    // from innerWidth left the shader one strip too wide, and every wave seeded by Math.random()*W
-    // could land in that invisible strip. clientWidth is the box the canvas actually occupies.
-    //
-    // 量元素，不量窗口。
-    //
-    // window.innerWidth 包含经典滚动条那 15px，而 position:fixed 的盒子只覆盖它能画到的那块视口
-    // （1440px 窗口上是 1425 对 1440）。按 innerWidth 定尺寸会让着色器宽出一条不可见的窄带，
-    // 而每一条用 Math.random()*W 播下的波都可能落进那条带里。clientWidth 才是画布真正占的框。
-    var w = canvas.clientWidth || window.innerWidth;
-    var h = canvas.clientHeight || window.innerHeight;
-    if (w <= 0 || h <= 0) { return; }
-    var cw = Math.round(w * dpr), ch = Math.round(h * dpr);
-    if (canvas.width === cw && canvas.height === ch) { return; }
-    canvas.width = cw;
-    canvas.height = ch;
-    W = w; H = h;
-    gl.viewport(0, 0, cw, ch);
-    gl.uniform2f(uRes, W, H);
-    gl.uniform1f(uDpr, dpr);
-  }
-  resize();
-
-  var MAX = 6;
-  var waves = [];
-  var arr = new Float32Array(MAX * 3);
-  var clock = 0;
-
-  function spawn(x, y) {
-    waves.push({ x: x, y: y, born: clock });
-    while (waves.length > MAX) { waves.shift(); }
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    var fb = gl.createFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+    var ok = gl.checkFramebufferStatus(gl.FRAMEBUFFER) === gl.FRAMEBUFFER_COMPLETE;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    return ok ? { tex: tex, fb: fb, w: w, h: h } : null;
   }
 
-  // The heartbeat. Intervals are irregular on purpose: a fixed period reads as a metronome, and a
-  // metronome is the one thing a "living" surface must not sound like.
+  function freeTarget(t) {
+    if (!t) { return; }
+    gl.deleteFramebuffer(t.fb);
+    gl.deleteTexture(t.tex);
+  }
+
+  // ── palette ─────────────────────────────────────────────────────────
+  // Both colours come from the stylesheet. The dot colour is what the static grid uses; the
+  // foreground is where a wave crest is allowed to brighten to. Without that second one the grid is
+  // invisible on a dark theme: --dot is #333 there, and #333 dots lit to #333 are still #333.
   //
-  // 脉搏。间隔刻意不等长：固定周期读起来像节拍器，而节拍器恰恰是一片「活着的」表面最不该像的东西。
-  var timer = null;
+  // 两种颜色都取自样式表。点色就是静态网格用的那个；前景色是波峰允许提亮到的上限。
+  // 少了后者，暗色主题下整片网格等于不存在：那里 --dot 是 #333，而把 #333 的点「打亮」还是 #333。
+  var dotRGB = [0.82, 0.82, 0.82];
+  var foreRGB = [0.35, 0.34, 0.31];
+
+  function parseVar(name, fallback) {
+    var raw = '';
+    try { raw = getComputedStyle(body).getPropertyValue(name).trim(); } catch (e) { raw = ''; }
+    var h6 = /^#([0-9a-f]{6})$/i.exec(raw);
+    if (h6) {
+      var n = parseInt(h6[1], 16);
+      return [((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255];
+    }
+    var h3 = /^#([0-9a-f]{3})$/i.exec(raw);
+    if (h3) {
+      var s = h3[1];
+      return [parseInt(s[0] + s[0], 16) / 255, parseInt(s[1] + s[1], 16) / 255, parseInt(s[2] + s[2], 16) / 255];
+    }
+    var m = /rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/.exec(raw);
+    if (m) { return [+m[1] / 255, +m[2] / 255, +m[3] / 255]; }
+    return fallback;
+  }
+
+  function readPalette() {
+    dotRGB = parseVar('--dot', dotRGB);
+    foreRGB = parseVar('--foreground', foreRGB);
+  }
+  readPalette();
+
+  // ── tuning (the owner's numbers) ─────────────────────────────────────
+  var SPACING = 5;
+  var MARK_SIZE = 0.62;
+  var DEPTH = 0.9;
+  var LIGHT = 1;
+  var SHINE = 1;
+  var CONTRAST = 1.5;
+  var SPEED = 1.4;
+  var SCALE = 2.0;
+  var DIRECTION = 0;
+  var FADE_MODE = 2;
+  var FADE_SIZE = 0.34;
+  var WAVE_UNIT = 520;
+  var PIXEL_BUDGET = 4.5e6;
+  var INTRO_SECONDS = 2;
+  var RIPPLE_CELL = 8;
+  var RIPPLE_RATE = 60;
+
+  function clamp(v, lo, hi) { return Math.min(Math.max(v, lo), hi); }
+
+  var W = 1, H = 1, dpr = 1;
+  var field = null;
+  var rippleRead = null, rippleWrite = null;
+  var rippleClock = 0, rippleUntil = 0, rippleAmp = 0;
+  var time = 0, introClock = 0;
+
+  function buildTargets() {
+    var pitch = Math.max(4, Math.round(SPACING * dpr));
+    var cols = Math.min(4096, Math.ceil(gl.drawingBufferWidth / pitch) + 1);
+    var rows = Math.min(4096, Math.ceil(gl.drawingBufferHeight / pitch) + 2);
+    if (!field || field.w !== cols || field.h !== rows) {
+      freeTarget(field);
+      field = makeTarget(cols, rows, false);
+    }
+    if (floatOk && rippleProg) {
+      var rw = clamp(Math.ceil(W / RIPPLE_CELL), 4, 512);
+      var rh = clamp(Math.ceil(H / RIPPLE_CELL), 4, 512);
+      if (!rippleRead || rippleRead.w !== rw || rippleRead.h !== rh) {
+        freeTarget(rippleRead);
+        freeTarget(rippleWrite);
+        rippleRead = makeTarget(rw, rh, true);
+        rippleWrite = makeTarget(rw, rh, true);
+      }
+    }
+  }
+
+  function resize() {
+    var cw = canvas.clientWidth || window.innerWidth;
+    var ch = canvas.clientHeight || window.innerHeight;
+    if (cw <= 0 || ch <= 0) { return; }
+    W = cw; H = ch;
+    dpr = Math.min(window.devicePixelRatio || 1, 2, Math.sqrt(PIXEL_BUDGET / (W * H)));
+    var w = Math.round(W * dpr), h = Math.round(H * dpr);
+    if (canvas.width === w && canvas.height === h) { return; }
+    canvas.width = w;
+    canvas.height = h;
+    buildTargets();
+  }
+
+  // ── pointer + self ripples ──────────────────────────────────────────
+  var pointer = { x: 0, y: 0, lastX: 0, lastY: 0, inside: false, placed: false, burst: 0 };
+
+  function locate(e) {
+    var r = canvas.getBoundingClientRect();
+    var x = e.clientX - r.left;
+    var y = e.clientY - r.top;
+    return { x: x, y: y, inside: x >= 0 && y >= 0 && x <= r.width && y <= r.height };
+  }
+
+  function onMove(e) {
+    var p = locate(e);
+    pointer.x = p.x; pointer.y = p.y;
+    if (p.inside !== pointer.inside) { pointer.placed = false; }
+    pointer.inside = p.inside;
+  }
+  function onDown(e) {
+    var p = locate(e);
+    if (!p.inside) { return; }
+    pointer.x = p.x; pointer.y = p.y;
+    if (!pointer.inside) { pointer.lastX = p.x; pointer.lastY = p.y; }
+    pointer.burst = 1.2;
+    pointer.inside = true;
+  }
+  function onLeave() { pointer.inside = false; pointer.placed = false; }
+
+  window.addEventListener('pointermove', onMove, { passive: true });
+  window.addEventListener('pointerdown', onDown, { passive: true });
+  window.addEventListener('pointerup', function (e) { if (e.pointerType === 'touch') { onLeave(); } }, { passive: true });
+  window.addEventListener('blur', onLeave);
+
+  // Self-touch: a ripple nobody asked for, at an irregular interval.
+  // 自触：一次没人要求的涟漪，间隔不等长。
+  var beatTimer = null;
   function beat() {
-    timer = window.setTimeout(function () {
-      if (!document.hidden && W > 0 && H > 0) {
-        spawn(Math.random() * W, Math.random() * H);
+    beatTimer = window.setTimeout(function () {
+      if (!document.hidden && rippleRead) {
+        rippleUntil = performance.now() + 2600;
+        var x = Math.random() * W, y = Math.random() * H;
+        pointer.lastX = x; pointer.lastY = y;
+        pointer.x = x; pointer.y = y;
+        pointer.burst = 0.55;
+        pointer.placed = true;
+        kick();
       }
       beat();
-    }, 380 + Math.random() * 900);
+    }, 1500 + Math.random() * 2600);
   }
-  beat();
-  spawn(W * 0.32, H * 0.34);
-  spawn(W * 0.68, H * 0.58);
 
   var raf = 0;
-  var t0 = performance.now();
+  var last = 0;
 
-  function frame(ts) {
-    clock = (ts - t0) / 1000;
-    while (waves.length && clock - waves[0].born > 2.4) { waves.shift(); }
-    arr.fill(0);
-    for (var i = 0; i < waves.length; i++) {
-      arr[i * 3] = waves[i].x;
-      arr[i * 3 + 1] = waves[i].y;
-      arr[i * 3 + 2] = waves[i].born;
+  function kick() { if (!raf) { last = performance.now(); raf = requestAnimationFrame(frame); } }
+
+  function stepRipple(dt) {
+    if (!rippleRead || !rippleWrite) { return; }
+    rippleClock = Math.min(rippleClock + dt * RIPPLE_RATE, 4);
+    var moved = Math.hypot(pointer.x - pointer.lastX, pointer.y - pointer.lastY);
+    var impulse = (pointer.inside ? Math.min(moved / 14, 1) * 0.35 : 0) + pointer.burst;
+    pointer.burst = 0;
+    gl.useProgram(rippleProg);
+    gl.bindVertexArray(vao);
+    gl.uniform2f(uRipple.uTexel, 1 / rippleRead.w, 1 / rippleRead.h);
+    gl.uniform2f(uRipple.uSize, W, H);
+    gl.uniform2f(uRipple.uFrom, pointer.lastX, H - pointer.lastY);
+    gl.uniform2f(uRipple.uTo, pointer.x, H - pointer.y);
+    gl.uniform1f(uRipple.uRadius, 20);
+    gl.uniform1f(uRipple.uDamping, 0.975);
+    while (rippleClock >= 1) {
+      rippleClock -= 1;
+      gl.bindFramebuffer(gl.FRAMEBUFFER, rippleWrite.fb);
+      gl.viewport(0, 0, rippleWrite.w, rippleWrite.h);
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, rippleRead.tex);
+      gl.uniform1i(uRipple.tState, 0);
+      gl.uniform1f(uRipple.uImpulse, impulse);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+      var t = rippleRead; rippleRead = rippleWrite; rippleWrite = t;
+      impulse = 0;
     }
-    gl.uniform3fv(uWave, arr);
-    gl.uniform1i(uCount, waves.length);
-    gl.uniform1f(uTime, clock);
-    gl.uniform3fv(uDot, dotRGB);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    pointer.lastX = pointer.x;
+    pointer.lastY = pointer.y;
+  }
+
+  function frame(now) {
+    raf = 0;
+    if (!field) { return; }
+    var dt = Math.min(0.05, Math.max(1 / 240, (now - last) / 1000));
+    last = now;
+    time += dt * SPEED;
+    introClock = Math.min(1, introClock + dt / INTRO_SECONDS);
+    var appear = 1 - Math.pow(1 - clamp(introClock / 0.75, 0, 1), 3);
+    var rise = clamp((introClock - 0.1) / 0.9, 0, 1);
+    var amp = rise * rise * (3 - 2 * rise);
+
+    // Ripple amplitude eases instead of switching, so the surface settles rather than snapping
+    // flat the instant the last ripple expires.
+    // 涟漪幅度是渐变的，不是开关：最后一道涟漪结束之后表面慢慢平息，而不是一下子变平。
+    var wantRipple = !!rippleRead && (pointer.inside || pointer.burst > 0 || now < rippleUntil);
+    if (wantRipple) { stepRipple(dt); }
+    var targetAmp = wantRipple ? 0.32 : 0;
+    rippleAmp += (targetAmp - rippleAmp) * Math.min(1, dt * 4);
+    if (rippleAmp < 0.005) { rippleAmp = 0; }
+
+    var heading = (DIRECTION * Math.PI) / 180;
+    var lightAngle = ((DIRECTION + 180 + clamp(LIGHT, -90, 90)) * Math.PI) / 180;
+
+    gl.useProgram(fieldProg);
+    gl.bindVertexArray(vao);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, field.fb);
+    gl.viewport(0, 0, field.w, field.h);
+    gl.uniform2f(uField.uSize, W, H);
+    gl.uniform1f(uField.uDpr, dpr);
+    gl.uniform2f(uField.uOrigin, 0, 0);
+    gl.uniform2f(uField.uPitch, Math.max(4, Math.round(SPACING * dpr)), Math.max(4, Math.round(SPACING * dpr)));
+    gl.uniform1f(uField.uTime, time);
+    gl.uniform1f(uField.uUnit, WAVE_UNIT * SCALE);
+    gl.uniform2f(uField.uHeading, Math.cos(heading), Math.sin(heading));
+    gl.uniform1f(uField.uAmp, amp);
+    gl.uniform1f(uField.uDepth, DEPTH);
+    gl.uniform3f(uField.uLight, Math.cos(lightAngle) * 0.78, Math.sin(lightAngle) * 0.78, 0.62);
+    gl.uniform1f(uField.uShine, SHINE);
+    gl.uniform1f(uField.uContrast, CONTRAST);
+    gl.uniform1f(uField.uOpacity, 1);
+    gl.uniform1i(uField.uFade, FADE_MODE);
+    gl.uniform1f(uField.uFadeSize, FADE_SIZE);
+    gl.uniform1f(uField.uAppear, appear);
+    gl.uniform1f(uField.uRipple, rippleAmp);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, rippleRead ? rippleRead.tex : null);
+    gl.uniform1i(uField.tRipple, 0);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+
+    gl.useProgram(markProg);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.viewport(0, 0, canvas.width, canvas.height);
     gl.clearColor(0, 0, 0, 0);
     gl.clear(gl.COLOR_BUFFER_BIT);
+    gl.enable(gl.BLEND);
+    gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, field.tex);
+    gl.uniform1i(uMark.tField, 0);
+    gl.uniform2f(uMark.uOrigin, 0, 0);
+    gl.uniform2f(uMark.uPitch, Math.max(4, Math.round(SPACING * dpr)), Math.max(4, Math.round(SPACING * dpr)));
+    gl.uniform2f(uMark.uGrid, field.w, field.h);
+    gl.uniform1f(uMark.uMarkSize, MARK_SIZE);
+    gl.uniform3fv(uMark.uColor, dotRGB);
+    gl.uniform3fv(uMark.uFore, foreRGB);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
-    raf = window.requestAnimationFrame(frame);
-  }
-  raf = window.requestAnimationFrame(frame);
+    gl.disable(gl.BLEND);
+    gl.bindVertexArray(null);
 
-  // Stop drawing when the tab is hidden, and resume on a clock that did not jump: carrying the
-  // wall-clock gap into uTime would fire every wave at once on return.
-  //
-  // 标签页隐藏时停止绘制，并在恢复时用没有跳变的时钟：把挂起期间的真实时长带进 uTime，
-  // 会让所有波在回来的那一瞬间同时炸开。
-  document.addEventListener('visibilitychange', function () {
-    if (document.hidden) {
-      window.cancelAnimationFrame(raf);
-      raf = 0;
-    } else if (!raf) {
-      t0 = performance.now() - clock * 1000;
-      raf = window.requestAnimationFrame(frame);
-    }
-  });
-
-  // Re-read the dot colour whenever the theme could have changed. Three routes reach dark mode
-  // (explicit dark, explicit light, follow-system), so both the class and the media query matter.
-  // 主题可能变化时重读点色。到达暗色有三条路（显式 dark、显式 light、跟随系统），
-  // 因此 class 与媒体查询都要看。
-  try {
-    new MutationObserver(readDot).observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
-  } catch (e) {}
-  if (window.matchMedia) {
-    var mq = window.matchMedia('(prefers-color-scheme: dark)');
-    if (mq.addEventListener) { mq.addEventListener('change', readDot); }
-    else if (mq.addListener) { mq.addListener(readDot); }
+    kick();
   }
+
+  resize();
+  beat();
 
   var resizeTimer = null;
   window.addEventListener('resize', function () {
     if (resizeTimer) { window.clearTimeout(resizeTimer); }
-    resizeTimer = window.setTimeout(resize, 120);
+    resizeTimer = window.setTimeout(function () { resize(); kick(); }, 120);
   });
 
-  // Crossing below the breakpoint hands the background back to the static grid.
-  // 跨到断点以下时把背景交还给静态网格。
+  document.addEventListener('visibilitychange', function () {
+    if (document.hidden) {
+      if (raf) { cancelAnimationFrame(raf); raf = 0; }
+    } else {
+      kick();
+    }
+  });
+
+  try {
+    new MutationObserver(readPalette).observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
+  } catch (e) {}
+  if (window.matchMedia) {
+    var mq = window.matchMedia('(prefers-color-scheme: dark)');
+    if (mq.addEventListener) { mq.addEventListener('change', readPalette); }
+    else if (mq.addListener) { mq.addListener(readPalette); }
+  }
+
   function onBreak() {
     if (desk.matches) { return; }
-    window.cancelAnimationFrame(raf);
-    raf = 0;
-    if (timer) { window.clearTimeout(timer); timer = null; }
+    if (raf) { cancelAnimationFrame(raf); raf = 0; }
+    if (beatTimer) { window.clearTimeout(beatTimer); beatTimer = null; }
+    freeTarget(field); field = null;
+    freeTarget(rippleRead); rippleRead = null;
+    freeTarget(rippleWrite); rippleWrite = null;
     drop();
   }
   if (desk.addEventListener) { desk.addEventListener('change', onBreak); }
   else if (desk.addListener) { desk.addListener(onBreak); }
+
+  kick();
 })();
 `

@@ -129,6 +129,9 @@ img{max-width:100%;height:auto;border-radius:.5rem}
   position:fixed;inset:0;z-index:0;
   width:100%;height:100%;display:block;
   pointer-events:none;
+  /* 整块压到 84%。波峰本身已经比原来的静态网格强得多——明色下点会被拉向前景色，
+     对比远比 #d1d1d1 平铺要重。不加这一条，正文段落直接压在波谷与波峰上时会与背景抢注意力。 */
+  opacity:.84;
 }
 @media (prefers-reduced-motion:reduce){.wave-bg{display:none}}
 @media print{.wave-bg{display:none}}
@@ -1280,13 +1283,18 @@ mjx-container[display="true"]{margin:.9rem 0}
 .graphcard-slider:disabled::-webkit-slider-thumb{cursor:default}
 .graphcard-acts{display:flex;align-items:center;gap:.15rem}
 /* 图标刻意比文字更浅:它们是次要操作,不应与「深度」争夺注意力。 */
-.graphcard-icon{display:inline-flex;align-items:center;justify-content:center;width:1.55rem;height:1.55rem;
+.graphcard-icon{display:inline-flex;align-items:center;justify-content:center;width:2rem;height:2rem;
   border:0;border-radius:.5rem;background:transparent;padding:0;cursor:pointer;
   color:color-mix(in srgb,var(--muted-foreground) 78%,transparent);
   transition:background .18s ease,color .18s ease}
 .graphcard-icon svg{width:1rem;height:1rem}
 .graphcard-icon:hover{background:var(--accent);color:var(--foreground)}
-.graphcard-icon:active{transform:scale(.94)}
+/* 按下反馈只改底色，不再缩。
+   原来这里是 transform:scale(.94)：按下瞬间按钮自己缩小，指针若靠近边缘，
+   抬起时就落在缩小后的区域之外，浏览器判定这不是一次 click，于是「按下去有动效、功能没反应」。
+   25×25 的点击区让这件事很容易发生。现在把点击区放到 32×32，
+   并且按下只换底色 —— 命中区域在整个按压过程中保持不变。 */
+.graphcard-icon:active{background:color-mix(in srgb,var(--accent) 70%,var(--foreground) 12%)}
 
 /* ── 图谱配色 ──────────────────────────────────────────────────────────
    直接用参考图实测的色值,不再映射到博客的 --c3/--c4。
@@ -3661,10 +3669,13 @@ body.drawer-rec .sheet-rec{transform:translateY(0)}
 .back-pill:hover{color:var(--foreground);border-color:color-mix(in srgb,var(--border) 40%,var(--foreground))}
 .back-pill svg{width:12px;height:12px}
 
-/* Reading progress ring. It doubles as the back-to-top button: a ring that only reports turns
-   into a control the reader can actually use, and one control is one target to hit. */
+/* 阅读进度环。它同时是回到顶部按钮：一个只负责汇报的环，加上可点击之后就成了读者真能用的控件，
+   而一个控件就是一个要瞄准的目标。
+   位置：右下角两个浮动件必须互不接触。实测 4.6rem 时环的底边在 834，而文章页图谱入口的顶边在 831 ——
+   叠了 3px，且环的 z-index 62 压在入口的 41 之上，于是那个入口的上沿被一条白边盖住。
+   抬到 6rem 之后两者留出 27px 的空隙。 */
 .read-prog{
-  position:fixed;right:1.15rem;bottom:4.6rem;z-index:62;
+  position:fixed;right:1.15rem;bottom:6rem;z-index:62;
   width:42px;height:42px;border-radius:50%;border:1px solid var(--border);
   background:color-mix(in srgb,var(--card) 86%,transparent);
   -webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);
