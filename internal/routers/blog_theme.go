@@ -118,6 +118,20 @@ img{max-width:100%;height:auto;border-radius:.5rem}
   background-size:20px 20px;background-position:center;
   opacity:.5;
 }
+/* The wave canvas takes the static grid's place rather than stacking on top of it: same layer, same
+   box, later in DOM order. It covers the viewport exactly — inset:0 with width/height 100% — so it
+   cannot spill past the edge it belongs to, which is the failure this element is most prone to.
+
+   波纹画布是接替静态网格，而不是叠在它上面：同层、同框、DOM 顺序在后。
+   它严格铺满视口 —— inset:0 加宽高 100% —— 因此不会溢出它所属的那条边，
+   而这正是这个元素最容易出的故障。 */
+.wave-bg{
+  position:fixed;inset:0;z-index:0;
+  width:100%;height:100%;display:block;
+  pointer-events:none;
+}
+@media (prefers-reduced-motion:reduce){.wave-bg{display:none}}
+@media print{.wave-bg{display:none}}
 .shell{position:relative;z-index:1;min-height:100vh;display:flex;flex-direction:column}
 
 /* ── 顶栏：粘性 + 毛玻璃 ───────────────────────────────────────────── */

@@ -287,6 +287,7 @@ func registerBlogRoutes(r *gin.Engine, appContainer *app.App) {
 				Nav:         home.Nav.Tree,
 				TintJS:      template.JS(blogTintJS()),
 				WarpJS:      template.JS(blogWarpJS()),
+				WaveJS:      template.JS(blogWaveJS),
 			},
 			Stats:      home.Stats,
 			Profile:    home.Profile,
@@ -714,6 +715,7 @@ func serveBlogPage(c *gin.Context, appContainer *app.App, shareSvc service.Share
 		TOC:         toc,
 		HasMath:     strings.Contains(page.HTML, "math-inline") || strings.Contains(page.HTML, "math-block"),
 		WarpJS:      template.JS(blogWarpJS()),
+		WaveJS:      template.JS(blogWaveJS),
 		AskEnabled:  blogAskEnabled(appContainer),
 	}); err != nil {
 		blogFail(c, appContainer, err.Error())

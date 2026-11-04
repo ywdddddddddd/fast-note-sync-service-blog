@@ -928,6 +928,10 @@ type blogPageView struct {
 	// WarpJS is the arriving half of the warp transition. See blogPostView.WarpJS.
 	// WarpJS 是穿越过渡中「抵达」的那一半。见 blogPostView.WarpJS。
 	WarpJS template.JS
+	// WaveJS is the dot-grid wave background. Only the card page and page notes carry it — see
+	// blogWaveJS for why a list page does not.
+	// WaveJS 是点阵波纹背景。只有名片页与页面笔记带它——列表页为何不带，见 blogWaveJS。
+	WaveJS template.JS
 	// 备案号：空表示不渲染那一行。见 config.BlogConfig.ICP。
 	ICP     string
 	MPS     string
@@ -1030,6 +1034,7 @@ var blogPageTmpl = template.Must(template.New("blog-page").Funcs(blogAssetFuncs)
   </footer>
 </div>
 {{if .WarpJS}}<script>{{.WarpJS}}</script>{{end}}
+{{if .WaveJS}}<script>{{.WaveJS}}</script>{{end}}
 {{if .TOC}}<script>
 /* 目录滚动高亮 —— 与文章页同一段渐进增强；脚本不执行时目录链接仍可点击跳转。 */
 (function () {

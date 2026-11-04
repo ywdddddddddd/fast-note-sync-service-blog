@@ -43,9 +43,13 @@ type blogChrome struct {
 	Nav      []dto.BlogNavNode
 
 	// TintJS paints each card's hover colour from its own cover. WarpJS is the page transition.
+	// WaveJS is the dot-grid wave background, carried only by the card page and page notes.
+	//
 	// TintJS 从每张卡片自己的封面取色，用来画悬停色；WarpJS 是页面过渡。
+	// WaveJS 是点阵波纹背景，只有名片页与页面笔记带。
 	TintJS template.JS
 	WarpJS template.JS
+	WaveJS template.JS
 }
 
 // blogCardView is the card page: identity, heat, and nothing else.

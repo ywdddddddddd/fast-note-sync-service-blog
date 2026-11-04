@@ -257,6 +257,7 @@ var blogCardTmpl = template.Must(template.New("blog-card").Funcs(blogAssetFuncs)
 <script>{{.DockJS}}</script>
 {{if .StatsJS}}<script>{{.StatsJS}}</script>{{end}}
 {{if .WarpJS}}<script>{{.WarpJS}}</script>{{end}}
+{{if .WaveJS}}<script>{{.WaveJS}}</script>{{end}}
 {{if .AskEnabled}}
 <div id="ask-root"></div>
 <script src="/blog/ask.js?v={{assetVer}}" defer></script>
