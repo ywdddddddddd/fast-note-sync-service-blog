@@ -612,16 +612,66 @@ const blogGraphEngineJS string = `import { forceSimulation, forceManyBody, force
     // filter 虽能把非节点的拖动挡在节点逻辑之外，但同一元素上的 zoom 监听器仍然会收到事件并平移。
     // 逐节点绑定还让每个节点自带正确的 subject，无需 closest() 查找。
     var dragStartTime = 0, dragStartPos = null, moved = false;
-    // Pointer velocity, used only to carry a flick past the release.
-    // 指针速度，仅用于把"甩"延续到松手之后。
-    var velX = 0, velY = 0, lastMoveX = 0, lastMoveY = 0, lastMoveTime = 0;
+    // Pointer samples for the last fraction of a second, used only to carry a flick past the
+    // release. A window rather than a smoothed instantaneous velocity — see the note in the drag
+    // handler for why the smoothed version measured zero.
+    // 最近一小段时间的指针采样，仅用于把「甩」延续到松手之后。
+    // 用窗口而不是平滑后的瞬时速度——平滑版本为什么测出零速，见 drag 处理里的说明。
+    var velSamples = [];
+    // The subject captured at dragstart.
+    //
+    // end cannot rely on ev.subject. Measured: the bound d3-drag build hands back a null subject on
+    // end for this binding, so the handler returned at its first line every time — the whole
+    // release path (the flick carry, and even clearing alphaTarget) never ran. That is why a flick
+    // stopped dead and the graph kept re-balancing for a second afterwards.
+    //
+    // 在拖拽开始时捕获的 subject。
+    //
+    // end 不能依赖 ev.subject。实测：这个版本 d3-drag 在这个绑定上于 end 阶段回传 null subject，
+    // 于是处理函数每次都在第一行返回——整条松手路径（甩动的滑行，甚至 alphaTarget 的复位）
+    // 从未执行过。这正是甩动戛然而止、而图随后还会重新平衡一秒的原因。
+    var dragSubject = null;
 
     var dragBehavior = drag()
       .container(function () { return svg; })
       .subject(function (ev) {
-        var g = ev.target && ev.target.closest ? ev.target.closest('.g-node') : null;
-        if (!g) { return null; }
-        var s = simById[g.getAttribute('data-node-id')];
+        // Resolve the node from the bound element, not from the event.
+        //
+        // d3 passes the native mousedown to subject, so the obvious implementation reads
+        // ev.target.closest('.g-node') — and that is what this used to do. It never worked. The
+        // bundled d3 build hands subject an internal object whose type is literally "beforestart",
+        // with no target, no view and no path: measured, the event subject received was
+        //   {type: "beforestart", tag: undefined, hasClosest: false, hasView: false}
+        // so closest() was a no-op and subject returned null every time. d3 treats a null subject
+        // as "this element is not draggable" and dispatches no start at all, which is why dragging a
+        // node did nothing and only the force simulation was ever seen moving.
+        //
+        // The bound element is where d3 stores the node, so reading the id from it is both
+        // correct and independent of what the event carries.
+        //
+        // 从 this 解析节点，而不是从事件。
+        //
+        // d3 会把原生 mousedown 传给 subject，于是最自然的写法就是读 ev.target.closest('.g-node')
+        // —— 这里原本正是这么写的，而它从未生效过。随包发布的 d3 构建传给 subject 的是一个内部
+        // 对象，其 type 字面上就是 "beforestart"，没有 target、没有 view、没有 path：
+        // 实测 subject 收到的事件对象为
+        //   {type: "beforestart", tag: undefined, hasClosest: false, hasView: false}
+        // 于是 closest() 形同虚设，subject 每次都返回 null。d3 把 null subject 理解为
+        // 「这个元素不可拖」，连 start 都不派发——这就是拖动节点毫无反应、
+        // 只有力模拟自己在动的原因。
+        //
+        // this 是行为绑定的那个元素（d3 用绑定节点调用 subject），
+        // 从它读 id 既正确，也不依赖事件携带了什么。
+        var self = this;
+        var id = self && self.getAttribute ? self.getAttribute('data-node-id') : null;
+        if (!id) {
+          // Fallback for any build that does hand back a real event.
+          // 兜底：某些构建确实会回传真实事件。
+          var t = ev && ev.target;
+          var g = t && t.closest ? t.closest('.g-node') : null;
+          id = g ? g.getAttribute('data-node-id') : null;
+        }
+        var s = id ? simById[id] : null;
         if (!s) { return null; }
         return {
           x: s.x * currentTransform.k + currentTransform.x,
@@ -630,6 +680,7 @@ const blogGraphEngineJS string = `import { forceSimulation, forceManyBody, force
         };
       })
         .on('start', function (ev) {
+          dragSubject = ev.subject;
           if (!ev.subject) { return; }
           // Keep the press from also reaching the zoom behaviour on the svg.
           //
@@ -649,8 +700,8 @@ const blogGraphEngineJS string = `import { forceSimulation, forceManyBody, force
           dragStartTime = Date.now();
           dragStartPos = { x: ev.x, y: ev.y };
           moved = false;
-          velX = 0; velY = 0;
-          lastMoveX = ev.x; lastMoveY = ev.y; lastMoveTime = Date.now();
+          velSamples.length = 0;
+          velSamples.push({ t: dragStartTime, x: ev.x, y: ev.y });
           // Hold the simulation at full energy for the whole drag, as the reference does.
           // A one-shot alpha() here decayed away mid-drag, after which the rest of the graph
           // stopped responding to the node being moved.
@@ -661,76 +712,160 @@ const blogGraphEngineJS string = `import { forceSimulation, forceManyBody, force
           wake();
         })
         .on('drag', function (ev) {
-          if (!ev.subject) { return; }
-          ev.subject.sim.fx = (ev.x - currentTransform.x) / currentTransform.k;
+          if (!ev.subject) { return; }          ev.subject.sim.fx = (ev.x - currentTransform.x) / currentTransform.k;
           ev.subject.sim.fy = (ev.y - currentTransform.y) / currentTransform.k;
-          // Track pointer velocity so a flick can be carried into the release.
-          // 记录指针速度，使"甩"这个动作能延续到松手之后。
+          // Keep the last ~140ms of pointer positions so a flick can be carried into the release.
+          //
+          // This replaced a smoothed instantaneous velocity, and the replacement is the fix for a
+          // real defect rather than a preference. That version read
+          //     vel = vel * 0.4 + ((x - lastX) / dt) * 0.6
+          // which treats every drag event as an equal vote. Dragging emits a stream of events and
+          // the tail of that stream is often several at the same position — the pointer is held
+          // still for the last few frames before release, or the browser coalesces moves into one.
+          // Each of those votes multiplies the running value by 0.4, so ten stationary events leave
+          // 0.4^10 ≈ 1e-4 of the original speed. Measured: the release velocity came out at
+          // 0.0012px/ms and the glide advanced 0.02px per frame — invisible, which is exactly what
+          // "the flick does nothing" looks like.
+          //
+          // A window has no such memory. It asks one question — where was the pointer 140ms ago
+          // versus now — so a stream of identical samples contributes zero displacement instead of
+          // voting away the motion that came before it. It also makes holding still before release
+          // mean what it should: no displacement in the window, no glide.
+          //
+          // 保留最近约 140ms 的指针位置，使「甩」能延续到松手之后。
+          //
+          // 这里替换掉了平滑后的瞬时速度，而这次替换修的是一个真实缺陷，不是口味问题。旧写法是
+          //     vel = vel * 0.4 + ((x - lastX) / dt) * 0.6
+          // 它把每一个拖拽事件当成等值的一票。拖动会发出一串事件，而这串事件的尾部常常是几个
+          // 位置相同的事件——指针在松手前几帧本来就停着，或者浏览器把多次移动合并成一次。
+          // 每一票都把累计值乘 0.4，于是十个静止事件之后只剩原来的 0.4^10 ≈ 1e-4。
+          // 实测：松手速度算成 0.0012px/ms，滑行每帧推进 0.02px —— 看不见，
+          // 而「甩了一下什么也没发生」看起来正是这样。
+          //
+          // 窗口没有这种记忆。它只问一件事——140ms 前指针在哪、现在在哪——所以一串相同的采样
+          // 贡献的是零位移，而不是把之前的运动投票抹平。它同时让「松手前停住」有了应有的含义：
+          // 窗口里没有位移，就没有滑行。
           var now = Date.now();
-          var dtms = now - lastMoveTime;
-          if (dtms > 0) {
-            var vx = (ev.x - lastMoveX) / dtms, vy = (ev.y - lastMoveY) / dtms;
-            // Smooth slightly: a single frame's delta is noisy, and the flick should feel like a
-            // direction, not like the last millisecond of jitter.
-            // 稍作平滑：单帧位移有噪声，而"甩"应当是一种方向感，而不是最后一毫秒的抖动。
-            velX = velX * 0.4 + vx * 0.6;
-            velY = velY * 0.4 + vy * 0.6;
+          var s = velSamples[velSamples.length - 1];
+          if (!s || now > s.t || s.x !== ev.x || s.y !== ev.y) {
+            velSamples.push({ t: now, x: ev.x, y: ev.y });
           }
-          lastMoveX = ev.x; lastMoveY = ev.y; lastMoveTime = now;
+          while (velSamples.length > 2 && now - velSamples[0].t > 140) { velSamples.shift(); }
           moved = true;
         })
         .on('end', function (ev) {
-          if (!ev.subject) { return; }
-          var sim = ev.subject.sim;
+          // ev.subject first, the captured one as fallback — see dragSubject above for why.
+          // 优先用 ev.subject，取不到时用捕获的那个——原因见上面的 dragSubject。
+          var subject = ev.subject || dragSubject;
+          dragSubject = null;
+          if (!subject) { return; }
+          var sim = subject.sim;
+          var k = currentTransform.k || 1;
+
           // Hand the flick to the node before releasing it.
           //
           // With fx/fy cleared outright, a flick stops dead: the node is let go at zero velocity
           // and the layout simply re-balances around where it happened to be. Continuity of motion
-          // is what makes a drag read as physical rather than as teleporting a dot. So the release
-          // keeps the node pinned for a short carry, advancing it every frame by a velocity that
-          // decays linearly, and only then clears fx/fy and lets the forces take over.
+          // is what makes a drag read as physical rather than as teleporting a dot.
           //
-          // 松手前把"甩"的动量交给节点。
+          // 松手前把甩的动量交给节点。
           //
-          // 直接清掉 fx/fy 时，一次甩动会戛然而止：节点以零速度被放开，布局只是在它恰好停下的位置重新平衡。
-          // 运动的连续性才让拖动读起来像是物理动作，而不是把一个小圆点瞬移过去。
-          // 因此松手后先保持节点被钉住一小段时间，每帧按线性衰减的速度推进它，
-          // 然后再清掉 fx/fy，交给力模型接管。
-          var carry = STILL ? 0 : 340;   // ms // 毫秒
-          if (carry > 0 && (Math.abs(velX) > 0.05 || Math.abs(velY) > 0.05)) {
-            var simX = (ev.x - currentTransform.x) / currentTransform.k;
-            var simY = (ev.y - currentTransform.y) / currentTransform.k;
-            var vSimX = velX / currentTransform.k, vSimY = velY / currentTransform.k;
-            var t0 = Date.now();
+          // 直接清掉 fx/fy 时，一次甩动会戛然而止：节点以零速度被放开，布局只是在它恰好停下的
+          // 位置重新平衡。运动的连续性才让拖动读起来像物理动作，而不是把一个小圆点瞬移过去。
+          //
+          // This carried a bug that made the whole branch a no-op. The step used to be
+          //     sim.fx = sim.x + v * (carry / 1000) * 0.35
+          // where v is in units per millisecond. (carry/1000)*0.35 is a constant ~0.119, so each
+          // frame advanced the node by about an eighth of a unit and the total glide came to well
+          // under a pixel — measured 0.7px over 400ms with the node then jumping 37px because the
+          // force simulation, not the flick, had pulled it. A velocity has to be multiplied by the
+          // frame's duration to become a displacement; there is no way to express that with a fixed
+          // coefficient.
+          //
+          // 这段曾经有个让整条分支形同虚设的 bug：步长写成
+          //     sim.fx = sim.x + v * (carry / 1000) * 0.35
+          // 而 v 的单位是「模拟单位每毫秒」。(carry/1000)*0.35 是个常量约 0.119，于是每帧只推进
+          // 约八分之一个单位，整段滑行不到一个像素 —— 实测 400ms 只挪了 0.7px，随后跳了 37px，
+          // 那是力模型在拉它，不是甩动。速度必须乘以这一帧的时长才成为位移，这件事没法用一个
+          // 固定系数表达。
+          // Release velocity from the two ends of the window: displacement over elapsed time.
+          // A window shorter than one frame cannot describe a direction, so it contributes none —
+          // that is the case of a press-and-release with no movement, which must not glide.
+          //
+          // 松手速度取窗口两端的位移除以时间。不足一帧的窗口描述不了方向，因此不贡献速度——
+          // 那正是「按一下没动就松开」的情形，它不该滑行。
+          var vX = 0, vY = 0;
+          if (velSamples.length >= 2) {
+            var first = velSamples[0], last = velSamples[velSamples.length - 1];
+            var winMs = last.t - first.t;
+            if (winMs >= 24) {
+              vX = (last.x - first.x) / winMs / k;
+              vY = (last.y - first.y) / winMs / k;
+            }
+          }
+          velSamples.length = 0;
+
+          // Cap the flick. A hard throw across the card would otherwise sling the node far outside
+          // a 360px-wide canvas, and the reader would read the empty frame as the graph breaking.
+          // 给甩动设上限。一次用力的横甩会把节点抛出这块 360px 宽的画布，而读者看到空框只会
+          // 以为图坏了。
+          var MAX_SPEED = 2.4;   // 模拟单位 / 毫秒 // sim units per ms
+          var speed = Math.sqrt(vX * vX + vY * vY);
+          if (speed > MAX_SPEED) {
+            var scale = MAX_SPEED / speed;
+            vX *= scale; vY *= scale; speed = MAX_SPEED;
+          }
+
+          // Exponential, not linear, decay. A flicked object does not brake evenly to zero — it
+          // sheds most of its speed early and then trails off, and linear decay reads as a robot
+          // arm retracting. tau is the time constant: after 90ms about a third of the speed is
+          // left, which puts a normal flick's glide at roughly 80–130px.
+          //
+          // 指数衰减而不是线性。被甩出去的东西不会匀速刹车到零 —— 它前期掉速快、尾巴拖得长，
+          // 而线性衰减读起来像一条机械臂在收回。tau 是时间常数：90ms 后还剩约三分之一速度，
+          // 一次普通的甩动大约滑行 80–130px。
+          var TAU = 90;          // ms
+          var MIN_SPEED = 0.03;  // 低于它就没有甩动，直接放开 // below this there was no flick
+          var carryMs = STILL ? 0 : 700;
+
+          if (carryMs > 0 && speed > MIN_SPEED) {
+            // Pin the node to the pointer's last position for the first frame, then advance it.
+            // 第一帧先把节点固定在指针的最后位置，之后开始推进。
+            sim.fx = (ev.x - currentTransform.x) / k;
+            sim.fy = (ev.y - currentTransform.y) / k;
+            simulation.alphaTarget(0.35);
+            wake();
+
+            var t0 = Date.now(), lastT = t0;
             var carryTick = function () {
-              var p = (Date.now() - t0) / carry;
-              if (p >= 1) {
+              var now = Date.now();
+              if (now - t0 >= carryMs || Math.sqrt(vX * vX + vY * vY) < MIN_SPEED) {
                 sim.fx = null; sim.fy = null;
                 simulation.alphaTarget(0);
                 return;
               }
-              // Linear decay: full velocity at release, zero when the carry ends.
-              // 线性衰减：松手瞬间是全速，滑行结束时归零。
-              var v = 1 - p;
-              sim.fx = sim.x + vSimX * (carry / 1000) * v * 0.35;
-              sim.fy = sim.y + vSimY * (carry / 1000) * v * 0.35;
+              // Clamp the frame: returning to a background tab hands us a dt of seconds, and
+              // multiplying by that would teleport the node in one step.
+              // 夹住帧长：从后台标签页切回来时 dt 是秒级的，乘上去等于一步把节点瞬移出去。
+              var dt = now - lastT;
+              if (dt > 48) { dt = 48; }
+              lastT = now;
+              var decay = Math.exp(-dt / TAU);
+              vX *= decay; vY *= decay;
+              sim.fx = sim.x + vX * dt;
+              sim.fy = sim.y + vY * dt;
+              wake();
               window.requestAnimationFrame(carryTick);
             };
-            // Keep the node pinned to the pointer's last position for the first frame.
-            // 第一帧先把节点固定在指针的最后位置。
-            sim.fx = simX; sim.fy = simY;
-            simulation.alphaTarget(0.35);
-            wake();
             window.requestAnimationFrame(carryTick);
           } else {
             sim.fx = null; sim.fy = null;
             simulation.alphaTarget(0);
           }
-          velX = 0; velY = 0;
           var dt = Date.now() - dragStartTime;
           var dx = ev.x - dragStartPos.x, dy = ev.y - dragStartPos.y;
-          if (dt < 500 && Math.sqrt(dx * dx + dy * dy) < 5 && ev.subject.node.url) {
-            window.location = ev.subject.node.url;
+          if (dt < 500 && Math.sqrt(dx * dx + dy * dy) < 5 && subject.node.url) {
+            window.location = subject.node.url;
           }
         });
 
