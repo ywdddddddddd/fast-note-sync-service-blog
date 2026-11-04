@@ -9,6 +9,7 @@ import (
 	"math/big"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -313,19 +314,43 @@ func registerBlogRoutes(r *gin.Engine, appContainer *app.App) {
 	// 注册在 "/blog/:slug" 之前，使这些静态段的意图不会含糊：gin 无论如何都优先静态子节点，
 	// 但顺序说明了 /blog/all 是一个页面，而不是一篇 slug 恰好叫 all 的笔记。
 	blog.GET("/blog/all", func(c *gin.Context) {
-		serveBlogList(c, appContainer, shareSvc, "", 1)
+		serveBlogList(c, appContainer, shareSvc, "", "", 1)
 	})
 	blog.GET("/blog/all/:page", func(c *gin.Context) {
 		if n, ok := blogPageParam(c, appContainer, "全部笔记"); ok {
-			serveBlogList(c, appContainer, shareSvc, "", n)
+			serveBlogList(c, appContainer, shareSvc, "", "", n)
 		}
 	})
 	blog.GET("/blog/c/:section", func(c *gin.Context) {
-		serveBlogList(c, appContainer, shareSvc, c.Param("section"), 1)
+		serveBlogList(c, appContainer, shareSvc, c.Param("section"), "", 1)
 	})
-	blog.GET("/blog/c/:section/:page", func(c *gin.Context) {
-		if n, ok := blogPageParam(c, appContainer, "版块"); ok {
-			serveBlogList(c, appContainer, shareSvc, c.Param("section"), n)
+	// The second segment after /blog/c/<section> is either a page number or a sub-section name.
+	//
+	// Both live at the same depth, so one pattern has to serve them and the handler decides. The
+	// alternative — /blog/s/<section>/<sub> for sub-sections — buys an unambiguous route tree at
+	// the cost of a second prefix for the same taxonomy, and a reader who has learned
+	// /blog/c/口腔笔记 would then have to learn a second address for its children.
+	//
+	// /blog/c/<版块> 之后的第二段，要么是页码，要么是二级栏目名。
+	//
+	// 两者处在同一深度，因此必须由同一个模式服务、由处理函数来分辨。另一种做法是为二级栏目
+	// 另开 /blog/s/<版块>/<二级>：换来一棵不会有歧义的路由树，代价是同一套分类多一个前缀，
+	// 而一个已经记住 /blog/c/口腔笔记 的读者，还得再记住它的子目录的第二个地址。
+	blog.GET("/blog/c/:section/:seg", func(c *gin.Context) {
+		section, seg := c.Param("section"), c.Param("seg")
+		if n, err := strconv.Atoi(seg); err == nil {
+			if n < 1 {
+				blogPageParam(c, appContainer, "版块")
+				return
+			}
+			serveBlogList(c, appContainer, shareSvc, section, "", n)
+			return
+		}
+		serveBlogList(c, appContainer, shareSvc, section, seg, 1)
+	})
+	blog.GET("/blog/c/:section/:seg/:page", func(c *gin.Context) {
+		if n, ok := blogPageParam(c, appContainer, c.Param("seg")); ok {
+			serveBlogList(c, appContainer, shareSvc, c.Param("section"), c.Param("seg"), n)
 		}
 	})
 	blog.GET("/blog/archives", func(c *gin.Context) {

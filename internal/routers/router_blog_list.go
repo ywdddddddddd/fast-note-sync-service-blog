@@ -14,17 +14,18 @@ import (
 	"github.com/haierkeys/fast-note-sync-service/internal/service"
 )
 
-// serveBlogList renders /blog/all and /blog/c/<section>.
+// serveBlogList renders /blog/all, /blog/c/<section> and /blog/c/<section>/<sub>.
 //
-// The two pages are one handler because they differ only in which entries they slice: same
-// template, same rail, same pager. Splitting them would duplicate the chrome assembly, and the
-// chrome is exactly what drifted between pages in the previous design.
+// The three pages are one handler because they differ only in which entries they slice and which
+// card shape they use: same template, same rail assembly, same pager. Splitting them would
+// duplicate the chrome, and the chrome is exactly what drifted between pages in the previous
+// design.
 //
-// serveBlogList 渲染 /blog/all 与 /blog/c/<版块>。
+// serveBlogList 渲染 /blog/all、/blog/c/<版块> 与 /blog/c/<版块>/<二级>。
 //
-// 两个页面共用一个处理函数，因为它们只差「切哪一批条目」：同一个模板、同一条右栏、同一个分页器。
-// 把它们拆开会复制一遍外壳组装，而外壳正是上一版页面之间发生漂移的那部分。
-func serveBlogList(c *gin.Context, appContainer *app.App, shareSvc service.ShareService, section string, page int) {
+// 三个页面共用一个处理函数，因为它们只差「切哪一批条目」与「用哪种卡片」：同一个模板、
+// 同一套右栏组装、同一个分页器。把它们拆开会复制一遍外壳，而外壳正是上一版页面之间发生漂移的那部分。
+func serveBlogList(c *gin.Context, appContainer *app.App, shareSvc service.ShareService, section, sub string, page int) {
 	cfg, ok := blogEnabled(c, appContainer)
 	if !ok {
 		return
@@ -35,7 +36,7 @@ func serveBlogList(c *gin.Context, appContainer *app.App, shareSvc service.Share
 	base := blogBaseURL(c, appContainer)
 	publishedOnly := !strings.EqualFold(strings.TrimSpace(cfg.GraphScope), "all")
 
-	list, err := shareSvc.GetBlogList(c.Request.Context(), uid, base, publishedOnly, section, page)
+	list, err := shareSvc.GetBlogList(c.Request.Context(), uid, base, publishedOnly, section, sub, page)
 	if err != nil {
 		if errors.Is(err, service.ErrBlogSectionNotFound) {
 			blogErrorPage(c, appContainer, http.StatusNotFound, "版块",
@@ -65,13 +66,19 @@ func serveBlogList(c *gin.Context, appContainer *app.App, shareSvc service.Share
 	}
 
 	// Recommendations rank folders, not articles, and they come from the whole published set —
-	// the same list the card page's capsule shows.
+	// the same list the card page's capsule shows. Which level they cover is decided by the
+	// service: top level on /blog/all, one step down on a section page, none on a sub-section page.
 	//
 	// 推荐排的是文件夹而不是文章，且来自整个已发布集合——与名片页胶囊展示的是同一份。
+	// 覆盖哪一层由 service 决定：/blog/all 上是顶层，版块页上下移一层，二级栏目页上没有。
 	list.Hot = nil
-	canonical := strings.TrimRight(base, "/") + "/blog/all"
-	if section != "" {
-		canonical = strings.TrimRight(base, "/") + "/blog/c/" + section
+	root := strings.TrimRight(base, "/")
+	canonical := root + "/blog/all"
+	switch {
+	case sub != "":
+		canonical = root + "/blog/c/" + section + "/" + sub
+	case section != "":
+		canonical = root + "/blog/c/" + section
 	}
 	if list.Page > 1 {
 		canonical = canonical + "/" + strconv.Itoa(list.Page)
@@ -100,7 +107,9 @@ func serveBlogList(c *gin.Context, appContainer *app.App, shareSvc service.Share
 		},
 		Kicker:     list.Kicker,
 		Section:    list.Section,
+		Sub:        list.Sub,
 		Entries:    list.Entries,
+		Subs:       list.Subs,
 		Total:      list.Total,
 		Page:       list.Page,
 		TotalPages: list.TotalPages,

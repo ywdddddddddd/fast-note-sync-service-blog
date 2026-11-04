@@ -73,28 +73,37 @@ type blogCardView struct {
 	AskEnabled bool
 }
 
-// blogListView is /blog/all and /blog/c/<section>.
+// blogListView is /blog/all, /blog/c/<section> and /blog/c/<section>/<sub>.
 //
-// Kicker carries the h1: "全部笔记" or the section name. Section stays empty on /blog/all so the
-// template can mark "no section" without a second boolean.
+// Kicker carries the h1: "全部笔记", the section name, or the sub-section name. Section and Sub
+// stay empty on the levels above so the template can tell where it is without a second boolean.
 //
-// blogListView 是 /blog/all 与 /blog/c/<版块>。
+// Subs is what makes a section page a table of contents: when it is non-nil the body renders child
+// folder cards instead of note cards, and Entries is nil. That is one condition in the template
+// rather than two page shapes, because the two bodies share a wrapper, a kicker and a card list.
 //
-// Kicker 承载 h1：「全部笔记」或版块名。在 /blog/all 上 Section 保持为空，
-// 使模板无需第二个布尔量就能判断「当前不分版块」。
+// blogListView 是 /blog/all、/blog/c/<版块> 与 /blog/c/<版块>/<二级>。
+//
+// Kicker 承载 h1：「全部笔记」、版块名或二级栏目名。在更上层 Section 与 Sub 保持为空，
+// 使模板无需第二个布尔量就能判断自己在哪一层。
+//
+// Subs 是版块页成为目录的原因：它非空时主体渲染子目录卡片而不是笔记卡片，此时 Entries 为 nil。
+// 模板里这是一个条件而不是两种页形，因为两个主体共用同一个外层、同一个 kicker 和同一种卡片列表。
 type blogListView struct {
 	blogChrome
 	Kicker     string
 	Section    string
+	Sub        string
 	Entries    []*dto.BlogEntryDTO
+	Subs       []*dto.BlogSectionRecDTO
 	Total      int
 	Page       int
 	TotalPages int
 	PagerLinks []dto.BlogPageLinkDTO
 	PrevURL    string
 	NextURL    string
-	// Recs is the same second-level folder list the card page's capsule shows.
-	// Recs 与名片页胶囊展示的是同一组二级栏目。
+	// Recs are the folders one level below this page, or nothing on a sub-section page.
+	// Recs 是这一页下一层的文件夹；二级栏目页上没有。
 	Recs       []*dto.BlogSectionRecDTO
 	DockJS     template.JS
 	AskEnabled bool

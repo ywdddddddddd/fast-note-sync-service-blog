@@ -135,7 +135,7 @@ type ShareService interface {
 	// reported as an error so the router can answer 404 rather than render an empty page.
 	// GetBlogList 组装 /blog/all 或 /blog/c/<版块> 的一页。
 	// 未知版块以错误形式报告，使路由层能返回 404 而不是渲染一个空页面。
-	GetBlogList(ctx context.Context, uid int64, baseURL string, publishedOnly bool, section string, page int) (*dto.BlogListDTO, error)
+	GetBlogList(ctx context.Context, uid int64, baseURL string, publishedOnly bool, section, sub string, page int) (*dto.BlogListDTO, error)
 
 	// GetBlogArchives returns every published note grouped by year, unpaged.
 	// GetBlogArchives 返回按年份分组的全部已发布笔记，不分页。

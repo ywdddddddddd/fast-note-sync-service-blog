@@ -834,12 +834,18 @@ func (s *shareService) GetBlogHome(ctx context.Context, uid int64, baseURL strin
 	// 版块取自刚刚建好的这棵树，因此下拉、右栏与侧栏在构造上就描述同一套分类。
 	home.Sections = buildBlogSections(home.Nav.Tree)
 
-	// Recommendations: second-level folders ranked by recent change, not articles ranked by likes.
-	// They are computed from the article set, so a page note can never appear here.
+	// Recommendations: folders ranked by recent change, not articles ranked by likes.
 	//
-	// 推荐：按最近变更排序的二级文件夹，而不是按点赞排序的文章。
-	// 它们由文章集合算出，因此页面笔记永远不会出现在这里。
-	home.Recs = blogSectionRecs(sources, blogRecLimit)
+	// The card page stands at the top of the taxonomy, so it recommends first-level sections. The
+	// rail then steps down with the reader: /blog/c/<section> asks for that section's children.
+	// Both come from the same aggregator, so the two levels cannot disagree about what exists.
+	//
+	// 推荐：按最近变更排序的文件夹，而不是按点赞排序的文章。
+	//
+	// 名片页站在分类的顶层，因此它推荐一级版块。右栏随读者逐级下降：
+	// /blog/c/<版块> 要的是那个版块的子目录。两者出自同一个聚合函数，
+	// 因此这两层对「存在什么」不会各说一套。
+	home.Recs = blogAggregateSections(home.Entries, "", 1, blogRecLimit)
 
 	// The start date is the earliest published note's timestamp — the same value the heat map
 	// already windows on. Deriving it means the card cannot claim a different history from the

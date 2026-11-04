@@ -121,6 +121,18 @@ var blogChromePartials = `
   </a>
 </li>{{end}}
 
+{{define "sectioncard"}}<li class="post-card">
+  <a class="card-link" href="{{.Href}}">
+    {{if .Cover}}{{if eq .Cover.Kind "video"}}<video class="cover" src="{{.Cover.URL}}" muted playsinline preload="metadata" aria-hidden="true"></video>{{else}}<img class="cover" src="{{.Cover.URL}}" alt="" loading="lazy" width="1200" height="630" style="object-position:{{.Cover.FocusX}}% {{.Cover.FocusY}}%;transform:scale({{.Cover.Zoom}});transform-origin:{{.Cover.FocusX}}% {{.Cover.FocusY}}%">{{end}}<span class="cover-loading" aria-hidden="true"></span>{{else}}<div class="cover-ph" style="--ph:{{.InitialHue}}" aria-hidden="true"><b>{{.Initial}}</b></div>{{end}}
+    <span class="card-date">{{.Updated}}</span>
+    <div class="card-body">
+      <h2 class="card-h">{{.Name}}</h2>
+      {{if .Desc}}<p class="card-sum">{{.Desc}}</p>{{end}}
+      <div class="card-meta"><span>{{.Count}} 篇</span><span>{{.Words}} 字</span></div>
+    </div>
+  </a>
+</li>{{end}}
+
 {{define "pager"}}<nav class="pager" aria-label="分页">{{range .PagerLinks}}{{if .Current}}<span class="pg is-on" aria-current="page">{{.Num}}</span>{{else}}<a class="pg" href="{{.URL}}" aria-label="第 {{.Num}} 页">{{.Num}}</a>{{end}}{{end}}</nav>{{end}}
 ` + `{{define "blognav"}}` + blogNavPartial + `{{end}}` + blogNavTree
 
@@ -216,7 +228,7 @@ var blogCardTmpl = template.Must(template.New("blog-card").Funcs(blogAssetFuncs)
   {{if .Recs}}<aside class="card-sheet sheet-rec" aria-label="推荐">
     <div class="nav-title">推荐 · 最近更新的栏目</div>
     <ul class="rec">
-      {{range .Recs}}<li><a href="/blog/{{.Slug}}"><span class="rec-name">{{.Name}}</span><b class="rec-upd">{{.Updated}}</b></a>{{if .Desc}}<p>{{.Desc}}</p>{{end}}<span class="rec-meta">{{.Count}} 篇 · {{.Words}} 字</span></li>{{end}}
+      {{range .Recs}}<li><a href="{{.Href}}"><span class="rec-name">{{.Name}}</span><b class="rec-upd">{{.Updated}}</b></a>{{if .Desc}}<p>{{.Desc}}</p>{{end}}<span class="rec-meta">{{.Count}} 篇 · {{.Words}} 字</span></li>{{end}}
     </ul>
   </aside>{{end}}
 </div>
@@ -273,7 +285,11 @@ var blogListTmpl = template.Must(template.New("blog-list").Funcs(blogAssetFuncs)
 <div class="list-wrap">
   <main class="list-main">
     <h1 class="list-kicker">{{.Kicker}}<span class="list-count">{{.Total}}</span></h1>
-    {{if .Entries}}
+    {{if .Subs}}
+    <ul class="cards">
+      {{range .Subs}}{{template "sectioncard" .}}{{end}}
+    </ul>
+    {{else if .Entries}}
     <ul class="cards">
       {{range .Entries}}{{template "card" .}}{{end}}
     </ul>
@@ -288,7 +304,7 @@ var blogListTmpl = template.Must(template.New("blog-list").Funcs(blogAssetFuncs)
     <div class="card card-rail">
       <h2 class="rail-title">推荐 · 最近更新</h2>
       <ul class="rec">
-        {{range .Recs}}<li><a href="/blog/{{.Slug}}"><span class="rec-name">{{.Name}}</span><b class="rec-upd">{{.Updated}}</b></a>{{if .Desc}}<p>{{.Desc}}</p>{{end}}<span class="rec-meta">{{.Count}} 篇 · {{.Words}} 字</span></li>{{end}}
+        {{range .Recs}}<li><a href="{{.Href}}"><span class="rec-name">{{.Name}}</span><b class="rec-upd">{{.Updated}}</b></a>{{if .Desc}}<p>{{.Desc}}</p>{{end}}<span class="rec-meta">{{.Count}} 篇 · {{.Words}} 字</span></li>{{end}}
       </ul>
     </div>
     {{end}}

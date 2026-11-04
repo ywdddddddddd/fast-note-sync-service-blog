@@ -9,52 +9,106 @@ import (
 	"github.com/haierkeys/fast-note-sync-service/internal/dto"
 )
 
-// ErrBlogSectionNotFound is returned when a requested section does not exist.
+// ErrBlogSectionNotFound is returned when a requested section or sub-section does not exist.
 //
 // It is a sentinel rather than an empty list because the two cases need different answers: an
 // empty section page is a 200 with an empty state, while an unknown section name is a 404 — the
 // reader typed or pasted a URL that never described anything.
 //
-// ErrBlogSectionNotFound 在请求的版块不存在时返回。
+// ErrBlogSectionNotFound 在请求的版块或二级栏目不存在时返回。
 //
 // 它是哨兵错误而不是空清单，因为两种情况需要不同的答案：空版块页是 200 + 空状态，
 // 而未知版块名是 404——读者输入或粘贴了一条从未描述任何东西的 URL。
 var ErrBlogSectionNotFound = errors.New("blog: section not found")
 
-// GetBlogList assembles one page of /blog/all or /blog/c/<section>.
+// GetBlogList assembles one page of /blog/all, /blog/c/<section> or /blog/c/<section>/<sub>.
 //
-// It reuses GetBlogHome rather than re-reading the vault: the home assembly already resolves every
-// published note, its cover, its word count and its link tally, and a second query path would be a
-// second place for "how many notes are published" to be computed. The graph layout is the one
-// expensive step that is skipped here, by passing maxNodes = 0.
+// One function serves all three because they differ only in which set they take and which card
+// shape they use. Splitting them would duplicate the rail assembly, and the rail is exactly the
+// part that had already drifted between pages once.
 //
-// GetBlogList 组装 /blog/all 或 /blog/c/<版块> 的一页。
+// The three levels read top-down:
 //
-// 它复用 GetBlogHome 而不是重新读一遍仓库：首页组装已经解析了每一篇已发布笔记及其封面、字数、
-// 链接计数，而第二条查询路径会成为「有多少篇已发布」的第二个计算处。
-// 唯一昂贵的一步是图谱布局，这里通过传 maxNodes = 0 跳过它。
-func (s *shareService) GetBlogList(ctx context.Context, uid int64, baseURL string, publishedOnly bool, section string, page int) (*dto.BlogListDTO, error) {
+//	/blog/all                  note list, 15/page, rail = first-level sections
+//	/blog/c/<section>          sub-section cards, rail = that section's sub-sections
+//	/blog/c/<section>/<sub>    note list, 6/page, no rail
+//
+// A section whose notes all sit directly inside it has no sub-sections to draw, so it falls back
+// to the note list rather than rendering an empty page. Falling back is the honest answer there:
+// the reader asked for that section's content and the content is the notes.
+//
+// GetBlogList 组装 /blog/all、/blog/c/<版块> 或 /blog/c/<版块>/<二级> 的一页。
+//
+// 一个函数服务三层，因为它们的差别只在于取哪一批、用哪种卡片。拆开会复制一遍右栏组装，
+// 而右栏正是曾经在页面之间发生过漂移的那部分。
+//
+// 三层自上而下：
+//
+//	/blog/all                  笔记清单，15 篇/页，右栏 = 一级版块
+//	/blog/c/<版块>             二级栏目卡，右栏 = 该版块的二级栏目
+//	/blog/c/<版块>/<二级>      笔记清单，6 篇/页，无右栏
+//
+// 一个「笔记全都直接放在版块里」的版块没有可画的二级栏目，于是回退到笔记清单，
+// 而不是渲染一个空页。回退在这里是诚实的答案：读者要的是那个版块的内容，而内容就是那些笔记。
+func (s *shareService) GetBlogList(ctx context.Context, uid int64, baseURL string, publishedOnly bool, section, sub string, page int) (*dto.BlogListDTO, error) {
 	home, err := s.GetBlogHome(ctx, uid, baseURL, publishedOnly, 0)
 	if err != nil {
 		return nil, err
 	}
 
+	root := strings.TrimRight(baseURL, "/")
 	entries := home.Entries
 	kicker := "全部笔记"
-	basePath := strings.TrimRight(baseURL, "/") + "/blog/all"
+	basePath := root + "/blog/all"
+	size := blogPageSize
+	var subs, recs []*dto.BlogSectionRecDTO
 
-	if section != "" {
+	switch {
+	case section == "":
+		// /blog/all — everything, newest first, recommending the top level of the taxonomy.
+		recs = blogAggregateSections(home.Entries, "", 1, blogRecLimit)
+
+	case sub == "":
+		// /blog/c/<section> — a table of contents for one section.
 		sec := blogSectionOf(home.Sections, section)
 		if sec == nil {
 			return nil, ErrBlogSectionNotFound
 		}
-		entries = blogFilterSection(entries, section)
 		kicker = sec.Name
-		basePath = strings.TrimRight(baseURL, "/") + "/blog/c/" + url.PathEscape(section)
+		basePath = root + "/blog/c/" + url.PathEscape(section)
+		inSection := blogFilterSection(home.Entries, section)
+		subs = blogAggregateSections(home.Entries, section, 2, 0)
+		recs = blogAggregateSections(home.Entries, section, 2, blogRecLimit)
+		if len(subs) == 0 {
+			// No second level under this section: show its notes instead of an empty shelf.
+			subs = nil
+			entries = inSection
+			break
+		}
+		// The body is the folder cards, so there are no note entries to slice. Total still counts
+		// notes, because that is the number the reader is actually asking about.
+		entries = nil
+
+	default:
+		// /blog/c/<section>/<sub> — the notes of one sub-section.
+		sec := blogSectionOf(home.Sections, section)
+		if sec == nil || !blogSubSectionOf(home.Entries, section, sub) {
+			return nil, ErrBlogSectionNotFound
+		}
+		kicker = sub
+		basePath = root + "/blog/c/" + url.PathEscape(section) + "/" + url.PathEscape(sub)
+		entries = blogFilterSubSection(home.Entries, section, sub)
+		size = blogSubPageSize
+		// No rail here: the reader has already narrowed to one course, and a list of sibling
+		// courses beside it would only invite them to leave.
+		recs = nil
 	}
 
 	total := len(entries)
-	pageEntries, totalPages := blogPaginate(entries, page, blogPageSize)
+	if subs != nil {
+		total = len(blogFilterSection(home.Entries, section))
+	}
+	pageEntries, totalPages := blogPaginate(entries, page, size)
 
 	prevURL, nextURL := "", ""
 	if page > 1 && page <= totalPages {
@@ -68,7 +122,9 @@ func (s *shareService) GetBlogList(ctx context.Context, uid int64, baseURL strin
 		Title:      home.Title,
 		Kicker:     kicker,
 		Section:    section,
+		Sub:        sub,
 		Entries:    pageEntries,
+		Subs:       subs,
 		Total:      total,
 		Sections:   home.Sections,
 		Hot:        nil, // filled by the router from the reaction tallies // 由路由层从反应计数填充
@@ -78,7 +134,7 @@ func (s *shareService) GetBlogList(ctx context.Context, uid int64, baseURL strin
 		PrevURL:    prevURL,
 		NextURL:    nextURL,
 		AllEntries: entries,
-		Recs:       home.Recs,
+		Recs:       recs,
 	}, nil
 }
 

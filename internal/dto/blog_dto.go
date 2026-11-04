@@ -463,24 +463,46 @@ type BlogProfileLinkDTO struct {
 	Kind  string `json:"kind"` // link | mail | rss | qr // 行为类型
 }
 
-// BlogSectionRecDTO is one recommendation: a second-level folder with recent activity.
+// BlogSectionRecDTO is one folder presented as a recommendation or as a sub-section card.
 //
-// Slug points at the newest article inside the folder. There is no per-folder route, and inventing
-// one would add a page whose only content is a subset of a section page; landing on the newest
-// article is what "recently updated" promises anyway.
+// Href is the folder's own page, not the newest article inside it. That changed when the taxonomy
+// gained a middle level: a first-level folder now has a page listing its second-level folders, and
+// a second-level folder has a page listing its notes, so "recently updated" can open the thing that
+// was updated rather than a single note that happened to be newest.
 //
-// BlogSectionRecDTO 是一条推荐：一个最近有变动的二级文件夹。
+// Slug is kept because it still names the newest article, which the template no longer links to but
+// which stays useful when a folder page would be a dead end (see blogAggregateSections).
 //
-// Slug 指向该文件夹里最新的一篇文章。没有按文件夹的独立路由，为它新建一条只会多出一个
-// 「内容是一张版块页子集」的页面；而「最近更新」本来承诺的就是最新那一篇。
+// BlogSectionRecDTO 是一个作为推荐或二级栏目卡呈现的文件夹。
+//
+// Href 是这个文件夹自己的页面，而不是它里面最新的那篇文章。分类多了中间一层之后这一点变了：
+// 一级文件夹现在有一页列出它的二级文件夹，二级文件夹有一页列出它的笔记，
+// 于是「最近更新」可以打开那个被更新的东西，而不是恰好最新的某一篇。
+//
+// Slug 保留着，它仍然指着最新那篇；模板不再用它当链接，但在栏目页会变成死路时还有用
+// （见 blogAggregateSections）。
 type BlogSectionRecDTO struct {
-	Name    string `json:"name"`    // 二级目录名 // second-level folder name
-	Parent  string `json:"parent"`  // 一级目录名，用于分组展示 // parent section
-	Desc    string `json:"desc"`    // 手写的一句话 // hand-written one-liner
-	Slug    string `json:"slug"`    // 该栏目最新一篇的 slug // newest article in the folder
-	Count   int    `json:"count"`   // 已发布篇数 // published notes inside
-	Words   int    `json:"words"`   // 该栏目总字数 // total characters inside
+	Name    string `json:"name"`   // 目录名 // folder name
+	Parent  string `json:"parent"` // 一级目录名，一级栏目自身为空 // parent section, empty for a top-level one
+	Desc    string `json:"desc"`   // 手写的一句话 // hand-written one-liner
+	Slug    string `json:"slug"`   // 该栏目最新一篇的 slug // newest article in the folder
+	Href    string `json:"href"`   // 该栏目自己的页面 // the folder's own page
+	Count   int    `json:"count"`  // 已发布篇数 // published notes inside
+	Words   int    `json:"words"`  // 该栏目总字数 // total characters inside
 	Updated string `json:"updated"` // 该栏目最新变更日期 // newest change date
+
+	// Cover is picked at random from the covers of the notes inside the folder, one per request.
+	// The owner asked for this explicitly: a folder has no cover of its own, and drawing a
+	// placeholder for it would throw away cover art the author already chose.
+	//
+	// Cover 从该目录内笔记的封面里随机取一张，每次请求重抽。
+	// 这是站主明确要求的：目录本身没有封面，而为它画一个占位等于把作者已经选好的封面图丢掉。
+	Cover *BlogCoverDTO `json:"cover,omitempty"`
+
+	// Initial and InitialHue drive the placeholder cover when no note inside has one.
+	// Initial / InitialHue 在目录内没有任何封面时驱动占位封面。
+	Initial    string `json:"initial,omitempty"`
+	InitialHue int    `json:"initialHue,omitempty"`
 }
 
 // BlogProfileMetaDTO is one key/value row of the card's "关于" block.
@@ -543,8 +565,9 @@ type BlogPageLinkDTO struct {
 // 空状态也就只是 Total == 0。
 type BlogListDTO struct {
 	Title      string
-	Kicker     string // 全部笔记 / 版块名 // section name or "全部笔记"
+	Kicker     string // 全部笔记 / 版块名 / 二级栏目名 // section or sub-section name
 	Section    string // current section slug, empty on /blog/all // 当前版块，全部页为空
+	Sub        string // current sub-section name, empty above it // 当前二级栏目，其上层为空
 	Entries    []*BlogEntryDTO
 	Total      int
 	Sections   []*BlogSectionDTO
@@ -555,6 +578,15 @@ type BlogListDTO struct {
 	PrevURL    string
 	NextURL    string
 	Canonical  string
+
+	// Subs are the child folders a section page shows instead of a note list. It is nil everywhere
+	// else — and nil rather than empty on a section whose notes all sit directly inside it, which
+	// is what tells the template to fall back to the note list.
+	//
+	// Subs 是版块页用来代替笔记清单的子目录卡片。其它页面为空——
+	// 而一个「笔记全都直接放在版块里」的版块得到 nil 而不是空切片，
+	// 模板据此回退到笔记清单。
+	Subs []*BlogSectionRecDTO
 
 	// ArchiveYears groups entries by year for /blog/archives. It is nil elsewhere.
 	//

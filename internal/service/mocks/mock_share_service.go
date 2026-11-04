@@ -136,9 +136,9 @@ func (m *MockShareService) RenderBlogBySlug(ctx context.Context, slug string) (*
 }
 
 // GetBlogReactions 返回赞/踩计数与累计访问次数。
-// GetBlogList 组装 /blog/all 或版块列表的一页。
-func (m *MockShareService) GetBlogList(ctx context.Context, uid int64, baseURL string, publishedOnly bool, section string, page int) (*dto.BlogListDTO, error) {
-	args := m.Called(ctx, uid, baseURL, publishedOnly, section, page)
+// GetBlogList 组装 /blog/all、版块页或二级栏目页的一页。
+func (m *MockShareService) GetBlogList(ctx context.Context, uid int64, baseURL string, publishedOnly bool, section, sub string, page int) (*dto.BlogListDTO, error) {
+	args := m.Called(ctx, uid, baseURL, publishedOnly, section, sub, page)
 	if v := args.Get(0); v != nil {
 		return v.(*dto.BlogListDTO), args.Error(1)
 	}
