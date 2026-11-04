@@ -85,6 +85,32 @@ const blogSheetScript = `
     var el = activeSheet();
     if (!draggable(el)) return;
 
+    // Never start a sheet drag on top of a control.
+    //
+    // The drag strip is the top 56px of the sheet, and the graph card puts its toolbar — the depth
+    // slider and the three icon buttons — inside exactly that strip. Pressing one of those buttons
+    // therefore also began a drag, and a drag calls setPointerCapture on the sheet, which retargets
+    // every later pointer event to the sheet itself. The button got pointerdown and then lost the
+    // pointerup and the click: the press animation played and nothing happened. Measured on the live
+    // page, the same press reported
+    //   pointerdown target=svg (inside the button)
+    //   pointerup   target=graph-panel
+    // which is why no click ever fired.
+    //
+    // 永远不要在一个控件上面开始拖抽屉。
+    //
+    // 拖拽热区是抽屉顶部那 56px，而图谱卡片把它的工具条——深度滑块和三颗图标按钮——正好放在那条里。
+    // 于是按其中任何一颗也会启动拖拽，而拖拽会对抽屉调用 setPointerCapture，
+    // 把之后所有指针事件重定向到抽屉本身。按钮收到了 pointerdown，然后丢掉了 pointerup 与 click：
+    // 按压动效照常播放，功能毫无反应。线上实测同一次按压报的是
+    //   pointerdown target=svg（按钮内部）
+    //   pointerup   target=graph-panel
+    // 这就是 click 从未触发的原因。
+    if (ev.target && ev.target.closest &&
+        ev.target.closest('button, a, input, select, textarea, label, [role="button"], [contenteditable="true"]')) {
+      return;
+    }
+
     var rect = el.getBoundingClientRect();
     // Only the top strip drags. Making the whole panel draggable would fight the content's own
     // scrolling: the reader would try to scroll a long nav tree and instead resize the sheet.
