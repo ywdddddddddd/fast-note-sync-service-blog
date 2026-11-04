@@ -589,7 +589,7 @@ var blogPostTmpl = template.Must(template.New("blog-post").Funcs(blogAssetFuncs)
   </div>
 
   <footer class="footer">
-    <div>由 <a href="https://github.com/haierkeys/fast-note-sync-service" target="_blank" rel="noopener noreferrer">Fast Note Sync</a> 提供支持</div>
+    <div>由 <a href="https://obsidian.md" target="_blank" rel="noopener noreferrer">Obsidian</a> 提供内容支持</div>
     {{template "footer-legal" .}}
   </footer>
 </div>
@@ -696,7 +696,15 @@ var blogPostTmpl = template.Must(template.New("blog-post").Funcs(blogAssetFuncs)
   <!-- 阅读页的五点胶囊：山（全局目录）· 图谱 · 首页 · 漫游 · 问道。
        左书签撤掉了 —— 全局目录的入口在这里的「山」上，同一个页面不需要两个通往目录的入口。
        右书签保留，它管的是本页大纲，与全局目录不是一件事。 -->
-  <div class="dock" id="fns-dock" role="group" aria-label="阅读页入口" data-slot="0">
+  <div class="dock dock-collapsible" id="fns-dock" role="group" aria-label="阅读页入口" data-slot="0">
+    <button type="button" class="dock-orb" id="fns-orb" aria-label="展开页面入口" aria-expanded="false">
+      <svg class="taiji" viewBox="0 0 24 24" aria-hidden="true">
+        <circle cx="12" cy="12" r="9.1" fill="none" stroke="currentColor" stroke-width="1.35"/>
+        <path d="M12 2.9a4.55 4.55 0 0 1 0 9.1 4.55 4.55 0 0 0 0 9.1" fill="currentColor"/>
+        <circle cx="12" cy="7.45" r="1.3" fill="var(--card)"/>
+        <circle cx="12" cy="16.55" r="1.3" fill="currentColor"/>
+      </svg>
+    </button>
     <span class="dock-thumb" aria-hidden="true"></span>
     <button type="button" class="dock-b" data-i="0" id="dock-nav" aria-label="目录" aria-expanded="false">
       <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M0 1.75A.75.75 0 0 1 .75 1h4.253c1.227 0 2.317.59 3 1.501A3.743 3.743 0 0 1 11.006 1h4.245a.75.75 0 0 1 .75.75v10.5a.75.75 0 0 1-.75.75h-4.507a2.25 2.25 0 0 0-1.591.659l-.622.621a.75.75 0 0 1-1.06 0l-.622-.621A2.25 2.25 0 0 0 5.258 13H.75a.75.75 0 0 1-.75-.75Zm7.251 10.324.004-5.073-.002-2.253A2.25 2.25 0 0 0 5.003 2.5H1.5v9h3.757a3.75 3.75 0 0 1 1.994.574ZM8.755 4.75l-.004 7.322a3.752 3.752 0 0 1 1.992-.572H14.5v-9h-3.495a2.25 2.25 0 0 0-2.25 2.25Z"/></svg>
@@ -729,6 +737,27 @@ var blogPostTmpl = template.Must(template.New("blog-post").Funcs(blogAssetFuncs)
   (function () {
     var b = document.body;
     var dock = document.getElementById('fns-dock');
+// Collapsed capsule, same behaviour as the card page: one round key until asked, and it closes
+// again the moment a click lands outside it.
+// 收起的胶囊，与名片页同一套行为：在读者要之前只是一个圆键，而任何落在它外面的点击都会让它收回。
+(function () {
+  var orb = document.getElementById('fns-orb');
+  if (!dock || !orb) { return; }
+  function setOpen(on) {
+    dock.classList.toggle('is-open', on);
+    orb.setAttribute('aria-expanded', on ? 'true' : 'false');
+  }
+  orb.addEventListener('click', function (ev) {
+    ev.stopPropagation();
+    setOpen(!dock.classList.contains('is-open'));
+  });
+  document.addEventListener('click', function (ev) {
+    if (dock.classList.contains('is-open') && !dock.contains(ev.target)) { setOpen(false); }
+  });
+  Array.prototype.forEach.call(dock.querySelectorAll('.dock-b'), function (b) {
+    b.addEventListener('click', function () { setOpen(false); });
+  });
+})();
     var tabToc = document.getElementById('dock-toc');
     var scrim = document.getElementById('fns-scrim');
     if (!dock || !tabToc || !scrim) return;
@@ -973,7 +1002,7 @@ var blogPageTmpl = template.Must(template.New("blog-page").Funcs(blogAssetFuncs)
   </div>
 
   <footer class="footer">
-    <div>由 <a href="https://github.com/haierkeys/fast-note-sync-service" target="_blank" rel="noopener noreferrer">Fast Note Sync</a> 提供支持</div>
+    <div>由 <a href="https://obsidian.md" target="_blank" rel="noopener noreferrer">Obsidian</a> 提供内容支持</div>
     {{template "footer-legal" .}}
   </footer>
 </div>
@@ -1029,7 +1058,15 @@ var blogPageTmpl = template.Must(template.New("blog-page").Funcs(blogAssetFuncs)
   <!-- 页面笔记的三点胶囊：首页 · 漫游 · 问道。
        比阅读页少两格，因为这两种东西在这一页上不存在 —— 全局目录没有（页面是终点），
        局部图谱也没有（本页不携带图谱）。少两格比给对方一个点了没反应的键诚实。 -->
-  <div class="dock" id="fns-dock" role="group" aria-label="页面入口" data-slot="0">
+  <div class="dock dock-collapsible" id="fns-dock" role="group" aria-label="页面入口" data-slot="0">
+    <button type="button" class="dock-orb" id="fns-orb" aria-label="展开页面入口" aria-expanded="false">
+      <svg class="taiji" viewBox="0 0 24 24" aria-hidden="true">
+        <circle cx="12" cy="12" r="9.1" fill="none" stroke="currentColor" stroke-width="1.35"/>
+        <path d="M12 2.9a4.55 4.55 0 0 1 0 9.1 4.55 4.55 0 0 0 0 9.1" fill="currentColor"/>
+        <circle cx="12" cy="7.45" r="1.3" fill="var(--card)"/>
+        <circle cx="12" cy="16.55" r="1.3" fill="currentColor"/>
+      </svg>
+    </button>
     <span class="dock-thumb" aria-hidden="true"></span>
     <button type="button" class="dock-b" data-i="0" id="dock-toc" aria-label="本页大纲" aria-expanded="false">
       <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M5.75 2.5h8.5a.75.75 0 0 1 0 1.5h-8.5a.75.75 0 0 1 0-1.5Zm0 5h8.5a.75.75 0 0 1 0 1.5h-8.5a.75.75 0 0 1 0-1.5Zm0 5h8.5a.75.75 0 0 1 0 1.5h-8.5a.75.75 0 0 1 0-1.5ZM2 14a1 1 0 1 1 0-2 1 1 0 0 1 0 2Zm1-6a1 1 0 1 1-2 0 1 1 0 0 1 2 0ZM2 4a1 1 0 1 1 0-2 1 1 0 0 1 0 2Z"/></svg>
@@ -1050,6 +1087,27 @@ var blogPageTmpl = template.Must(template.New("blog-page").Funcs(blogAssetFuncs)
 
     var TOC = 'drawer-toc';
     var dock = document.getElementById('fns-dock');
+// Collapsed capsule, same behaviour as the card page: one round key until asked, and it closes
+// again the moment a click lands outside it.
+// 收起的胶囊，与名片页同一套行为：在读者要之前只是一个圆键，而任何落在它外面的点击都会让它收回。
+(function () {
+  var orb = document.getElementById('fns-orb');
+  if (!dock || !orb) { return; }
+  function setOpen(on) {
+    dock.classList.toggle('is-open', on);
+    orb.setAttribute('aria-expanded', on ? 'true' : 'false');
+  }
+  orb.addEventListener('click', function (ev) {
+    ev.stopPropagation();
+    setOpen(!dock.classList.contains('is-open'));
+  });
+  document.addEventListener('click', function (ev) {
+    if (dock.classList.contains('is-open') && !dock.contains(ev.target)) { setOpen(false); }
+  });
+  Array.prototype.forEach.call(dock.querySelectorAll('.dock-b'), function (b) {
+    b.addEventListener('click', function () { setOpen(false); });
+  });
+})();
     var SLIDE = 300;
     // 跨页进来时让胶囊自己重组一次：读者因此知道这一条的顺序与上一页不同。
     // 只在站内导航时播；首屏进入网站不播，那会显得页面一直在加载。
@@ -1218,7 +1276,7 @@ var blogErrorTmpl = template.Must(template.New("blog-error").Funcs(blogAssetFunc
   </main>
 
   <footer class="footer">
-    <div>由 <a href="https://github.com/haierkeys/fast-note-sync-service" target="_blank" rel="noopener noreferrer">Fast Note Sync</a> 提供支持</div>
+    <div>由 <a href="https://obsidian.md" target="_blank" rel="noopener noreferrer">Obsidian</a> 提供内容支持</div>
     {{template "footer-legal" .}}
   </footer>
 </div>

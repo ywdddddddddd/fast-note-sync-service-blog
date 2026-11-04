@@ -219,6 +219,16 @@ func registerBlogRoutes(r *gin.Engine, appContainer *app.App) {
 			return
 		}
 
+		// A note may declare its own portrait; when it does not, the embedded one is used. The
+		// fallback lives here rather than in the parser because the parser only knows the note,
+		// while the embedded URL is a router-owned asset.
+		//
+		// 笔记可以声明自己的头像；没声明时用内嵌的那张。兜底放在这里而不是解析器里，
+		// 因为解析器只认识笔记，而内嵌 URL 是路由层自己的资源。
+		if home.Profile != nil && home.Profile.Avatar == "" {
+			home.Profile.Avatar = blogAvatarURL
+		}
+
 		// One visit per page render. It counts refreshes and crawlers too, which is why the label
 		// says 访问次数 rather than 阅读量 — see blogReactionLog.addVisit.
 		//

@@ -147,7 +147,14 @@ const blogFeedScript = `
   }
 
   document.addEventListener('click', function (e) {
-    var btn = e.target.closest ? e.target.closest('.topnav-feed') : null;
+    // Two entry points share this dialog: the top bar's 订阅 link and the card page's 订阅 pill.
+    // The pill carries data-feed instead of the topnav class, so a selector that only knew
+    // .topnav-feed left it dead — clicking it did nothing at all.
+    //
+    // 这个弹层有两个入口：顶栏的「订阅」与名片页的「订阅」药丸。
+    // 药丸带的是 data-feed 而不是顶栏那个类，只认 .topnav-feed 的选择器把它变成了死键——
+    // 点它什么都不会发生。
+    var btn = e.target.closest ? e.target.closest('.topnav-feed, [data-feed]') : null;
     if (!btn) { return; }
     e.preventDefault();
     show(btn);

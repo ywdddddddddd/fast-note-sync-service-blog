@@ -213,6 +213,16 @@ avatar:
 }
 
 // TestBlogProfilePills pins the pill order, which is a design decision rather than data order.
+//
+// The location pill's kind depends on data: 浙江 · 金华 has a pinned map URL, so it is a link.
+// A place without one stays plain text — both shapes are asserted, because the fallback is the
+// part that silently breaks when the map table is edited.
+//
+// TestBlogProfilePills 钉住药丸顺序，那是设计决定而不是数据顺序。
+//
+// 地区药丸的 Kind 取决于数据：浙江 · 金华 有钉好的地图 URL，所以它是链接。
+// 没有地图的地方保持纯文本——两种形态都要断言，因为地图表被改动时，
+// 悄悄坏掉的正是兜底那条。
 func TestBlogProfilePills(t *testing.T) {
 	p := &dto.BlogProfileDTO{
 		Location: "浙江 · 金华",
@@ -225,7 +235,7 @@ func TestBlogProfilePills(t *testing.T) {
 	if len(pills) != 4 {
 		t.Fatalf("want 4 pills (location, github, mail, rss), got %d", len(pills))
 	}
-	want := []string{"text", "link", "mail", "rss"}
+	want := []string{"link", "link", "mail", "rss"}
 	for i, w := range want {
 		if pills[i].Kind != w {
 			t.Errorf("pill[%d].Kind = %q, want %q", i, pills[i].Kind, w)
@@ -233,5 +243,18 @@ func TestBlogProfilePills(t *testing.T) {
 	}
 	if pills[0].Label != "浙江 · 金华" {
 		t.Errorf("first pill label = %q, want the location", pills[0].Label)
+	}
+	if !strings.Contains(pills[0].Href, "bing.com/maps") {
+		t.Errorf("location pill href = %q, want the pinned map", pills[0].Href)
+	}
+
+	// A place with no pinned map must degrade to text, not to a dead link.
+	// 没有钉地图的地方必须退化成文本，而不是一个空链接。
+	other := blogProfilePills(&dto.BlogProfileDTO{Location: "火星 · 奥林匹斯山"}, "")
+	if len(other) != 1 {
+		t.Fatalf("want 1 pill, got %d", len(other))
+	}
+	if other[0].Kind != "text" || other[0].Href != "" {
+		t.Errorf("unpinned location = %+v, want text with no href", other[0])
 	}
 }

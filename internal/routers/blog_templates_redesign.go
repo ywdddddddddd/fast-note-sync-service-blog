@@ -185,7 +185,7 @@ var blogChromePartials = `
     <a href="/blog/archives">归档</a>
     <a href="/blog/all">全部笔记</a>
     {{if and .Indexable .FeedURL}}<a href="{{.FeedURL}}">RSS</a>{{end}}
-    <span class="footer-mark">由 <a href="https://github.com/haierkeys/fast-note-sync-service" target="_blank" rel="noopener noreferrer">Fast Note Sync</a> 提供支持</span>
+    <span class="footer-mark">由 <a href="https://obsidian.md" target="_blank" rel="noopener noreferrer">Obsidian</a> 提供内容支持</span>
   </div>
   <div class="footer-bottom">{{template "footer-legal" .}}</div>
 </footer>{{end}}

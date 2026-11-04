@@ -159,7 +159,7 @@ const blogShelfPage = `<!DOCTYPE html>
   </main>
 
   <footer class="footer">
-    <div>由 <a href="https://github.com/haierkeys/fast-note-sync-service" target="_blank" rel="noopener noreferrer">Fast Note Sync</a> 提供支持</div>
+    <div>由 <a href="https://obsidian.md" target="_blank" rel="noopener noreferrer">Obsidian</a> 提供内容支持</div>
     {{template "footer-legal" .}}
   </footer>
 </div>

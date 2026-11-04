@@ -218,13 +218,50 @@ func blogProfileLinkIcon(label, href string) string {
 // 顺序固定在这里，而不是交给笔记的行顺序，因为这是一条设计决定：
 // 你在哪、你的代码在哪、怎么联系你、然后是订阅源。先写邮箱的笔记与先写 GitHub 的笔记，
 // 不应该产出两张不一样的名片——两份在不同日子编辑过的简历必须渲染成同一张名片。
-func blogProfilePills(p *dto.BlogProfileDTO, feedURL string) []dto.BlogProfileLinkDTO {
-	if p == nil {
+// blogLocationLinks pins a place label to the map that should open for it.
+//
+// Keyed without spaces so that "浙江 · 金华" and "浙江·金华" hit the same entry: the label comes
+// from a hand-written résumé line, and the spacing around the dot is whatever the author typed
+// that day.
+//
+// blogLocationLinks 把一个地名钉到应当打开的那张地图。
+//
+// 键去掉空格，使「浙江 · 金华」与「浙江·金华」命中同一条：标签来自手写的简历行，
+// 圆点两侧的空格取决于作者那天怎么打的。
+var blogLocationLinks = map[string]string{
+	"浙江·金华": "https://cn.bing.com/maps/directions?ty=18&vdpid=7840081814210215937&v=2&sV=1&qpvt=%E6%B5%99%E6%B1%9F%E9%87%91%E5%8D%8E&FORM=MIRE&style=r&rtp=%7Epos.nvcw6dtz3jhw_29.079158782958984%252C119.64734649658203_%25E6%25B5%2599%25E6%25B1%259F%25E7%259C%2581%25E9%2587%2591%25E5%258D%258E%25E5%25B8%2582_&cp=nvgzqptzqtrz&lvl=9.7",
+}
+
+// blogLocationLink returns the map URL for a place label, or "" when there is none.
+// blogLocationLink 返回地名对应的地图 URL，没有时返回空串。
+func blogLocationLink(label string) string {
+	key := strings.Map(func(r rune) rune {
+		switch r {
+		case ' ', '\t', '\u00a0', '\u3000':
+			return -1
+		}
+		return r
+	}, label)
+	return blogLocationLinks[key]
+}
+
+func blogProfilePills(p *dto.BlogProfileDTO, feedURL string) []dto.BlogProfileLinkDTO {	if p == nil {
 		return nil
 	}
 	out := make([]dto.BlogProfileLinkDTO, 0, len(p.Links)+2)
 	if p.Location != "" {
-		out = append(out, dto.BlogProfileLinkDTO{Label: p.Location, Kind: "text", Icon: "location"})
+		// The location pill is a link when someone has pinned a map for that place, and plain text
+		// otherwise. Hard-coded rather than derived: a map URL that opens on the right spot is a
+		// hand-made artifact — a search URL built from the label would land on a results page, not
+		// on the place.
+		//
+		// 地区药丸在有对应地图时是链接，否则是纯文本。写死而不是推导：一个能落在正确位置的地图
+		// URL 是手工产物——用标签拼出来的搜索地址只会落到结果页，而不是那个地方。
+		if href := blogLocationLink(p.Location); href != "" {
+			out = append(out, dto.BlogProfileLinkDTO{Label: p.Location, Href: href, Kind: "link", Icon: "location"})
+		} else {
+			out = append(out, dto.BlogProfileLinkDTO{Label: p.Location, Kind: "text", Icon: "location"})
+		}
 	}
 	var github, mail, scholar, other []dto.BlogProfileLinkDTO
 	for _, l := range p.Links {
