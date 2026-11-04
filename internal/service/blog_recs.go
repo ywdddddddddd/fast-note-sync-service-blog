@@ -3,7 +3,6 @@ package service
 import (
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/haierkeys/fast-note-sync-service/internal/dto"
 )
@@ -71,12 +70,12 @@ func blogSectionRecs(sources []*blogHomeSource, limit int) []*dto.BlogSectionRec
 		limit = blogRecLimit
 	}
 	type agg struct {
-		name     string
-		parent   string
-		mtime    int64
-		words    int
-		count    int
-		slug     string
+		name   string
+		parent string
+		latest string
+		words  int
+		count  int
+		slug   string
 	}
 	byKey := make(map[string]*agg, 32)
 	order := make([]string, 0, 32)
@@ -104,8 +103,20 @@ func blogSectionRecs(sources []*blogHomeSource, limit int) []*dto.BlogSectionRec
 		}
 		a.count++
 		a.words += src.Words
-		if src.MTime >= a.mtime {
-			a.mtime = src.MTime
+		// CreatedAt, not MTime.
+		//
+		// The list card prints CreatedAt, so ranking by file mtime made the rail contradict the
+		// cards: a note dated 11-02 could sit under a folder the rail placed at 10-27. Two places
+		// describing the same note with two different dates is not a nuance — it reads as a bug.
+		// The rail now uses the same column the card shows.
+		//
+		// 用 CreatedAt 而不是 MTime。
+		//
+		// 列表卡印的是 CreatedAt，按文件 mtime 排序会让右栏和卡片互相矛盾：
+		// 一篇标着 11-02 的笔记，可能被归进右栏写着 10-27 的目录。同一个笔记在两个地方
+		// 显示两个日期，读起来就是 bug，而不是细节。右栏现在用卡片展示的同一列。
+		if src.CreatedAt >= a.latest {
+			a.latest = src.CreatedAt
 			a.slug = src.Slug
 		}
 	}
@@ -134,7 +145,7 @@ func blogSectionRecs(sources []*blogHomeSource, limit int) []*dto.BlogSectionRec
 			Slug:    a.slug,
 			Count:   a.count,
 			Words:   a.words,
-			Updated: time.UnixMilli(a.mtime).Format("2006-01-02"),
+			Updated: a.latest,
 		})
 	}
 
