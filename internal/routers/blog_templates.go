@@ -31,7 +31,15 @@ var blogAssetFuncs = template.FuncMap{
 	// 主题脚本做成模板函数而不是每个 view 的字段：四个文件里有六个独立 <head>，
 	// 加字段意味着改六个 view 结构体——而其中任何一个都可能被漏掉，
 	// 那一页就会在读者选了暗色之后依然停在亮色。
-	"themejs": func() template.JS { return template.JS(blogThemeScript) },
+	"themejs": func() template.JS {
+		// Both halves travel together: the loader exists only to drive the three-state button that
+		// the first half owns. Splitting them would put a 164 KB downloader on pages that never
+		// render a button.
+		//
+		// 两半一起走：加载器的唯一用途是驱动前半段拥有的那个三态按钮。
+		// 把它们拆开，会让从不渲染按钮的页面也背上 164 KB 的下载器。
+		return template.JS(blogThemeScript + blogThemeLottieJS)
+	},
 }
 
 // Blog templates. Everything is rendered on the server, so the pages work with JavaScript

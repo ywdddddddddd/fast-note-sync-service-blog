@@ -151,6 +151,14 @@ func registerBlogRoutes(r *gin.Engine, appContainer *app.App) {
 		c.JSON(http.StatusOK, tally)
 	})
 
+	// Lottie assets for the three-state theme button. Registered before "/blog/:slug" for the same
+	// literal-segment reason as the feed: "lottie.js" is a file, not a note.
+	//
+	// 三态主题按钮的 Lottie 资源。和订阅源同理，注册在 "/blog/:slug" 之前：
+	// lottie.js 是一个文件，不是一篇笔记。
+	blog.GET("/blog/lottie.js", serveLottiePlayer)
+	blog.GET("/blog/lottie/:name", serveLottieIcon)
+
 	// RSS feed. Registered before any "/blog/:slug" style route so the literal path wins.
 	// RSS 订阅源。在任何 "/blog/:slug" 形式的路由之前注册，确保字面路径优先。
 	blog.GET("/blog/rss.xml", func(c *gin.Context) {

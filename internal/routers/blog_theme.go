@@ -3308,6 +3308,35 @@ html.is-wx .ask-panel{left:.45rem;right:.45rem;width:auto}
 .theme-btn[data-mode="system"] .ti-auto,
 .theme-btn[data-mode="dark"] .ti-dark,
 .theme-btn[data-mode="light"] .ti-light{display:block}
+
+/* Lottie layer for the same three states.
+   The static SVG above is the baseline and stays in the markup; these spans only take over after
+   the player has actually drawn a frame (the script adds has-lottie). A page that never loads
+   /blog/lottie.js therefore still shows the right symbol, and a slow link does not leave the
+   button blank in the meantime.
+
+   同三个状态的 Lottie 层。
+   上面的静态 SVG 是基线，留在标记里；这几个 span 只在播放器真的画出一帧之后才接手
+   （由脚本加上 has-lottie）。因此从不加载 /blog/lottie.js 的页面仍然显示正确的符号，
+   慢链路也不会让按钮中途变空。 */
+.theme-btn .tl{display:none;width:19px;height:19px}
+.theme-btn.has-lottie .ti{display:none}
+.theme-btn.has-lottie[data-mode="system"] .tl-system,
+.theme-btn.has-lottie[data-mode="dark"] .tl-dark,
+.theme-btn.has-lottie[data-mode="light"] .tl-light{display:block}
+.theme-btn.has-lottie .tl svg{width:100%;height:100%;display:block}
+/* 三份动画都是纯黑描边。亮色下压到与 --foreground 相称的浓度，暗色下反相。
+   暗色有三种到达方式（显式 dark、显式 light、跟随系统），三条都要写，否则跟随系统的暗色
+   会显示一枚谁都看不见的黑图标。 */
+.theme-btn.has-lottie .tl svg{opacity:.8}
+html.dark .theme-btn.has-lottie .tl svg{filter:invert(1);opacity:.88}
+html.light .theme-btn.has-lottie .tl svg{filter:none;opacity:.8}
+@media (prefers-color-scheme:dark){
+  html:not(.light) .theme-btn.has-lottie .tl svg{filter:invert(1);opacity:.88}
+}
+@media (prefers-reduced-motion:reduce){
+  .theme-btn .tl{transition:none}
+}
 .mnav{display:none}
 
 /* ── 双层页脚 ───────────────────────────────────────────────────────────── */
