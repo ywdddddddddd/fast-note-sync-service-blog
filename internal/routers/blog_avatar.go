@@ -31,7 +31,18 @@ var blogAvatarJPEG []byte
 //go:embed assets/icon.svg
 var blogIconSVG []byte
 
+// The tile in the top bar uses the same artwork with the white backing plate removed: at 34px a
+// white-on-white square reads as an empty box, so the transparent version is what actually shows
+// the figure.
+//
+// 顶栏里的方格用同一张图案，但去掉白色底板：34px 下白底白图读起来就是一个空盒子，
+// 透明版本才看得见主体。
+//
+//go:embed assets/icon-mark.svg
+var blogMarkSVG []byte
+
 const blogIconURL = "/blog/icon.svg"
+const blogMarkURL = "/blog/icon-mark.svg"
 
 // registerBlogIconRoute serves the embedded icon.
 // registerBlogIconRoute 提供内嵌站点图标。
@@ -42,6 +53,13 @@ func registerBlogIconRoute(r *gin.Engine, appContainer *app.App) {
 		}
 		c.Header("Cache-Control", "public, max-age=604800")
 		c.Data(http.StatusOK, "image/svg+xml", blogIconSVG)
+	})
+	r.GET(blogMarkURL, func(c *gin.Context) {
+		if _, ok := blogEnabled(c, appContainer); !ok {
+			return
+		}
+		c.Header("Cache-Control", "public, max-age=604800")
+		c.Data(http.StatusOK, "image/svg+xml", blogMarkSVG)
 	})
 	// Browsers still ask for /favicon.ico unprompted, and a 404 there leaves a blank tab icon in
 	// clients that ignore the <link> element. Redirecting is enough: they follow it once.

@@ -108,7 +108,7 @@ const blogShelfPage = `<!DOCTYPE html>
 <div class="shell">
   <header class="topbar"><div class="topbar-inner">
     <div class="brand">
-      <a class="brand-mark" href="/blog" title="返回首页"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M10 9H8"/><path d="M16 13H8"/><path d="M16 17H8"/></svg></a>
+      <a class="brand-mark" href="/blog" title="返回首页"><img src="/blog/icon-mark.svg" alt="" width="34" height="34"></a>
       <div style="min-width:0">
         <a class="brand-name" href="/blog">{{.SiteName}}</a>
         <div class="brand-sub">资料</div>

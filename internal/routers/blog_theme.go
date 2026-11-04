@@ -137,8 +137,15 @@ img{max-width:100%;height:auto;border-radius:.5rem}
   width:34px;height:34px;flex:0 0 34px;border-radius:.75rem;
   display:flex;align-items:center;justify-content:center;
   background:color-mix(in srgb,var(--primary) 10%,transparent);color:var(--primary);
+  overflow:hidden;
 }
 .brand-mark svg{width:18px;height:18px}
+/* The mark is now the owner's artwork rather than a stroked glyph, so it fills the tile instead of
+   being sized as an icon. Cover rather than contain: the artwork already has its own margins, and
+   containing it inside a 34px tile would shrink the visible figure to a smudge.
+   品牌标记现在是站主自己的图案而不是描边字形，因此铺满方格而不是按图标尺寸居中。
+   用 cover 而不是 contain：图案本身已留白，contain 在 34px 里会把主体缩成一块污渍。 */
+.brand-mark img{width:100%;height:100%;object-fit:cover;display:block;border-radius:inherit}
 .brand-name{font-size:1.0625rem;font-weight:700;letter-spacing:-.01em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .brand-sub{font-size:.75rem;color:var(--muted-foreground);white-space:nowrap}
 /* 同一条信息的两种长度。宽屏用完整写法，窄屏用压缩写法（字数按「万」计），
