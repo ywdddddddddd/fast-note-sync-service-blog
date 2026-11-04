@@ -375,8 +375,18 @@ func blogCoverDTO(c *blogCover) *dto.BlogCoverDTO {
 	if zoom > blogCoverMaxZoom {
 		zoom = blogCoverMaxZoom
 	}
+	// Serve covers through the downscaling route. The stored URL points at the original file —
+	// a 10 MB photograph is the wrong thing to hand a 516×168 card — so the DTO hands the page a
+	// URL that the server can shrink once and cache.
+	//
+	// 封面改为经由缩图路由提供。存储里的 URL 指向原图——把一张 10 MB 的照片交给 516×168 的卡片
+	// 是错的——因此 DTO 交给页面一个服务端可以缩小一次并缓存的地址。
+	coverURL := c.URL
+	if i := strings.Index(coverURL, "/api/share/file"); i >= 0 {
+		coverURL = coverURL[:i] + "/blog/thumb" + coverURL[i+len("/api/share/file"):]
+	}
 	return &dto.BlogCoverDTO{
-		URL:    c.URL,
+		URL:    coverURL,
 		Kind:   c.Kind,
 		FocusX: c.FocusX,
 		FocusY: c.FocusY,
