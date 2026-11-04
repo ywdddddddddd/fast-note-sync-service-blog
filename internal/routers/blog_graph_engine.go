@@ -134,7 +134,6 @@ const blogGraphEngineJS string = `import { forceSimulation, forceManyBody, force
 
   var NS = 'http://www.w3.org/2000/svg';
   var STILL = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  var DESKTOP = window.matchMedia('(min-width: 861px)');
 
   var root = document.getElementById('graph-root');
   if (!root) { return; }
@@ -863,7 +862,7 @@ const blogGraphEngineJS string = `import { forceSimulation, forceManyBody, force
   var lastFocus = null;
 
   function openLayer(kind) {
-    if (!DESKTOP.matches || !layer) { return; }
+    if (!layer) { return; }
     lastFocus = document.activeElement;
     layer.hidden = false;
     if (layerTitle) {
@@ -923,12 +922,16 @@ const blogGraphEngineJS string = `import { forceSimulation, forceManyBody, force
   if (layer) {
     layer.addEventListener('click', function (ev) { if (ev.target === layer) { closeLayer(); } });
   }
-  // Leaving the desktop breakpoint with a modal open that its own controls can no longer dismiss
-  // is a trap.
-  // 在浮层打开时缩到桌面断点以下，而它自己的控件已无法关闭它，是个陷阱。
-  function onBreak(e) { if (!e.matches) { closeLayer(); } }
-  if (DESKTOP.addEventListener) { DESKTOP.addEventListener('change', onBreak); }
-  else if (DESKTOP.addListener) { DESKTOP.addListener(onBreak); }
+  // The fullscreen layer used to be desktop-only, and this handler closed it on the way down
+  // across 861px because its own close button had no styling there — leaving it open was a trap.
+  // Now that the layer is styled at every width (see the .graphlayer block in the stylesheet,
+  // which is no longer wrapped in a media query), there is no breakpoint to cross out of: the
+  // layer scales with the viewport instead of disappearing with it.
+  //
+  // 全屏浮层曾经只在桌面端可用，这条处理器负责在跨过 861px 向下时把它关掉 ——
+  // 因为那时它的关闭按钮在窄屏上没有样式，留着它就是陷阱。
+  // 现在浮层在每个宽度都有完整样式（见样式表里不再包在媒体查询中的 .graphlayer 区块），
+  // 也就没有可跨出的断点了：浮层随视口缩放，而不是随视口消失。
 
   // ── panel open / close ─────────────────────────────────────────────
   // A copy of the ask panel's open/close, including the two-frame trick and the guarded
@@ -968,6 +971,19 @@ const blogGraphEngineJS string = `import { forceSimulation, forceManyBody, force
     fab.setAttribute('aria-expanded', 'false');
     var settled = false;
     var guard = 0;
+    var onEnd = function (ev) {
+      // Only the panel's own exit counts. transitionend bubbles, so a hover fade on one of the
+      // toolbar icons or on the depth slider thumb — and the pointer is necessarily over the
+      // button the reader just pressed — would otherwise land here and finish the close after
+      // 180ms instead of 440ms. The panel then vanishes mid-slide, which reads as a control
+      // that either fired late or not at all.
+      //
+      // 只认面板自己的退场。transitionend 会冒泡：工具条图标或深度滑块拇指的悬停淡入
+      // （读者的指针此刻必然停在刚按下的那颗按钮上）也会落到这里，于是关闭在 180ms 就收尾，
+      // 而不是 440ms —— 面板在半途消失，读起来像一个要么迟了、要么根本没响应的控件。
+      if (ev && ev.target !== panel) { return; }
+      done();
+    };
     var done = function () {
       if (settled) { return; }
       settled = true;
@@ -975,11 +991,11 @@ const blogGraphEngineJS string = `import { forceSimulation, forceManyBody, force
       panel.hidden = true;
       if (backdrop) { backdrop.hidden = true; }
       root.classList.remove('gr-on');
-      panel.removeEventListener('transitionend', done);
+      panel.removeEventListener('transitionend', onEnd);
     };
     if (STILL) { done(); return; }
-    guard = setTimeout(done, 420);
-    panel.addEventListener('transitionend', done);
+    guard = setTimeout(done, 520);
+    panel.addEventListener('transitionend', onEnd);
   }
 
   fab.addEventListener('click', function () { if (OPEN) { closePanel(); } else { openPanel(); } });

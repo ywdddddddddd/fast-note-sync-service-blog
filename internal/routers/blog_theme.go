@@ -1314,33 +1314,36 @@ mjx-container[display="true"]{margin:.9rem 0}
 }
 @media print{#graph-root{display:none}}
 
-/* ── 图谱全屏浮层（桌面端专用）────────────────────────────────────── */
-/* 移动端(<=860px)完全禁用:在手机上把这张图塞进浮层比直接滑过去更糟,
-   因此不是「更小的浮层」而是「没有浮层」——控件在此宽度下直接隐藏。 */
-@media (min-width:861px){
-  .graphlayer{position:fixed;inset:0;z-index:44;display:flex;align-items:center;justify-content:center;
-    padding:4vmin;
-    /* 背景毛玻璃:后面的页面内容被虚化而不是被遮死,读者仍知道自己在哪一页。 */
-    background:color-mix(in srgb,var(--background) 62%,transparent);
-    backdrop-filter:blur(14px) saturate(120%);
-    -webkit-backdrop-filter:blur(14px) saturate(120%)}
-  .graphlayer[hidden]{display:none}
-  .graphlayer-panel{width:min(96vw,80rem);max-height:92vh;display:flex;flex-direction:column;
-    border:1px solid var(--border);border-radius:1rem;background:var(--card);overflow:hidden;
-    box-shadow:0 24px 64px -12px #00000040,0 4px 16px -4px #00000026;
-    transform:scale(.94);opacity:0}
-  /* 平滑放大:从 .94 到 1,配合居中定位,视觉上像是卡片长大而不是新页面弹出。 */
-  .graphlayer.is-in .graphlayer-panel{transform:scale(1);opacity:1;
-    transition:transform .34s cubic-bezier(.22,1,.36,1),opacity .22s ease}
-  .graphlayer-head{display:flex;align-items:center;justify-content:space-between;gap:1rem;
-    padding:.85rem 1.1rem;border-bottom:1px solid var(--border)}
-  .graphlayer-title{font-size:.875rem;font-weight:700;color:var(--foreground)}
-  .graphlayer-close{display:inline-flex;align-items:center;justify-content:center;width:1.9rem;height:1.9rem;
-    border:0;border-radius:.55rem;background:transparent;padding:0;cursor:pointer;color:var(--muted-foreground);
-    transition:background .18s ease,color .18s ease}
-  .graphlayer-close svg{width:1.05rem;height:1.05rem}
-  .graphlayer-close:hover{background:var(--accent);color:var(--foreground)}
-  .graphlayer-body{flex:1;min-height:0;overflow:auto;padding:.9rem 1.1rem 1.1rem}
+/* ── 图谱全屏浮层 ──────────────────────────────────────────────────── */
+/* 这段原先整套包在 min-width:861px 里,理由是「窄屏上不要浮层」。
+   后果是:窄屏点「放大」或「全屏」时,层在 DOM 里确实打开了(layer.hidden 变成 false),
+   但它拿不到任何定位与外观,于是以普通块级元素的身份落到文档末尾 ——
+   读者眼前没有任何变化,控件看起来像坏了。
+   浮层与宽度无关,它要的是「盖住视口的一张卡片」。尺寸差异用 clamp 表达,
+   而不是用媒体查询把整块规则复制一份或者整块关掉。 */
+.graphlayer{position:fixed;inset:0;z-index:44;display:flex;align-items:center;justify-content:center;
+  padding:clamp(.5rem,4vmin,2.5rem);
+  /* 背景毛玻璃:后面的页面内容被虚化而不是被遮死,读者仍知道自己在哪一页。 */
+  background:color-mix(in srgb,var(--background) 62%,transparent);
+  backdrop-filter:blur(14px) saturate(120%);
+  -webkit-backdrop-filter:blur(14px) saturate(120%)}
+.graphlayer[hidden]{display:none}
+.graphlayer-panel{width:min(96vw,80rem);max-height:92vh;display:flex;flex-direction:column;
+  border:1px solid var(--border);border-radius:1rem;background:var(--card);overflow:hidden;
+  box-shadow:0 24px 64px -12px #00000040,0 4px 16px -4px #00000026;
+  transform:scale(.94);opacity:0}
+/* 平滑放大:从 .94 到 1,配合居中定位,视觉上像是卡片长大而不是新页面弹出。 */
+.graphlayer.is-in .graphlayer-panel{transform:scale(1);opacity:1;
+  transition:transform .34s cubic-bezier(.22,1,.36,1),opacity .22s ease}
+.graphlayer-head{display:flex;align-items:center;justify-content:space-between;gap:1rem;
+  padding:.85rem 1.1rem;border-bottom:1px solid var(--border)}
+.graphlayer-title{font-size:.875rem;font-weight:700;color:var(--foreground)}
+.graphlayer-close{display:inline-flex;align-items:center;justify-content:center;width:1.9rem;height:1.9rem;
+  border:0;border-radius:.55rem;background:transparent;padding:0;cursor:pointer;color:var(--muted-foreground);
+  transition:background .18s ease,color .18s ease}
+.graphlayer-close svg{width:1.05rem;height:1.05rem}
+.graphlayer-close:hover{background:var(--accent);color:var(--foreground)}
+.graphlayer-body{flex:1;min-height:0;overflow:auto;padding:.9rem 1.1rem 1.1rem}
 /* 浮层内的图形容器需要确定高度。
    它此前只靠内联 style 的 100%，而父级是 flex:1;min-height:0，
    百分比高度在高度未定的 flex 子项里算出来是 0 —— 于是挂载时的尺寸守卫判定为「太小」并直接放弃，
@@ -1348,13 +1351,12 @@ mjx-container[display="true"]{margin:.9rem 0}
    给出 min-height 使容器有可测量的高度，与卡片内固定 18rem 的做法一致。 */
 .graphlayer-host{width:100%;height:100%;min-height:24rem}
 .graphlayer-host .graph-svg{display:block;width:100%;height:100%;touch-action:none}
-  .graphlayer-body .graph-frag{height:100%}
-  .graphlayer-body svg{width:100%;height:auto;max-height:74vh}
-  .graphlayer-loading,.graphlayer-error{padding:3rem 0;text-align:center;
-    font-size:.875rem;color:var(--muted-foreground)}
-  /* 全屏浮层内标签略大:那里的画布是视口尺寸,10.5px 会显得很小。 */
-  .graphlayer .g-node text{font-size:11.5px}
-}
+.graphlayer-body .graph-frag{height:100%}
+.graphlayer-body svg{width:100%;height:auto;max-height:74vh}
+.graphlayer-loading,.graphlayer-error{padding:3rem 0;text-align:center;
+  font-size:.875rem;color:var(--muted-foreground)}
+/* 全屏浮层内标签略大:那里的画布是视口尺寸,10.5px 会显得很小。 */
+.graphlayer .g-node text{font-size:11.5px}
 /* 工具条在小屏上保留 —— 见文件末尾「移动端阅读布局」里的说明。
    这里原有一条 .graphcard-tools{display:none},理由是「桌面端专用控件在小屏上消失」;
    但深度滑条与全屏在窄屏上比在桌面上更有用,那条判断不成立。 */
@@ -2539,10 +2541,13 @@ html.fns-arrived .shell{animation:fns-arrive-fade .62s cubic-bezier(.22,1,.36,1)
   /* 图谱也是底部 sheet，与目录/大纲/热门/活跃同一套动作语言：
      自下而上升起、顶部抓手、三档可拖、内部滚动。
      画布需要高度，所以默认开在 92% 而不是 40% —— 半屏的图什么都看不清。 */
+  /* 92dvh 改成 86dvh：面板原来几乎顶到屏幕顶端，遮罩只剩上面 68px，
+     而「点外面收起」恰恰要落在那一小条上 —— 手指点十次有七次落在面板内部，
+     于是这个手势看起来时灵时不灵。留出 14dvh，遮罩才是一个能瞄准的目标。 */
   #graph-root .graph-panel{
     right:0;left:0;bottom:0;top:auto;
     width:auto;max-width:none;
-    height:var(--sheet-h,92dvh);max-height:96dvh;
+    height:var(--sheet-h,86dvh);max-height:92dvh;
     /* 同样给胶囊留位：图的底部控件不该被压在胶囊下。 */
     padding:1.65rem .6rem calc(5rem + env(safe-area-inset-bottom,0px));
     border-radius:1.35rem 1.35rem 0 0;
@@ -2552,6 +2557,17 @@ html.fns-arrived .shell{animation:fns-arrive-fade .62s cubic-bezier(.22,1,.36,1)
     overflow-y:auto;
     overscroll-behavior:contain;
     transition:transform .42s cubic-bezier(.22,1,.36,1);
+  }
+  /* 工具条粘在顶部。
+     面板在窄屏上是 overflow-y:auto 的整页滚动容器，图本身就有 18rem，
+     加上说明文字，往下看一眼再想收起时，那颗按钮已经随内容滚出视口了 ——
+     读者点的是它原来所在位置的空白，于是判定「收起没用」。
+     桌面端没有这个问题：那里的面板按内容自然高度显示，从不滚动。 */
+  #graph-root .graphcard-tools{
+    position:sticky;top:0;z-index:3;
+    /* sticky 需要自己的底色，否则滚上来的图会从按钮之间透过去。 */
+    background:var(--card);
+    backdrop-filter:none;-webkit-backdrop-filter:none;
   }
   /* 抓手只画在可拖的三个面板上；图谱复用同一形态，保持视觉一致。 */
   #graph-root .graph-panel::before{
