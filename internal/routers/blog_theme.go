@@ -3116,6 +3116,39 @@ html.is-wx .ask-panel{left:.45rem;right:.45rem;width:auto}
   transition:opacity .3s ease;pointer-events:none;
 }
 .post-card:hover .cover{opacity:.62}
+/* Cover loading spinner.
+   A cover can be a few hundred KB over a slow link, and until it lands the card shows a tinted
+   rectangle with nothing in it — which reads as "this card has no cover" rather than "wait".
+   The spinner sits in the cover's lower-right corner, uses the same warm grey as the rest of the
+   card, and is removed by script the moment the image resolves (or fails).
+
+   封面加载指示。
+   封面在慢链路上可能有几百 KB，落地之前卡片只是一块空的有色矩形——读起来像「这张卡没有封面」
+   而不是「等一下」。指示器放在封面右下角，用与其他部分相同的暖灰，并在图片解析完成（或失败）
+   的那一刻由脚本移除。 */
+.cover-loading{
+  position:absolute;right:.9rem;bottom:.9rem;z-index:2;
+  width:38px;aspect-ratio:1;display:grid;
+  color:var(--muted-foreground);
+  background:radial-gradient(farthest-side,currentColor calc(100% - 5px),#0000 calc(100% - 4px) 0);
+  -webkit-mask:radial-gradient(farthest-side,#0000 calc(100% - 11px),#000 calc(100% - 10px));
+  mask:radial-gradient(farthest-side,#0000 calc(100% - 11px),#000 calc(100% - 10px));
+  border-radius:50%;opacity:.75;pointer-events:none;
+  animation:coverSpin 2s infinite linear;
+  transition:opacity .32s ease;
+}
+.cover-loading::before,.cover-loading::after{
+  content:"";grid-area:1/1;
+  background:linear-gradient(currentColor 0 0) center,linear-gradient(currentColor 0 0) center;
+  background-size:100% 8px,8px 100%;
+  background-repeat:no-repeat;
+}
+.cover-loading::after{transform:rotate(45deg)}
+@keyframes coverSpin{100%{transform:rotate(1turn)}}
+.post-card.is-cover-ready .cover-loading{opacity:0}
+@media (prefers-reduced-motion:reduce){
+  .cover-loading{animation:none}
+}
 /* Placeholder cover: a warm gradient block carrying the title's first character.
    It exists because only two notes in this vault declare a cover, and a page of plain-text cards
    loses the card rhythm the reference site has. The hue comes from the character, so the block

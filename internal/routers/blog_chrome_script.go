@@ -62,6 +62,25 @@ func blogNavDockJS() string {
       toast(ask.getAttribute('title') || '问答未启用');
     });
   }
+
+  // Cover spinners: hidden as soon as each image resolves. An error counts as resolved too — a
+  // broken cover should stop spinning, not advertise itself forever.
+  //
+  // 封面指示器：每张图一解析就隐藏。加载失败也算作已解析——坏掉的封面应该停止转动，
+  // 而不是永远宣称自己在加载。
+  Array.prototype.forEach.call(document.querySelectorAll('.post-card'), function (card) {
+    var img = card.querySelector('img.cover, video.cover');
+    if (!img) { return; }
+    var done = function () { card.classList.add('is-cover-ready'); };
+    if (img.tagName === 'IMG') {
+      if (img.complete && img.naturalWidth > 0) { done(); return; }
+      img.addEventListener('load', done);
+      img.addEventListener('error', done);
+    } else {
+      img.addEventListener('loadeddata', done);
+      img.addEventListener('error', done);
+    }
+  });
 })();`
 }
 
