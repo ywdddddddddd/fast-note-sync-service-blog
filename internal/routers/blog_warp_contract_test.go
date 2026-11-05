@@ -45,24 +45,50 @@ func TestWarpScriptContract(t *testing.T) {
 
 	// ── 以下四条对应站主三次退回的具体失败 ──────────────────────────────
 
-	// ⑤ 入站必须有动画：遮罩由 head 脚本无条件创建，而不是等一个 sessionStorage 标记。
+	// ⑤ 入站必须有动画：首访（没有「不要播放」标记）无条件 start()。
 	//
 	// 失败形态：首访没有标记 → 没有遮罩 → 读者先看白页再看站点。
-	if !strings.Contains(js, "  start();\n})();") {
+	if !strings.Contains(js, "  } else {\n    start();\n  }") {
 		t.Error("没有在文档一加载就调用 start()：入站不会有动画")
+	}
+	// 但经由过渡抵达的页面不播 —— 动画已经在出发页播完了。
+	//
+	// 失败形态：两页各播一遍，等待翻倍，限速下实测 2.9s + 2.9s，慢链路抵达那遍拉到 5s。
+	if !strings.Contains(js, "KEY_QUIET") {
+		t.Error("缺少「不要播放」标记：抵达页会重播一遍，等待翻倍")
+	}
+	if !strings.Contains(js, "if (quiet) { sessionStorage.removeItem(KEY_QUIET); }") {
+		t.Error("标记不是一次性的：之后的首访也会被静音")
 	}
 	if strings.Contains(js, "if (arrived)") {
 		t.Error("仍以 sessionStorage 标记作为创建遮罩的条件：首访没有动画")
 	}
-	// 相位交接仍要靠 sessionStorage，但那是「从哪一帧继续」，不是「要不要播」。
-	if !strings.Contains(js, "fns:ink-phase") {
-		t.Error("缺少相位交接：每次导航笔都会从 W 重来")
+
+	// ⑥ 每一次导航播完整的一遍，且不继承相位。
+	//
+	// 失败形态：相位写进 sessionStorage 并在目标页累加，值越滚越大；
+	// 实测第二次跳转读到 phase=12997，从 (12997 % 2900) ≈ 1400ms 处开始，557ms 就结束 ——
+	// 站主原话「动画一闪而过」。现在时钟属于本文档，从零开始。
+	if !strings.Contains(js, "var startedAt = 0") {
+		t.Error("缺少每文档的起始时刻：动画会继承上一页的相位")
+	}
+	if strings.Contains(js, "fns:ink-phase") {
+		t.Error("仍有跨文档相位交接：多次导航后动画会从半途开始")
+	}
+	// 播完整的一遍才起跳。
+	if !strings.Contains(js, "elapsedNow() >= PASS_MS") {
+		t.Error("起跳条件没有要求播完一整遍：笔会被从字母中间拽走")
+	}
+	// 且必须同时等到目标页落地。
+	if !strings.Contains(js, "readyFlag") {
+		t.Error("没有等目标页落地就起跳：下一页会在自己的遮罩里继续等")
+	}
+	// 出发时不能立刻导航 —— 那会把文档在笔画半途拆掉。
+	if strings.Contains(js, "if (view) { setHint('LOADING'); }\n    location.href = url;") {
+		t.Error("depart 仍立刻跳转：动画来不及播，只看到一闪")
 	}
 
-	// ⑥ 返回不能全白：bfcache 恢复必须摘掉 fns-warping。
-	//
-	// 失败形态：返回时旧文档原样恢复，带着 fns-warping，而上一版靠 body{opacity:0}
-	// 让页面消失 —— 那条规则让整页全白且永不恢复。
+	// ⑦ 返回不是抵达：pageshow 的 persisted 分支直接显示，不重播。
 	if !strings.Contains(js, "ev.persisted") {
 		t.Error("pageshow 没有处理 bfcache 恢复：按返回会全白")
 	}
@@ -70,20 +96,21 @@ func TestWarpScriptContract(t *testing.T) {
 		t.Error("恢复时没有摘掉 fns-warping：返回得到一张白页")
 	}
 
-	// ⑦ 动画播完不能还在读条：等到文档与图片都落定才抬起遮罩。
+	// ⑧ 就绪判定要覆盖图片，而不只是文档。
 	//
-	// 失败形态：按固定遍数抬起，而栏目页十几张封面每张约 700ms，读者看笔写完之后继续看转圈。
+	// 失败形态：栏目页十几张封面每张约 700ms，只等文档会让读者看笔写完之后继续看转圈。
 	if !strings.Contains(js, "function documentSettled") {
 		t.Error("缺少就绪判定：遮罩会在内容到达之前抬起")
 	}
 	if !strings.Contains(js, "var imgs = document.images") {
 		t.Error("没有等图片落定：封面还会在遮罩抬起之后继续加载")
 	}
-	if !strings.Contains(js, "passDone && documentSettled()") {
-		t.Error("抬起条件不是「写完一遍且页面就绪」")
-	}
 	if !strings.Contains(js, "warmDestination") {
 		t.Error("缺少目标页预热：出发时不会预取下一屏的封面")
+	}
+	// 预热必须等图片，而不是只发起请求。
+	if !strings.Contains(js, "im.onload = one") {
+		t.Error("预热只发起请求不等完成：后续页仍会读条")
 	}
 
 	// ⑧ 笔必须与字形重合：每笔一条子路径。

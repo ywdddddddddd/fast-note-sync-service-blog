@@ -47,18 +47,30 @@ package routers
 // 反过来设计的这套一次性修好三件：遮罩由 head 脚本在首帧之前画上，一直留到页面确实就绪，
 // 并且由创建它的同一份代码拆掉。
 //
-// ── Phase handoff ───────────────────────────────────────────────────────────────────────
+// ── One complete pass per navigation ────────────────────────────────────────────────────
 //
-// The pen must not restart from "W" on every navigation, or the two documents read as two
-// animations. The departure writes the animation's start time into sessionStorage; the destination
-// reads it and continues from the same phase, so the line is one continuous performance across the
-// document boundary.
+// The owner's requirement, in their own words: 点击立刻播放 → 加载 → 播放完就进入新界面.
 //
-// 相位交接
+// So every navigation plays one whole pass from the first stroke, the destination is fetched at the
+// same time, and the browser leaves only when both are finished. The pass is never cut short — the
+// pen at the end of a pass is off the paper, which makes that the only frame where lifting the
+// overlay does not read as an interruption.
 //
-// 笔不能每次导航都从「W」重来，否则两个文档读起来就是两段动画。
-// 出发页把动画起始时刻写进 sessionStorage，目标页读它并从同一相位继续，
-// 于是这条线跨过文档边界仍然是一次连续的书写。
+// An earlier version carried the animation's phase across documents so the clip appeared to继续
+// over the navigation. That was wrong twice over: sessionStorage accumulated an ever-growing phase,
+// so the second hop started mid-clip and finished in 557ms, and the third was worse. A whole pass
+// per navigation is both what was asked for and what stays correct.
+//
+// 每一次导航完整地播一遍
+//
+// 站主的原话：点击立刻播放 → 加载 → 播放完就进入新界面。
+//
+// 所以每一次导航都从第一笔完整播一遍，同时取目标页，两件事都完成之后浏览器才离开。
+// 这一遍永远不被截断 —— 一遍结尾时笔是离开纸面的，那是唯一一个抬起遮罩不会被读成打断的帧。
+//
+// 更早的一版把动画相位跨文档传下去，想让剪辑看起来连着一次导航。
+// 它错了两处：sessionStorage 里累积出一个越来越大的相位，第二次跳转从半途开始、557ms 就结束，
+// 第三次更糟。每次导航播完整一遍，既是要求，也是唯一正确的做法。
 //
 // ── The overlay must be viewport-sized from any scroll position ──────────────────────────
 //
@@ -82,26 +94,43 @@ const blogWarpScript = `
 
   var STILL = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
 
-  var KEY_PHASE = 'fns:ink-phase';
-  var KEY_DEPART = 'fns:ink-depart';
-
-  // ── Phase ─────────────────────────────────────────────────────────────────────────────
+  // ── Who plays the animation: the departing page, not both ─────────────────────────────
   //
-  // One clock for the whole site: performance.timeOrigin is when this document was created, and
-  // adding the phase offset stored by the departure page reconstructs "how long has the pen been
-  // writing" across the navigation.
+  // The owner's wording is a single sequence: 点击立刻播放 → 加载 → 播放完就进入新界面. That means
+  // the pass belongs to the page being left, played while its destination is fetched. The
+  // destination then shows itself immediately.
   //
-  // 全站共用一只钟：performance.timeOrigin 是这个文档创建的时刻，
-  // 加上出发页存下的相位偏移，就能在跨文档之后重建「笔已经写了多久」。
-  var phaseOffset = 0;
-  try {
-    var savedPhase = sessionStorage.getItem(KEY_PHASE);
-    if (savedPhase) { phaseOffset = parseFloat(savedPhase) || 0; }
-  } catch (e) {}
+  // The first version of this played a pass on BOTH pages, which is twice the wait: measured under
+  // throttling, 2.9s on the departure plus another 2.9s on arrival, and on a slow link the arrival
+  // pass stretched to 5s waiting for covers. The flag below is what keeps it to one pass.
+  //
+  // It is a "do not play" marker rather than a phase: it carries no timing, so it cannot accumulate
+  // and cannot make a later clip start mid-stroke.
+  //
+  // 动画由「离开的那一页」播，不是两页都播
+  //
+  // 站主的话是一条序列：点击立刻播放 → 加载 → 播放完就进入新界面。
+  // 也就是说这一遍属于「正在离开」的页面，在它取目标页的同时播放；目标页随即直接显示自己。
+  //
+  // 这一版之前的实现让两页各播一遍，等待因此翻倍：限速下实测出发 2.9 秒、抵达再来 2.9 秒，
+  // 慢链路上抵达那一遍为了等封面还拉到 5 秒。下面这个标记就是把「只播一遍」钉住的东西。
+  //
+  // 它是「不要播放」标记，不是相位：不带任何时间，因此不会累积，也不会让后一次剪辑从半途开始。
+  var KEY_QUIET = 'fns:ink-quiet';
 
-  function elapsedNow() { return phaseOffset + (performance.now ? performance.now() : Date.now() - timeOriginFallback()); }
-  var __t0 = Date.now();
-  function timeOriginFallback() { return __t0; }
+  // ── One clock ─────────────────────────────────────────────────────────────────────────
+  //
+  // Per document, starting at zero. There is deliberately no cross-document phase: an earlier
+  // version added a stored offset to performance.now(), the value grew without bound, and the
+  // second navigation started at (12997 % 2900) ≈ 1400ms into the clip and finished in 557ms —
+  // the "animation flashed past" the owner reported.
+  //
+  // 每文档一只钟，从零开始。刻意没有跨文档相位：早先的版本把存下的偏移加进 performance.now()，
+  // 那个值会无限增长，第二次导航于是从 (12997 % 2900) ≈ 1400ms 处开始、557ms 就结束 ——
+  // 也就是站主报的「动画一闪而过」。
+  var startedAt = 0;
+  function elapsedNow() { return (performance.now ? performance.now() : Date.now()) - startedAt; }
+  function nowMs() { return performance.now ? performance.now() : Date.now(); }
 
   // ── Readiness ─────────────────────────────────────────────────────────────────────────
   //
@@ -365,8 +394,8 @@ const blogWarpScript = `
 
   // Lengths need layout, so this runs once the overlay is in the document and laid out.
   // 长度需要布局，所以在遮罩进入文档并完成布局之后跑一次。
-  function prime() {
-    if (primed || !view) { return; }
+  function prime(layer) {
+    if (primed || !layer) { return; }
     var total = 0;
     for (var i = 0; i < SEGMENTS.length; i++) {
       var seg = SEGMENTS[i];
@@ -390,10 +419,15 @@ const blogWarpScript = `
     var acc = 0;
     for (var m = 0; m < SEGMENTS.length; m++) {
       var s2 = SEGMENTS[m];
-      var start = acc / total;
+      // Not named start: this function is itself named start, and a var of that same name here
+      // shadowed it for the whole body. Every later call to start() inside prime() therefore hit
+      // a float instead of the function.
+      // 不叫 start：这个函数本身就叫 start，而同名的 var 会在整个函数体里遮蔽它。
+      // prime() 内之后每一次对 start() 的调用，实际都落在一个浮点数上。
+      var segStart = acc / total;
       acc += s2.weight;
-      var end = acc / total;
-      timeline.push({ type: 'draw', seg: s2, start: start, end: end });
+      var segEnd = acc / total;
+      timeline.push({ type: 'draw', seg: s2, start: segStart, end: segEnd });
       for (var a = 0; a < AIR.length; a++) {
         if (AIR[a].from !== m) { continue; }
         var aStart = acc / total;
@@ -407,13 +441,28 @@ const blogWarpScript = `
         });
       }
     }
-    render = makeRenderer();
+    render = makeRenderer(layer);
     primed = true;
   }
 
   function handEase(t) { return t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2; }
 
-  function makeRenderer() {
+  function makeRenderer(layer) {
+    // The rendered overlay is passed in and captured here, never read from the module-level var.
+    //
+    // finish() sets view back to null so a later departure can build a fresh one. But this closure
+    // used to read view.pen on every frame, and after the first page's pass had finished and been
+    // torn down, the next departure drew into the CURRENT view while the closure still pointed at
+    // the module var — which was null. Result: "Cannot read properties of null (reading 'pen')",
+    // thrown from paint, which aborted depart() before it ever started waiting. The reader saw the
+    // overlay flash for ~200ms and then nothing.
+    //
+    // 传入并在这里捕获被渲染的那一层遮罩，不读模块级变量。
+    //
+    // finish() 会把 view 置空，好让下一次出发能建一个新的。但这个闭包原本每一帧都读 view.pen；
+    // 首页那一遍播完并被拆掉之后，下一次出发画的是「当前」的 view，而闭包仍然指着那个模块变量，
+    // 它已经是 null。于是 "Cannot read properties of null (reading 'pen')" 从 paint 抛出来，
+    // depart() 在开始等待之前就被中断 —— 读者看到的遮罩闪了约 200ms，然后什么都没有。
     function paint(p) {
       if (p > 1) { p = 1; }
       if (p < 0) { p = 0; }
@@ -430,8 +479,8 @@ const blogWarpScript = `
           if (p <= item.start) { hairOff = seg.length; frac = 0; }
           else if (p >= item.end) { hairOff = 0; frac = 1; }
           else {
-            var local = (p - item.start) / (item.end - item.start);
-            frac = handEase(local);
+            var segT = (p - item.start) / (item.end - item.start);
+            frac = handEase(segT);
             hairOff = seg.length - seg.length * frac;
           }
           seg.el.style.strokeDashoffset = hairOff;
@@ -461,18 +510,18 @@ const blogWarpScript = `
       }
 
       if (penPos) {
-        view.pen.style.opacity = '1';
-        view.pen.setAttribute('transform', 'translate(' + penPos.x + ',' + penPos.y + ') rotate(' + penAngle + ')');
-        if (lifting) { view.pen.classList.add('is-lifting'); }
-        else { view.pen.classList.remove('is-lifting'); }
+        layer.pen.style.opacity = '1';
+        layer.pen.setAttribute('transform', 'translate(' + penPos.x + ',' + penPos.y + ') rotate(' + penAngle + ')');
+        if (lifting) { layer.pen.classList.add('is-lifting'); }
+        else { layer.pen.classList.remove('is-lifting'); }
       } else {
         // Between strokes — and so also at the seam of a repeat — the pen waits above the next
         // stroke rather than disappearing, which is what the sample did at the end of its one pass.
         // 笔画之间 —— 也就是每一遍的接缝处 —— 笔停在下一笔上方，而不是消失；示例在它那一遍结尾是消失的。
         var home = SEGMENTS[0].startPt;
-        view.pen.style.opacity = '1';
-        view.pen.setAttribute('transform', 'translate(' + home.x + ',' + (home.y - 46) + ') rotate(39)');
-        view.pen.classList.remove('is-lifting');
+        layer.pen.style.opacity = '1';
+        layer.pen.setAttribute('transform', 'translate(' + home.x + ',' + (home.y - 46) + ') rotate(39)');
+        layer.pen.classList.remove('is-lifting');
       }
     }
     return paint;
@@ -518,44 +567,45 @@ const blogWarpScript = `
     window.setTimeout(function () {
       document.documentElement.classList.remove('fns-arrived');
     }, 700);
-
-    try { sessionStorage.removeItem(KEY_DEPART); } catch (e) {}
   }
 
   function tick() {
     if (finished) { return; }
-    if (!primed && view) { prime(); }
+    if (!primed && view) { prime(view); }
     if (render) {
-      var el = elapsedNow();
-      render((el % PASS_MS) / PASS_MS);
-
-      // Only once the pen has completed at least one pass AND the page is settled does the overlay
-      // lift. A pass boundary is the only place the pen is off the paper, so lifting there means
-      // the final frame is the finished signature rather than a half-drawn letter.
-      //
-      // 只有当笔至少写完一遍、并且页面已经就绪时，遮罩才抬起。
-      // 一遍的边界是笔唯一离开纸面的时刻，在那里抬起，最后一帧就是写好的签名，而不是半个字母。
-      var passDone = el >= PASS_MS;
-      if (passDone && documentSettled()) {
-        setHint('READY');
-        finish(false);
-        return;
-      }
-      if (documentSettled()) { setHint('READY'); }
-      else if (passDone) { setHint('LOADING'); }
+      render((elapsedNow() % PASS_MS) / PASS_MS);
     }
     raf = requestAnimationFrame(tick);
   }
 
+  // Builds the overlay. Called at load (so the sheet is up before the content is readable) and
+  // again by depart() if the previous one has already been torn down.
+  //
+  // 构建遮罩。加载时调用（让纸面在内容可读之前就在），并在遮罩已被拆掉时由 depart() 再次调用。
   function start() {
-    if (finished || view) { return; }
+    // The view variable alone decides whether there is an overlay to reuse; finished only records
+    // that the previous one was dismissed. Testing both at the top meant a rebuilt overlay was
+    // refused after the first reveal and the renderer was left pointing at nothing.
+    // 只看 view 决定有没有可复用的遮罩；finished 只记录上一层已被收起。
+    // 两个都作为前置条件，会让第一次揭示之后的每一次重建都被拒，而 renderer 留在空处。
+    if (view) { return; }
 
     // Reduced motion: no overlay at all. A reader who asked the system to stop animating should not
-    // be given a 3-second screen in front of every click either.
+    // be given a three-second screen in front of every click either.
     // 减少动效：完全不建遮罩。要求系统停止动画的读者，也不该每次点击都先看三秒画面。
     if (STILL) { return; }
 
     view = buildOverlay();
+
+    // A rebuilt overlay has fresh path elements, so the cached lengths from the previous one are
+    // meaningless. primed must go back to false or prime() early-returns and the new strokes never
+    // get their dash geometry — they would all render fully drawn from the first frame.
+    //
+    // 重建出来的遮罩是全新的 path 元素，上一层的缓存长度对它没有意义。
+    // primed 必须回到 false，否则 prime() 会提前返回，新笔画拿不到 dash 几何 ——
+    // 它们会在第一帧就整条画满。
+    primed = false;
+    render = null;
 
     // The overlay is a child of <html>, never <body>: a transform on body would capture it.
     // 遮罩是 <html> 的子节点，绝不是 <body> 的：body 上的 transform 会捕获它。
@@ -566,69 +616,185 @@ const blogWarpScript = `
     // between the tag being parsed and the animation starting.
     // 同步画出第一帧，于是从标签被解析到动画开始之间，不存在一帧空白或没有样式的遮罩。
     void view.root.offsetWidth;
-    prime();
-    if (render) { render((elapsedNow() % PASS_MS) / PASS_MS); }
+    startedAt = performance.now ? performance.now() : Date.now();
+    prime(view);
+    // Only ever the renderer that prime() just built for THIS overlay. Guarding on render alone
+    // is not enough: after a previous page's pass the module var still held the old closure, whose
+    // captured overlay had already been removed from the document.
+    // 只用 prime() 刚为「这一层」遮罩建好的那个 renderer。只判断 render 是否存在不够：
+    // 上一页播完之后，模块变量里仍是旧闭包，而它捕获的遮罩早已被移出文档。
+    if (timeline && render) { render(0); }
 
     raf = requestAnimationFrame(tick);
   }
 
-  // ── Departure ─────────────────────────────────────────────────────────────────────────
+  // ── The departing sequence ───────────────────────────────────────────────────────────
   //
-  // Navigation is not intercepted. The overlay is already up (every page has one), so a departure
-  // only has to: remember the phase, warm the destination, and get out of the way.
+  // This is the whole contract, and it is a sequence rather than a race:
   //
-  // 出发
+  //   click → one full pass plays from the first stroke → the destination is fetched meanwhile →
+  //   when the pass is done AND the destination is in hand, navigate
   //
-  // 不拦导航。遮罩本来就在（每一页都有），所以一次出发只需要：记住相位、预热目标页、然后让开。
+  // The previous version called location.href immediately after showing the overlay, which tore
+  // the document down mid-stroke: the reader saw a flash, not an animation. The version before that
+  // navigated at a pass boundary but only waited for the document, not the covers, so the reader
+  // got the animation and then watched placeholders spin.
+  //
+  // Both halves are load-bearing:
+  //   - the pass must complete, or the pen is yanked off the page mid-letter;
+  //   - the destination must be fetched, or the next page spends its own overlay waiting
+  //     (a section page carries a dozen covers at ~700ms each).
+  // Whichever finishes last decides, and the pass is never cut short.
+  //
+  // 出发的时序
+  //
+  // 这就是全部契约，它是一条序列而不是赛跑：
+  //
+  //   点击 → 从第一笔完整播一遍 → 同时取目标页 → 这一遍播完且目标页到手，才导航
+  //
+  // 上一版在显示遮罩之后立刻调 location.href，文档在笔画半途被拆掉：读者看到的是一闪，不是动画。
+  // 它之前的一版在遍与遍的边界导航，但只等文档不等封面，于是读者看完动画继续看转圈。
+  //
+  // 两半都是承重的：
+  //   - 这一遍必须播完，否则笔是被从字母中间拽走的；
+  //   - 目标页必须取到，否则下一页会用自己的遮罩继续等
+  //     （一个栏目页十几张封面，每张约 700ms）。
+  // 谁最后完成谁说了算，而这一遍永远不被截断。
+  var MAX_WAIT_MS = 6000;
+
   function warmDestination(url) {
-    // Prefetch the document and every cover it names. The covers are the slow part — a section page
-    // carries a dozen at ~700ms each — and without this the destination shows its own overlay while
-    // they arrive, which is the "animation finished but it is still loading" the owner filmed.
-    //
-    // 预取目标文档以及它引用的每一张封面。封面是慢的那一环 —— 一个栏目页十几张、每张约 700ms ——
-    // 少了这一步，目标页会带着自己的遮罩等它们到齐，
-    // 也就是站主录到的「动画播完了还在加载」。
-    try {
+    // Fetch the document and every cover it names, and report back when the covers have settled.
+    // 取目标文档以及它引用的每一张封面，并在封面落定时回报。
+    return new Promise(function (resolve) {
+      var done = false;
+      function settle() { if (!done) { done = true; resolve(); } }
+
+      // A destination that never answers must not trap the reader on a loading screen.
+      // 永远不回应的目标页不能把读者困在加载画面上。
+      var bail = setTimeout(settle, MAX_WAIT_MS);
+
       fetch(url, { credentials: 'same-origin' })
         .then(function (r) { return r.text(); })
         .then(function (html) {
           var re = /<img[^>]+src="([^"]+)"/g;
-          var m, seen = {}, list = [];
+          var m, seen = {}, srcs = [];
           while ((m = re.exec(html)) !== null) {
             var src = m[1].replace(/&amp;/g, '&');
             if (seen[src]) { continue; }
             seen[src] = 1;
-            list.push(src);
+            srcs.push(src);
           }
-          // Cap the warm-up: a page with hundreds of images should not spawn hundreds of requests
-          // that compete with the document the reader is about to need.
-          // 给预热设上限：一整页几百张图时，不该放几百个请求去和读者马上要用的文档抢带宽。
-          list.slice(0, 14).forEach(function (s) {
-            try { var im = new Image(); im.decoding = 'async'; im.src = s; } catch (e) {}
+          // Cap the warm-up: hundreds of images should not spawn hundreds of requests competing
+          // with the document the reader is about to need.
+          // 给预热设上限：几百张图时不该放几百个请求，去和读者马上要用的文档抢带宽。
+          srcs = srcs.slice(0, 14);
+          if (!srcs.length) { clearTimeout(bail); settle(); return; }
+
+          // Wait for the warm-up images themselves. Loading them without waiting was the earlier
+          // mistake: the overlay lifted on schedule and the covers were still arriving.
+          // 等这些预热图自己完成。只加载不等，是更早那次的错误：
+          // 遮罩按时抬起，而封面还在路上。
+          var left = srcs.length;
+          var finished = false;
+          function one() { left--; if (left <= 0 && !finished) { finished = true; clearTimeout(bail); settle(); } }
+          srcs.forEach(function (s) {
+            try {
+              var im = new Image();
+              im.onload = one;
+              im.onerror = one;   // a broken cover is the page's problem, not a reason to wait
+              im.src = s;
+            } catch (e) { one(); }
           });
         })
-        .catch(function () {});
-    } catch (e) {}
+        .catch(function () { clearTimeout(bail); settle(); });
+    });
   }
 
+  // Every navigation goes through here: play one pass, fetch meanwhile, leave when both are done.
+  // 每一次导航都走这里：播一遍、同时取目标页、两件事都完成再走。
   function depart(url) {
-    if (!url) { return false; }
-    try { sessionStorage.setItem(KEY_PHASE, String(elapsedNow())); } catch (e) {}
-    try { sessionStorage.setItem(KEY_DEPART, '1'); } catch (e) {}
-    warmDestination(url);
-    return true;
-  }
-
-  window.fnsWarp = function (url) {
     if (!url) { return; }
     if (STILL) { location.href = url; return; }
-    depart(url);
-    // Let the overlay repaint its hint before the document is torn down, so the reader is not left
-    // looking at a stale label for the last few milliseconds.
-    // 让遮罩在文档被拆掉之前重画一次提示，读者不会在最后几毫秒里盯着一个过期的标签。
-    if (view) { setHint('LOADING'); }
-    location.href = url;
-  };
+    // A second click during the pass would start a second animation and two fetches.
+    // 一遍进行中再点一次，会开第二套动画和两个请求。
+    if (departing) { return; }
+    departing = true;
+
+    // Fresh overlay, fresh clock. The pass always starts at the first stroke.
+    //
+    // start() rebuilds the DOM and the renderer together, so those two can never drift apart. The
+    // case that used to break: the first page's pass finished, finish() nulled view, and the next
+    // departure kept the old renderer while drawing into a new overlay.
+    //
+    // 新的遮罩、新的时钟。这一遍永远从第一笔开始。
+    //
+    // start() 把 DOM 与 renderer 一起重建，两者因此不可能走散。
+    // 以前会坏的那种情况：首页那一遍播完，finish() 把 view 置空，
+    // 而下一次出发仍留着旧的 renderer，却往新的遮罩里画。
+    // A fresh overlay for every departure. The overlay from the initial page load is gone by now —
+    // finish() removed it — and even if it were not, reusing it would mean re-using a renderer whose
+    // captured DOM has already been shown once. Rebuilding both together is what makes "the pass
+    // always starts at the first stroke" true rather than hopeful.
+    //
+    // 每一次出发都用新的遮罩。页面初次加载时那一层此刻已经不在了 —— finish() 把它移除了 ——
+    // 就算还在，复用它也等于复用一个已经展示过一次、捕获着旧 DOM 的 renderer。
+    // 把两者一起重建，才让「这一遍永远从第一笔开始」成为事实而不是期望。
+    if (view) {
+      // Defensive: a stray overlay left in the DOM (a cancelled navigation, say) is replaced rather
+      // than drawn into.
+      // 防御：DOM 里残留的遮罩（比如一次被取消的导航）就地换掉，而不是往里画。
+      if (view.root && view.root.parentNode) { view.root.parentNode.removeChild(view.root); }
+      view = null;
+    }
+    finished = false;
+    start();
+    startedAt = performance.now ? performance.now() : Date.now();
+    if (render) { render(0); }
+    setHint('LOADING');
+
+    var arrived = warmDestination(url);
+    var readyFlag = false;
+    arrived.then(function () { readyFlag = true; });
+
+    // The pass is the authority. The warm-up is best effort with a short grace period, because the
+    // requirement is "when the pass is done, go in" — waiting on a slow cover would turn that into
+    // "when the covers are done", which is the complaint from the previous round.
+    //
+    // 这一遍是准绳。预热是尽力而为，加一个很短的宽限：
+    // 要求是「这一遍播完就进去」，等一张慢封面会把它变成「等封面加载完」，
+    // 也就是上一轮被退回的那个问题。
+    var GRACE_MS = 500;
+
+    function leave() {
+      if (left) { return; }
+      left = true;
+      setHint('READY');
+      // Tell the destination not to play its own pass. Without this the reader sits through the
+      // animation twice.
+      // 告诉目标页别再播它自己那一遍。少了这个，读者要等两遍动画。
+      try { sessionStorage.setItem(KEY_QUIET, '1'); } catch (e) {}
+      // One short beat so READY is actually seen rather than replaced in the same frame the pen
+      // stops.
+      // 留一拍，让 READY 真的被看到，而不是在笔停下的同一帧被替换掉。
+      setTimeout(function () { location.href = url; }, 180);
+    }
+
+    var left = false;
+
+    function waitForBoth() {
+      if (left) { return; }
+      var el = elapsedNow();
+      var passDone = el >= PASS_MS;
+      if (passDone && (readyFlag || el >= PASS_MS + GRACE_MS)) { leave(); return; }
+      requestAnimationFrame(waitForBoth);
+    }
+
+    requestAnimationFrame(waitForBoth);
+  }
+
+  var departing = false;
+
+  window.fnsWarp = function (url) { depart(url); };
 
   // ── Click delegation ──────────────────────────────────────────────────────────────────
   //
@@ -668,40 +834,89 @@ const blogWarpScript = `
   // ── Arrival, back/forward, and the bfcache trap ───────────────────────────────────────
   //
   // pageshow fires on every load, including a restore from bfcache. A restore hands back the old
-  // document exactly as it was left — which, for a page that was departed from, means html.fns-warping
-  // still applied and body at opacity 0. Nothing else in the page would ever take that off, so the
-  // reader got a white page and no way back. persisted=true is exactly that case, and it is the
-  // only place that can fix it.
+  // document exactly as it was left — which, for a page that was departed from, means
+  // html.fns-warping still applied with a half-finished overlay in the DOM. Nothing else in the page
+  // would ever take that off, so the reader got a white page and no way back. persisted=true is
+  // exactly that case, and it is the only place that can fix it.
+  //
+  // 抵达、前进后退，以及 bfcache 的陷阱
   //
   // pageshow 在每次加载时都会触发，包括从 bfcache 恢复。恢复交还的是旧文档离开时的原样 ——
-  // 对一个「从它出发过」的页面来说，就是 html.fns-warping 仍然生效、body 停在 opacity 0。
+  // 对一个「从它出发过」的页面来说，就是 html.fns-warping 仍然生效、DOM 里还留着一张画到一半的遮罩。
   // 页面里没有任何别的代码会把它摘掉，于是读者拿到一张白页且没有回去的路。
   // persisted=true 正是这种情况，也只有这里能修它。
   window.addEventListener('pageshow', function (ev) {
     if (ev.persisted) {
-      // Drop every trace of a previous departure, then show the document as it is.
-      // 抹掉上一次出发留下的所有痕迹，然后照原样显示这个文档。
+      // Back/forward is a return, not an arrival: the reader has already seen this page, so it is
+      // shown immediately. A three-second signature in front of the back button would punish the
+      // one action people use most.
+      //
+      // 前进/后退是「回来」，不是「抵达」：这一页读者已经看过，所以直接显示。
+      // 在返回键前面放三秒签名，会惩罚人们用得最多的那个动作。
       document.documentElement.classList.remove('fns-warping', 'fns-arrived');
       if (view && view.root && view.root.parentNode) { view.root.parentNode.removeChild(view.root); }
       view = null;
       primed = false;
       finished = true;
-      try { sessionStorage.removeItem(KEY_DEPART); } catch (e) {}
       return;
     }
-    // A restored document already ran start() on its first load; a fresh one has not, and this is
-    // the earliest point every page reaches exactly once.
-    // 恢复的文档在它第一次加载时已经跑过 start()；新文档还没跑过，而这里是每一页恰好到达一次的
-    // 最早时刻。
-    start();
+    // A fresh document. If the overlay is already up from start() at the top of this file, the
+    // remaining question is when to lift it: one full pass AND every image settled.
+    //
+    // 新文档。如果遮罩已经由本文件末尾的 start() 建好，剩下的问题是什么时候抬起它：
+    // 一整遍写完且每张图落定。
+    if (STILL) { return; }
+    waitThenReveal();
   });
+
+  // The arriving page holds the overlay for the same reason the departing one does: one whole pass,
+  // and only once the page can actually be looked at.
+  //
+  // 抵达页留住遮罩的理由与出发页相同：完整的一遍，而且只在页面真的可以被看的时候。
+  function waitThenReveal() {
+    var notice = false;
+    function step() {
+      if (finished) { return; }
+      if (elapsedNow() >= PASS_MS && documentSettled()) {
+        if (!notice) { notice = true; setHint('READY'); }
+        finish(false);
+        return;
+      }
+      requestAnimationFrame(step);
+    }
+    requestAnimationFrame(step);
+  }
 
   // Before the first paint. DOMContentLoaded is too late for the overlay to be there on frame one,
   // but the head script itself already runs early enough to create the node — this just starts the
   // clock on a document that may still be parsing.
+  //
+  // The quiet flag is read here, before the overlay exists, so a page reached through a transition
+  // never paints one at all. Reading it later would mean creating the overlay and then removing it,
+  // which is a visible flash of the very thing we are trying not to show.
+  //
   // 首帧之前。DOMContentLoaded 对「第一帧就有遮罩」来说太晚了，
   // 但 head 脚本本身跑得足够早，已经能创建这个节点 —— 这里只是在一个可能还在解析的文档上启动时钟。
-  start();
+  //
+  // 「不要播放」标记在这里读，在遮罩存在之前，于是经由过渡抵达的页面根本不会画出遮罩。
+  // 晚一步读就意味着先造出来再拆掉，而那正是我们不想让人看见的那一闪。
+  var quiet = false;
+  try {
+    quiet = sessionStorage.getItem(KEY_QUIET) === '1';
+    if (quiet) { sessionStorage.removeItem(KEY_QUIET); }
+  } catch (e) {}
+
+  if (quiet) {
+    // A short fade so the change of document does not read as a hard cut. The heavy lifting — the
+    // one full pass — already happened on the page we left.
+    // 一段短淡入，让换文档不至于像一次硬切。真正的那一遍书写，已经在离开的那一页上完成了。
+    document.documentElement.classList.add('fns-arrived');
+    window.setTimeout(function () {
+      document.documentElement.classList.remove('fns-arrived');
+    }, 700);
+  } else {
+    start();
+  }
 })();
 
 `
