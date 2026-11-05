@@ -374,6 +374,7 @@ const blogThemeScript = `
       var INNER = 0.85;
       var LEAVE_DELAY = 70;
       var MIN_W = 120;
+      var ENTER_MS = 130;
 
       var cards = [];
 
@@ -381,6 +382,7 @@ const blogThemeScript = `
         if (slot.timer) { window.clearTimeout(slot.timer); slot.timer = 0; }
         slot.r = null;
         slot.pending = null;
+        slot.enterAt = 0;
         if (slot.raf) { window.cancelAnimationFrame(slot.raf); slot.raf = 0; }
         slot.card.classList.remove('is-tilting');
         slot.card.style.setProperty('--ry', '0deg');
@@ -416,7 +418,7 @@ const blogThemeScript = `
           sheen.setAttribute('aria-hidden', 'true');
           card.appendChild(sheen);
 
-          var slot = { card: card, r: null, pending: null, raf: 0, timer: 0 };
+          var slot = { card: card, r: null, pending: null, raf: 0, timer: 0, enterAt: 0 };
           cards.push(slot);
 
           function apply() {
@@ -424,17 +426,30 @@ const blogThemeScript = `
             var ev = slot.pending;
             var r = slot.r;
             if (!ev || !r || !r.width || !r.height) { return; }
-            // B4: the outer band holds the maximum angle, so rotating the card cannot change
-            // which side of the edge the pointer is on.
-            // B4：外侧那一条保持最大角度，于是卡片旋转不会改变指针落在边缘的哪一侧。
-            var nx = clamp(((ev.clientX - r.left) / r.width - 0.5) * 2 / INNER);
-            var ny = clamp(((ev.clientY - r.top) / r.height - 0.5) * 2 / INNER);
+
+            // B8 enter ramp. The first frame already moves — there is no delay — but the amplitude
+            // eases in over 130ms. Without it, entering a card at its edge snapped straight to the
+            // maximum 8 degrees in one frame, and the text layer jumped from scale 1 to 1.03 at the
+            // same instant. A single-frame jump of that size is what reads as a flash.
+            //
+            // B8 入场渐入。第一帧就开始动——没有延迟——但幅度在 130ms 内渐入。
+            // 没有它的时候，从卡片边缘进入会在同一帧里直接到 8° 上限，
+            // 文字层也在同一瞬间从 1.0 跳到 1.03；这种一帧之内的跳变，眼睛读到的就是闪。
+            var now = performance.now();
+            var t = slot.enterAt ? Math.min(1, (now - slot.enterAt) / ENTER_MS) : 1;
+            var k = t * t * (3 - 2 * t);           // smoothstep
+            card.style.setProperty('--k', k.toFixed(3));
+
+            var nx = clamp(((ev.clientX - r.left) / r.width - 0.5) * 2 / INNER) * k;
+            var ny = clamp(((ev.clientY - r.top) / r.height - 0.5) * 2 / INNER) * k;
             card.style.setProperty('--ry', (nx * MAX_DEG).toFixed(2) + 'deg');
             card.style.setProperty('--rx', (-ny * MAX_DEG).toFixed(2) + 'deg');
             card.style.setProperty('--px', (-nx * PARALLAX).toFixed(2) + 'px');
             card.style.setProperty('--py', (-ny * PARALLAX).toFixed(2) + 'px');
             card.style.setProperty('--mx', ((nx * 0.5 + 0.5) * 100).toFixed(1) + '%');
             card.style.setProperty('--my', ((ny * 0.5 + 0.5) * 100).toFixed(1) + '%');
+
+            if (t < 1) { slot.raf = window.requestAnimationFrame(apply); }
           }
 
           // B1: respond on the first frame.
@@ -447,6 +462,7 @@ const blogThemeScript = `
             if (slot.timer) { window.clearTimeout(slot.timer); slot.timer = 0; }
             slot.r = card.getBoundingClientRect();
             slot.pending = ev;
+            if (!card.classList.contains('is-tilting')) { slot.enterAt = performance.now(); }
             card.classList.add('is-tilting');
             if (!slot.raf) { slot.raf = window.requestAnimationFrame(apply); }
           });

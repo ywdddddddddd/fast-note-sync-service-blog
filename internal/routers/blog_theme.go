@@ -3152,10 +3152,14 @@ html.is-wx .ask-panel{left:.45rem;right:.45rem;width:auto}
 
 .post-card{
   --tint:color-mix(in srgb,rgb(var(--tint-r,138) var(--tint-g,127) var(--tint-b,111)) 40%,var(--foreground));
-  --tint-bg:color-mix(in srgb,rgb(var(--tint-r,138) var(--tint-g,127) var(--tint-b,111)) 18%,transparent);
+  /* 悬停底色从 18% 降到 8%。
+     18% 的深色叠在纯白卡片上，会把整张卡明显地压成一块灰——
+     指针扫过一列卡片时，每张都「白→灰」跳一次，读起来就是闪。
+     8% 仍然能被察觉（静态对比是 rgb(255) → rgb(247,244,244)），但不再是一块色斑。 */
+  --tint-bg:color-mix(in srgb,rgb(var(--tint-r,138) var(--tint-g,127) var(--tint-b,111)) 8%,transparent);
   position:relative;border:1px solid var(--border);border-radius:16px;
   background:var(--card);overflow:hidden;
-  transition:background-color .15s ease,border-color .15s ease;
+  transition:background-color .22s ease,border-color .22s ease;
 }
 .post-card:hover{background:var(--tint-bg);border-color:color-mix(in srgb,var(--border) 60%,var(--tint))}
 .card-link{display:grid;grid-template-columns:95px minmax(0,1fr);gap:0 1rem;align-items:start;
@@ -3168,7 +3172,7 @@ html.is-wx .ask-panel{left:.45rem;right:.45rem;width:auto}
   mask-image:linear-gradient(90deg,transparent 0,rgba(0,0,0,.15) 30%,#000 72%);
   transition:opacity .3s ease;pointer-events:none;
 }
-.post-card:hover .cover{opacity:.62}
+.post-card:hover .cover{opacity:.52}
 /* Cover loading spinner.
    A cover can be a few hundred KB over a slow link, and until it lands the card shows a tinted
    rectangle with nothing in it — which reads as "this card has no cover" rather than "wait".
@@ -3728,18 +3732,22 @@ body.is-post .rail.is-spring,.graph-panel.is-spring{transition:none!important}
        再叠一层过渡只会让卡片拖在光标后面。150ms 的底色过渡保留，那是悬停的呼吸。 */
     transition:background-color .15s ease,border-color .15s ease;
     box-shadow:0 24px 50px -22px color-mix(in srgb,var(--foreground) 34%,transparent);
-    will-change:transform;
   }
   /* 文字浮起：与封面反向位移，并且整体放大一点点。
-     只位移不放大，读起来是「文字在卡纸表面横移」；加上 2% 的放大，
-     它才像从卡纸里朝读者抬起来一层。位移取反 1.15 倍、封面 7px、文字再退半格，
-     两者相对位移约 14px，层次在 8° 的倾角下已经很清楚。 */
+     只位移不放大，读起来是「文字在卡纸表面横移」；加上 3% 的放大，
+     它才像从卡纸里朝读者抬起来一层。
+
+     缩放与位移都乘上 --k（入场系数 0→1）。没有它，指针一进卡片，文字从 1.0 直接跳到 1.03、
+     角度从 0 直接跳到可能 8°——那是一次硬跳变，看起来就是闪。
+     有了 --k，第一帧就开始动（不延迟），幅度在 130ms 内渐入。
+
+     另外两条 will-change 被去掉了：它们在进入/离开时反复开关，而图层提升与降级在 Chrome 里
+     会让已经合成的卡片重画一次——每次切换伴随一下闪烁。变换本身足够便宜，不需要预告。 */
   .tilt .card-link{
     translate:calc(var(--px,0px) * -1.3) calc(var(--py,0px) * -1.3);
-    scale:1.03;
+    scale:calc(1 + 0.03 * var(--k,0));
     transition:none;
   }
-  .tilt.is-tilting .card-link{will-change:translate,scale}
   /* 倾斜时给文字一层极淡的托影。
      封面在 .42 的不透明度下本来就把正文压得有点平；文字既然抬起来了，
      它和封面之间就该有一道很浅的分离，否则「浮起」只剩下尺寸上的 3%，
@@ -3765,7 +3773,7 @@ body.is-post .rail.is-spring,.graph-panel.is-spring{transition:none!important}
   .tilt-sheen{
     position:absolute;inset:0;z-index:3;pointer-events:none;border-radius:inherit;
     background:radial-gradient(240px circle at var(--mx,50%) var(--my,50%),
-      color-mix(in srgb,var(--foreground) 9%,transparent),transparent 62%);
+      color-mix(in srgb,var(--foreground) 6%,transparent),transparent 62%);
     opacity:0;transition:opacity .3s ease;
   }
   .tilt.is-tilting .tilt-sheen{opacity:1}
