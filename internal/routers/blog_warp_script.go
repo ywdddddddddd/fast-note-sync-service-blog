@@ -1,266 +1,138 @@
 package routers
 
-// The hand-written loader: a fountain pen draws "Wendao's Blog" over a paper-toned overlay while
-// the page behind it loads, and the overlay lifts only once the page can actually be looked at.
-// ── Why a cross-document transition and not a client-side swap ───────────────────────────
+// The hand-written loader. The artwork, the bezier coordinates, the mask-reveal technique and the
+// timing weights are taken verbatim from the sample the owner supplied (博客加载.html) — see
+// blog_warp_fixture_test.go, which parses that file and asserts this script still matches it.
 //
-// Intercepting the click, fetching the destination, swapping the DOM would make the transition
-// seamless with no help from the other page. It would also mean the browser's back button,
-// history, the address bar and a fresh reader's direct visit take a different code path than the
-// one this animation exercises — and the path nobody exercises is the one that breaks.
+// Two things are deliberately different from the sample, and only two:
 //
-// 为什么是跨文档过渡，而不是客户端换页
+//  1. mask_s and mask_B each hold TWO subpaths in the sample. getPointAtLength walks a
+//     multi-subpath path by jumping between them, so the pen teleported 127 units at the seam of
+//     "B" while the reveal kept drawing — the "pen does not follow the stroke" the owner kept
+//     reporting. They are split into four single-subpath segments here, with the weights divided
+//     in proportion to subpath length so the total timing is unchanged.
 //
-// 拦下点击、取回目标页、替换 DOM，可以让过渡不依赖目标页就做到无缝。
-// 但那也意味着浏览器的后退键、历史、地址栏，以及新读者直接访问，
-// 走的都是与这段动画不同的另一条代码路径 —— 而没人走的路径正是会坏的那条。
+//  2. The sample plays once and lifts the pen off at the end. This one loops until the page is
+//     ready, so a wrap-around air stroke carries the pen from the end of the flourish back to the
+//     first stroke instead of teleporting.
 //
-// ── The overlay is created in <head>, on every page, every time ─────────────────────────
+// 手写加载动画。字形、贝塞尔坐标、蒙版揭示手法与时序权重，逐字取自站主给的示例
+// （博客加载.html）—— 见 blog_warp_fixture_test.go，它解析那个文件并断言本脚本仍然与之一致。
 //
-// 2026-11-06, second round. The first version only painted the overlay when a sessionStorage flag
-// said "you arrived from a transition". That produced three concrete failures the owner filmed:
+// 与示例的差别只有两处，没有第三处：
 //
-//  1. A first visit played nothing at all: no flag, no overlay, so the reader watched a white
-//     page and then the site appear.
-//  2. Pressing back restored the previous document from bfcache with html.fns-warping still on it
-//     and body at opacity 0 — a completely white page, forever, because nothing ever removed the
-//     class.
-//  3. The overlay lifted after a fixed number of passes, not after the page was usable. One
-//     section page carries a dozen covers and each takes ~700ms to arrive, so the reader was left
-//     watching placeholders spin after the pen had finished.
+//  1. 示例里 mask_s 与 mask_B 各自含有「两条」子路径。getPointAtLength 走多子路径时会在两者之间跳，
+//     于是蒙版还在揭示、「B」的接缝处笔却瞬移了 127 单位 —— 这就是站主反复报的「书写不跟手」。
+//     这里拆成四条单子路径的段落，权重按子路径长度比例分配，总时长不变。
 //
-// The inverse design fixes all three at once: the overlay is painted by the head script on every
-// blog page before the first frame, it stays until the page is genuinely ready, and it is torn
-// down by the same code that created it.
-//
-// 每一页、每一次，遮罩都在 head 里创建
-//
-// 2026-11-06 第二轮。第一版只在 sessionStorage 标记说「你是过渡过来的」时才画遮罩。
-// 站主录屏里三个具体失败都是它造成的：
-//
-//  1. 首次访问什么都不播：没有标记就没有遮罩，读者先看到一张白页，然后站点出现。
-//  2. 按返回时 bfcache 把旧文档原样恢复，带着 html.fns-warping 和 body 的 opacity:0 ——
-//     整页全白且永远不会恢复，因为没有任何代码去摘掉那个类。
-//  3. 遮罩在固定遍数之后抬起，而不是在页面真的可用之后。一个栏目页有十几张封面，
-//     每张约 700ms 才到，于是笔写完了，读者还在盯着转圈的占位图。
-//
-// 反过来设计的这套一次性修好三件：遮罩由 head 脚本在首帧之前画上，一直留到页面确实就绪，
-// 并且由创建它的同一份代码拆掉。
-//
-// ── One complete pass per navigation ────────────────────────────────────────────────────
-//
-// The owner's requirement, in their own words: 点击立刻播放 → 加载 → 播放完就进入新界面.
-//
-// So every navigation plays one whole pass from the first stroke, the destination is fetched at the
-// same time, and the browser leaves only when both are finished. The pass is never cut short — the
-// pen at the end of a pass is off the paper, which makes that the only frame where lifting the
-// overlay does not read as an interruption.
-//
-// An earlier version carried the animation's phase across documents so the clip appeared to继续
-// over the navigation. That was wrong twice over: sessionStorage accumulated an ever-growing phase,
-// so the second hop started mid-clip and finished in 557ms, and the third was worse. A whole pass
-// per navigation is both what was asked for and what stays correct.
-//
-// 每一次导航完整地播一遍
-//
-// 站主的原话：点击立刻播放 → 加载 → 播放完就进入新界面。
-//
-// 所以每一次导航都从第一笔完整播一遍，同时取目标页，两件事都完成之后浏览器才离开。
-// 这一遍永远不被截断 —— 一遍结尾时笔是离开纸面的，那是唯一一个抬起遮罩不会被读成打断的帧。
-//
-// 更早的一版把动画相位跨文档传下去，想让剪辑看起来连着一次导航。
-// 它错了两处：sessionStorage 里累积出一个越来越大的相位，第二次跳转从半途开始、557ms 就结束，
-// 第三次更糟。每次导航播完整一遍，既是要求，也是唯一正确的做法。
-//
-// ── The overlay must be viewport-sized from any scroll position ──────────────────────────
-//
-// The overlay is a child of <html>, never <body>: the departure fade once put a transform on body,
-// and a transformed element becomes the containing block for its fixed descendants. Measured at
-// scrollY=1176 the canvas sat at y=-1176, entirely off-screen.
-//
-// 遮罩必须在任何滚动位置都完整
-//
-// 遮罩是 <html> 的子节点，绝不是 <body> 的：出发淡出曾在 body 上放 transform，
-// 而被 transform 的元素会成为其 fixed 后代的包含块。实测 scrollY=1176 时画布在 y=-1176，
-// 整个在屏幕外。
+//  2. 示例播一遍就把笔抬走。这一版要循环到页面就绪，所以补一条回绕抬笔，
+//     把笔从底部弧线的末端带回第一笔，而不是瞬移。
 const blogWarpScript = `
 (function () {
-  // ── Guard: blog pages only ──────────────────────────────────────────────────────────────
-  // The same head script is shared by the error page, which has no shell and no reading to wait
-  // for. A loading screen in front of a 404 would be pure delay.
-  // 同一个 head 脚本也被错误页共用，而错误页没有外壳、也没有内容要等。
-  // 在 404 前面放加载画面是纯粹的拖延。
+  // ── Blog pages only ───────────────────────────────────────────────────────────────────
+  // The error page has no shell and no reading to wait for; a loading screen in front of a 404 is
+  // pure delay.
+  // 只处理博客页。错误页没有外壳、也没有内容要等；在 404 前面放加载画面是纯粹的拖延。
   if (location.pathname.indexOf('/blog') !== 0) { return; }
 
   var STILL = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
 
-  // ── Who plays the animation: the departing page, not both ─────────────────────────────
-  //
-  // The owner's wording is a single sequence: 点击立刻播放 → 加载 → 播放完就进入新界面. That means
-  // the pass belongs to the page being left, played while its destination is fetched. The
-  // destination then shows itself immediately.
-  //
-  // The first version of this played a pass on BOTH pages, which is twice the wait: measured under
-  // throttling, 2.9s on the departure plus another 2.9s on arrival, and on a slow link the arrival
-  // pass stretched to 5s waiting for covers. The flag below is what keeps it to one pass.
-  //
-  // It is a "do not play" marker rather than a phase: it carries no timing, so it cannot accumulate
-  // and cannot make a later clip start mid-stroke.
-  //
-  // 动画由「离开的那一页」播，不是两页都播
-  //
-  // 站主的话是一条序列：点击立刻播放 → 加载 → 播放完就进入新界面。
-  // 也就是说这一遍属于「正在离开」的页面，在它取目标页的同时播放；目标页随即直接显示自己。
-  //
-  // 这一版之前的实现让两页各播一遍，等待因此翻倍：限速下实测出发 2.9 秒、抵达再来 2.9 秒，
-  // 慢链路上抵达那一遍为了等封面还拉到 5 秒。下面这个标记就是把「只播一遍」钉住的东西。
-  //
-  // 它是「不要播放」标记，不是相位：不带任何时间，因此不会累积，也不会让后一次剪辑从半途开始。
+  // One-shot marker meaning "the pass already played on the page you left; show yourself directly".
+  // It carries no timing, so it cannot accumulate the way a stored phase did.
+  // 一次性标记，意思是「你离开的那一页已经播完了，直接显示自己」。
+  // 它不带任何时间，因此不会像存下来的相位那样累积。
   var KEY_QUIET = 'fns:ink-quiet';
 
-  // ── One clock ─────────────────────────────────────────────────────────────────────────
-  //
-  // Per document, starting at zero. There is deliberately no cross-document phase: an earlier
-  // version added a stored offset to performance.now(), the value grew without bound, and the
-  // second navigation started at (12997 % 2900) ≈ 1400ms into the clip and finished in 557ms —
-  // the "animation flashed past" the owner reported.
-  //
-  // 每文档一只钟，从零开始。刻意没有跨文档相位：早先的版本把存下的偏移加进 performance.now()，
-  // 那个值会无限增长，第二次导航于是从 (12997 % 2900) ≈ 1400ms 处开始、557ms 就结束 ——
-  // 也就是站主报的「动画一闪而过」。
-  var startedAt = 0;
-  function elapsedNow() { return (performance.now ? performance.now() : Date.now()) - startedAt; }
-  function nowMs() { return performance.now ? performance.now() : Date.now(); }
+  // The sample's own base duration, unchanged.
+  // 示例自己的基准时长，未改动。
+  var PASS_MS = 2400;
 
-  // ── Readiness ─────────────────────────────────────────────────────────────────────────
+  // ── Timing, verbatim from the sample ──────────────────────────────────────────────────
   //
-  // "Ready" means: the document finished parsing, and every image already in the document has
-  // either loaded or failed. Covers are the slow part — one section page carries a dozen at ~700ms
-  // each — so waiting on the document alone is what left the reader watching spinners.
+  // weight is relative cost, not length: "endao" is the long run of cursive and the flourish is a
+  // long shallow arc, so equal lengths would draw them at visibly different speeds.
   //
-  // Images that fail must not hold the overlay forever: a broken cover is the page's problem and
-  // the reader still wants the article. They count as settled once the browser gives up on them.
+  // ── 时序，逐字取自示例 ────────────────────────────────────────────────────────────────
   //
-  // 就绪
+  // weight 是相对代价而不是长度：「endao」是最长的一段连笔，底部弧线则是又长又浅的一道，
+  // 只看长度会让它们用肉眼可见的不同速度画出来。
   //
-  // 「就绪」指：文档解析完成，且文档里每一张图要么已加载、要么已失败。
-  // 封面是慢的那一环 —— 一个栏目页有十几张、每张约 700ms ——
-  // 所以只等文档，正是让读者盯着转圈图标的原因。
-  //
-  // 失败的图不能永远扣着遮罩：坏掉的封面是页面的问题，读者仍然要读正文。
-  // 浏览器放弃它们之后就算落定。
-  function imagesSettled() {
-    var imgs = document.images;
-    for (var i = 0; i < imgs.length; i++) {
-      var img = imgs[i];
-      if (img.complete) { continue; }
-      // A lazy image below the fold has not been asked for yet, and waiting for it would hold the
-      // overlay until the reader scrolls. Lazy work belongs to scrolling, not to first paint.
-      // 视口之外的懒加载图还没被请求，等它会把遮罩扣到读者滚动为止。
-      // 懒加载属于滚动，不属于首屏。
-      if (img.loading === 'lazy') { continue; }
-      return false;
-    }
-    return true;
-  }
-
-  function documentSettled() {
-    if (document.readyState !== 'complete') { return false; }
-    return imagesSettled();
-  }
-
-  // ── The artwork ───────────────────────────────────────────────────────────────────────
-  //
-  // From the sample file the owner supplied. Eight pen-down strokes rather than the sample's six:
-  // the sample folded "s" and "B" into one path each with two subpaths, and getPointAtLength walks
-  // a multi-subpath path by jumping between them. Measured at the seam of "B": the pen travelled 127
-  // units in a single step, so it floated away from the letter being drawn. One subpath per stroke
-  // keeps the pen on the ink.
-  //
-  // 字形
-  //
-  // 取自站主给的示例文件。八次落笔而不是示例的六次：示例把「s」和「B」各自折成了一条含两个子路径的
-  // path，而 getPointAtLength 走多子路径时会在子路径之间跳。实测「B」的接缝处笔一步走了 127 单位，
-  // 于是它飘离了正在画的字母。每笔一条子路径，笔才留在墨上。
-  var SEGMENTS = [
-    {
-      weight: 1.05,
-      hair: 'M 130,195 C 115,200 110,230 115,258 C 122,298 140,318 160,318 C 178,318 194,290 205,255 C 218,290 234,318 252,318 C 274,318 290,270 298,205 C 302,185 292,180 282,184 C 274,188 274,204 282,224 C 290,248 304,268 318,268',
-      swells: [
-        { d: 'M 115,225 C 117,250 128,285 145,310', w: 7.5 },
-        { d: 'M 205,255 C 218,290 232,315 245,316', w: 6.8 }
-      ]
-    },
-    {
-      weight: 2.10,
-      hair: 'M 318,268 C 328,268 344,242 355,228 C 362,218 354,210 344,216 C 334,222 328,244 330,266 C 332,284 345,294 360,290 C 375,286 385,268 392,252 C 396,242 404,236 412,240 C 418,245 414,265 410,288 C 420,258 435,236 450,236 C 462,236 462,254 458,288 C 470,262 485,238 502,238 C 486,242 474,258 474,275 C 474,292 485,300 498,298 C 510,296 520,280 526,260 L 530,165 C 530,154 524,154 522,165 L 518,295 C 518,303 528,303 538,292 C 548,272 562,240 580,240 C 565,244 554,258 554,274 C 554,290 565,298 576,296 C 588,294 598,278 602,260 L 600,295 C 600,302 610,302 620,290 C 630,272 642,240 660,240 C 645,244 634,258 634,274 C 634,290 645,298 658,296 C 674,294 682,274 682,256 C 682,242 672,240 664,244 C 655,248 662,258 674,258',
-      swells: [
-        { d: 'M 352,228 C 342,238 332,254 334,272', w: 5.5 },
-        { d: 'M 412,240 C 418,250 415,268 412,286', w: 6.5 },
-        { d: 'M 454,246 C 460,256 460,270 458,286', w: 6.5 },
-        { d: 'M 498,242 C 484,248 476,262 476,276 C 476,290 484,298 495,298', w: 5.5 },
-        { d: 'M 528,185 L 522,295', w: 7.5 },
-        { d: 'M 578,244 C 564,248 556,262 556,276 C 556,288 564,296 575,296', w: 5.5 },
-        { d: 'M 602,260 L 600,294', w: 6.5 },
-        { d: 'M 658,244 C 644,248 636,262 636,276 C 636,288 644,296 655,296', w: 5.5 }
-      ]
-    },
-    {
-      weight: 0.30,
-      hair: 'M 698,198 C 696,208 692,220 687,228',
-      swells: []
-    },
-    {
-      weight: 0.75,
-      hair: 'M 698,280 C 708,252 722,238 732,240 C 738,242 738,252 730,260 C 720,272 718,282 724,290 C 730,298 742,294 750,286',
-      swells: []
-    },
-    {
-      weight: 0.55,
-      hair: 'M 798,165 C 794,180 782,235 778,295 C 776,306 768,308 762,300',
-      swells: [ { d: 'M 794,180 C 790,215 780,260 778,295', w: 8.0 } ]
-    },
-    {
-      weight: 0.95,
-      hair: 'M 788,178 C 804,162 842,162 848,195 C 852,216 836,234 814,240 C 840,244 860,262 858,285 C 856,304 834,310 812,306 C 796,303 794,294 804,290 C 814,286 828,292 836,282 C 842,272 832,252 806,248',
-      swells: [
-        { d: 'M 830,166 C 844,172 850,186 846,204 C 842,220 830,230 816,236', w: 6.0 },
-        { d: 'M 834,244 C 852,250 858,266 854,284 C 850,298 834,306 816,304', w: 7.0 }
-      ]
-    },
-    {
-      weight: 1.70,
-      hair: 'M 852,284 C 872,244 902,158 912,158 C 918,158 916,172 905,210 L 888,295 C 888,302 896,302 906,290 C 916,272 928,240 946,240 C 932,244 920,258 920,274 C 920,290 932,298 944,296 C 958,294 966,274 966,256 C 966,242 958,240 950,244 C 942,248 948,258 960,258 C 972,244 984,240 998,240 C 982,244 972,258 972,274 C 972,290 982,298 994,296 C 1005,294 1014,280 1018,260 L 1016,330 C 1012,375 994,405 956,412',
-      swells: [
-        { d: 'M 915,178 L 892,295', w: 8.0 },
-        { d: 'M 944,244 C 930,248 922,262 922,276 C 922,288 930,296 942,296', w: 5.5 },
-        { d: 'M 996,244 C 982,248 974,262 974,276 C 974,288 982,296 994,296', w: 5.5 },
-        { d: 'M 1018,260 L 1016,335 C 1012,375 994,405 956,412', w: 7.5 }
-      ]
-    },
-    {
-      weight: 1.15,
-      hair: 'M 956,412 C 908,416 835,410 740,400 C 560,380 370,380 230,398 C 175,405 150,398 165,386 C 185,372 240,375 320,378',
-      swells: [ { d: 'M 850,409 C 680,392 480,385 270,394', w: 4.8 } ]
-    }
+  // s and B are split. The two numbers in the comment on each are (sample weight, sample weight)
+  // divided by subpath length: 0.95 over 32/142 units, 1.45 over 155/379 units.
+  // s 与 B 拆开了。各行注释里的两个数，是把示例的权重按子路径长度拆开所得：
+  // 0.95 分成 32/142 单位，1.45 分成 155/379 单位。
+  var SEGDEFS = [
+    { id: 'W',         weight: 1.25, endAngle: 42 },
+    { id: 'endao',     weight: 2.70, endAngle: 38 },
+    { id: 's1',        weight: 0.17, endAngle: 40 },
+    { id: 's2',        weight: 0.78, endAngle: 40 },
+    { id: 'B1',        weight: 0.42, endAngle: 36 },
+    { id: 'B2',        weight: 1.03, endAngle: 36 },
+    { id: 'log',       weight: 2.20, endAngle: 42 },
+    { id: 'Underline', weight: 1.40, endAngle: 35 }
   ];
 
-  // Pen-up travel. The last entry wraps the underline back to the start of "Wendao", so the seam of
-  // a repeat is a movement rather than a teleport.
-  // 抬笔位移。最后一条把底部弧线接回「Wendao」的起笔，于是重复的接缝是一次移动而不是瞬移。
-  var AIR = [
-    { from: 0, to: 1, weight: 0.14 },
-    { from: 1, to: 2, weight: 0.12 },
-    { from: 2, to: 3, weight: 0.08 },
-    { from: 3, to: 4, weight: 0.26 },
-    { from: 4, to: 5, weight: 0.10 },
-    { from: 5, to: 6, weight: 0.14 },
-    { from: 6, to: 7, weight: 0.06 },
+  // Pen-up travel, from the sample, plus the wrap that looping needs.
+  // 抬笔位移，取自示例，另加循环需要的回绕。
+  var AIRDEFS = [
+    { from: 0, to: 1, weight: 0.18 },
+    { from: 1, to: 2, weight: 0.16 },
+    { from: 2, to: 3, weight: 0.04 },
+    { from: 3, to: 4, weight: 0.32 },
+    { from: 4, to: 5, weight: 0.08 },
+    { from: 5, to: 6, weight: 0.18 },
+    { from: 6, to: 7, weight: 0.08 },
     { from: 7, to: 0, weight: 0.30 }
   ];
 
+  // Path geometry, verbatim from the sample's mask. One subpath each.
+  // 路径几何，逐字取自示例的 mask。每条一条子路径。
+  var D = {
+    W: 'M 130,195 C 115,200 110,230 115,258 C 122,298 140,318 160,318 C 178,318 194,290 205,255 C 218,290 234,318 252,318 C 274,318 290,270 298,205 C 302,185 292,180 282,184 C 274,188 274,204 282,224 C 290,248 304,268 318,268',
+    endao: 'M 318,268 C 328,268 344,242 355,228 C 362,218 354,210 344,216 C 334,222 328,244 330,266 C 332,284 345,294 360,290 C 375,286 385,268 392,252 C 396,242 404,236 412,240 C 418,245 414,265 410,288 C 420,258 435,236 450,236 C 462,236 462,254 458,288 C 470,262 485,238 502,238 C 486,242 474,258 474,275 C 474,292 485,300 498,298 C 510,296 520,280 526,260 L 530,165 C 530,154 524,154 522,165 L 518,295 C 518,303 528,303 538,292 C 548,272 562,240 580,240 C 565,244 554,258 554,274 C 554,290 565,298 576,296 C 588,294 598,278 602,260 L 600,295 C 600,302 610,302 620,290 C 630,272 642,240 660,240 C 645,244 634,258 634,274 C 634,290 645,298 658,296 C 674,294 682,274 682,256 C 682,242 672,240 664,244 C 655,248 662,258 674,258',
+    s1: 'M 698,198 C 696,208 692,220 687,228',
+    s2: 'M 698,280 C 708,252 722,238 732,240 C 738,242 738,252 730,260 C 720,272 718,282 724,290 C 730,298 742,294 750,286',
+    B1: 'M 798,165 C 794,180 782,235 778,295 C 776,306 768,308 762,300',
+    B2: 'M 788,178 C 804,162 842,162 848,195 C 852,216 836,234 814,240 C 840,244 860,262 858,285 C 856,304 834,310 812,306 C 796,303 794,294 804,290 C 814,286 828,292 836,282 C 842,272 832,252 806,248',
+    log: 'M 852,284 C 872,244 902,158 912,158 C 918,158 916,172 905,210 L 888,295 C 888,302 896,302 906,290 C 916,272 928,240 946,240 C 932,244 920,258 920,274 C 920,290 932,298 944,296 C 958,294 966,274 966,256 C 966,242 958,240 950,244 C 942,248 948,258 960,258 C 972,244 984,240 998,240 C 982,244 972,258 972,274 C 972,290 982,298 994,296 C 1005,294 1014,280 1018,260 L 1016,330 C 1012,375 994,405 956,412',
+    Underline: 'M 956,412 C 908,416 835,410 740,400 C 560,380 370,380 230,398 C 175,405 150,398 165,386 C 185,372 240,375 320,378'
+  };
+
+  // Pressure swells, verbatim from the sample. These are what make the lettering read as written
+  // rather than plotted; the sample keeps them in a separate group from the hairlines.
+  // 按压加粗，逐字取自示例。它们让字形读起来像「写」而不是「描」；示例把它们与细骨分开成组。
+  var SWELLS = [
+    { d: 'M 115,225 C 117,250 128,285 145,310', w: 7.5 },
+    { d: 'M 205,255 C 218,290 232,315 245,316', w: 6.8 },
+    { d: 'M 352,228 C 342,238 332,254 334,272', w: 5.5 },
+    { d: 'M 412,240 C 418,250 415,268 412,286', w: 6.5 },
+    { d: 'M 454,246 C 460,256 460,270 458,286', w: 6.5 },
+    { d: 'M 498,242 C 484,248 476,262 476,276 C 476,290 484,298 495,298', w: 5.5 },
+    { d: 'M 528,185 L 522,295', w: 7.5 },
+    { d: 'M 578,244 C 564,248 556,262 556,276 C 556,288 564,296 575,296', w: 5.5 },
+    { d: 'M 602,260 L 600,294', w: 6.5 },
+    { d: 'M 658,244 C 644,248 636,262 636,276 C 636,288 644,296 655,296', w: 5.5 },
+    { d: 'M 794,180 C 790,215 780,260 778,295', w: 8.0 },
+    { d: 'M 830,166 C 844,172 850,186 846,204 C 842,220 830,230 816,236', w: 6.0 },
+    { d: 'M 834,244 C 852,250 858,266 854,284 C 850,298 834,306 816,304', w: 7.0 },
+    { d: 'M 915,178 L 892,295', w: 8.0 },
+    { d: 'M 944,244 C 930,248 922,262 922,276 C 922,288 930,296 942,296', w: 5.5 },
+    { d: 'M 996,244 C 982,248 974,262 974,276 C 974,288 982,296 994,296', w: 5.5 },
+    { d: 'M 1018,260 L 1016,335 C 1012,375 994,405 956,412', w: 7.5 },
+    { d: 'M 850,409 C 680,392 480,385 270,394', w: 4.8 }
+  ];
+
+  // Wet ink sheen, verbatim from the sample.
+  // 未干墨光，逐字取自示例。
+  var SHEEN = [
+    { d: 'M 122,240 C 126,268 136,295 148,310', w: 2.2 },
+    { d: 'M 526,195 L 522,285', w: 2.0 },
+    { d: 'M 792,190 C 788,225 780,268 778,292', w: 2.4 },
+    { d: 'M 912,190 L 894,285', w: 2.2 },
+    { d: 'M 1016,325 C 1012,365 996,392 965,408', w: 2.2 }
+  ];
+
   var NS = 'http://www.w3.org/2000/svg';
-  var PASS_MS = 2900;
 
   function svgEl(name, attrs) {
     var n = document.createElementNS(NS, name);
@@ -273,110 +145,222 @@ const blogWarpScript = `
     return n;
   }
 
-  // ── Build ─────────────────────────────────────────────────────────────────────────────
+  // ── Theme ─────────────────────────────────────────────────────────────────────────────
   //
-  // The two critical style declarations are written inline, not left to the stylesheet.
+  // The sample is a light-paper demo: near-black ink on cream. On this site the overlay is painted
+  // in the reader's theme, so the ink gradient flips and the guide lines dim. The pen itself does
+  // not change — an 18K nib with gold furniture reads correctly on both.
   //
-  // This script runs in <head>, which by definition is before the <style> block that follows it.
-  // Creating a bare div there means the first frames show an unstyled block: no fixed positioning,
-  // no background, and an <svg> at its intrinsic 1100x500 painting over the page. Measured on a
-  // 390x844 viewport the overlay reported 390x529 with a 1100x500 artwork — the sheet was sized by
-  // its own content because none of the rules had been parsed yet.
+  // 主题
   //
-  // Inlining position/inset/z-index/background/overflow costs a few bytes and makes the overlay
-  // correct from its very first painted frame, whether or not the stylesheet has arrived. Every
-  // other declaration (flex centring, colours, transitions, the lettering) stays in the sheet.
-  //
-  // 两个关键样式内联写，而不是留给样式表。
-  //
-  // 这个脚本跑在 <head> 里，按定义就在它后面的 <style> 之前。在那里造一个裸 div，
-  // 最初几帧呈现的就是一个没有样式的块：没有 fixed、没有底色，
-  // 而 <svg> 以自己 1100x500 的内在尺寸画在页面上。
-  // 在 390x844 的视口上实测，遮罩报 390x529、画面 1100x500 —— 纸面被自己的内容撑出了尺寸，
-  // 因为当时一条规则都还没被解析。
-  //
-  // 内联 position/inset/z-index/背景/overflow 只多几个字节，
-  // 却让遮罩从它被画出来的第一帧起就是对的，无论样式表到没到。
-  // 其余声明（flex 居中、配色、过渡、字形）仍留在样式表里。
+  // 示例是浅纸演示：米色底上的近黑墨。本站的遮罩按读者当前主题上色，
+  // 所以墨色渐变要翻转、参考线要压暗。钢笔本身不变 —— 18K 笔尖配金件在两种底色上都成立。
+  function isDark() {
+    var de = document.documentElement;
+    if (de.classList.contains('dark')) { return true; }
+    if (de.classList.contains('light')) { return false; }
+    try { return !!(window.matchMedia && window.matchMedia('(prefers-color-scheme:dark)').matches); } catch (e) {}
+    return false;
+  }
+
+  // The critical shell declarations are inline, not left to the stylesheet: this script runs in
+  // <head>, which is before the <style> block that follows it. A bare div there paints unstyled —
+  // measured on a 390x844 viewport, an overlay 390 wide and 529 tall with an <svg> drawing at its
+  // intrinsic 1100x500.
+  // 外壳的关键声明内联，不留给样式表：本脚本跑在 <head> 里，按定义在它后面的 <style> 之前。
+  // 那里一个裸 div 会以无样式状态被画出 —— 在 390x844 视口上实测到遮罩 390 宽、529 高，
+  // 而 <svg> 按内在的 1100x500 作画。
   var SHELL_STYLE = 'position:fixed;top:0;right:0;bottom:0;left:0;' +
-    'z-index:2147483000;pointer-events:none;overflow:hidden;' +
-    'background:#fff;';
+    'z-index:2147483000;pointer-events:none;overflow:hidden;';
 
+  // ── Build ─────────────────────────────────────────────────────────────────────────────
   function buildOverlay() {
-    var root = htmlEl('div', { 'class': 'fns-ink', 'aria-hidden': 'true' });
+    var dark = isDark();
+    var paper = dark ? '#1a1a1a' : '#fbfaf7';
+    var inkA = dark ? '#eef2fa' : '#141a29';
+    var inkB = dark ? '#e2e8f4' : '#0f1422';
+    var inkC = dark ? '#f4f7fd' : '#1c2333';
+    var guide = dark ? '#3a3d44' : '#d8ccbb';
 
-    // The paper colour has to match the theme from the first frame too, and the theme is decided by
-    // the theme script that runs just before this one — so read it here rather than waiting for the
-    // stylesheet's var(--background).
-    // 纸色也必须从第一帧就与主题一致，而主题由恰好跑在前面的主题脚本决定 ——
-    // 所以在这里读它，而不是等样式表的 var(--background)。
-    var earlyBg = '#fff';
-    if (document.documentElement.classList.contains('dark')) { earlyBg = '#1a1a1a'; }
-    else if (!document.documentElement.classList.contains('light')) {
-      // The system state adds no class; the media query decides, and it is a preference the script
-      // can read directly.
-      // 跟随系统时两个类都不加，由媒体查询决定；而这是一个脚本能直接读到的偏好。
-      try {
-        if (window.matchMedia && window.matchMedia('(prefers-color-scheme:dark)').matches) { earlyBg = '#1a1a1a'; }
-      } catch (e) {}
-    }
-    root.setAttribute('style', SHELL_STYLE + 'background:' + earlyBg + ';');
+    var root = htmlEl('div', { 'class': 'fns-ink', 'aria-hidden': 'true' });
+    root.setAttribute('style', SHELL_STYLE + 'background:' + paper + ';');
 
     var svg = svgEl('svg', {
       viewBox: '0 0 1100 500',
       preserveAspectRatio: 'xMidYMid meet',
       'class': 'fns-ink-svg',
-      // Intrinsic width/height, not only CSS: an <svg> without them has no intrinsic ratio and
-      // measured 0x0 inside a flex column with height:auto.
-      // 内在宽高，不只是 CSS：没有它们的 <svg> 没有内在比例，在 height:auto 的 flex 纵列里量到 0x0。
+      // Intrinsic size, and a bounded width before the stylesheet lands.
+      // 内在尺寸，并在样式表到达之前就限住宽度。
       width: '1100',
       height: '500',
-      // Bounded before the stylesheet lands, so the artwork cannot paint at 1100px wide over a
-      // 390px phone screen for the first few frames.
-      // 在样式表到达之前就限住，字形不会在最初几帧里以 1100px 宽画在 390px 的手机屏上。
       style: 'display:block;width:min(86vw,760px);height:auto;max-height:64vh;'
     });
 
-    SEGMENTS.forEach(function (seg) {
-      var g = svgEl('g', { 'class': 'fns-ink-seg' });
-      var hair = svgEl('path', { d: seg.hair, 'class': 'fns-ink-hair' });
-      g.appendChild(hair);
-      seg.el = hair;
-      seg.swellEls = [];
-      seg.swells.forEach(function (sw) {
-        var p = svgEl('path', { d: sw.d, 'class': 'fns-ink-swell', 'stroke-width': sw.w });
-        g.appendChild(p);
-        seg.swellEls.push(p);
+    var defs = svgEl('defs');
+
+    function grad(id, stops, x2, y2) {
+      var g = svgEl('linearGradient', { id: id, x1: '0%', y1: '0%', x2: x2, y2: y2 });
+      stops.forEach(function (s) {
+        g.appendChild(svgEl('stop', { offset: s[0], 'stop-color': s[1], 'stop-opacity': s.length > 2 ? s[2] : '1' }));
       });
-      svg.appendChild(g);
+      defs.appendChild(g);
+    }
+
+    // The sample's gradients, with the ink colours following the theme.
+    // 示例的渐变，墨色随主题。
+    grad('fnsDeepInk', [['0%', inkA], ['50%', inkB], ['100%', inkC]], '100%', '80%');
+    grad('fnsWetSheen', [['0%', '#79a9f5', '0'], ['50%', '#a4c7ff', '0.8'], ['100%', '#79a9f5', '0']], '100%', '0%');
+    grad('fnsGoldSheen', [['0%', '#ffe8a3'], ['35%', '#d8ab4e'], ['70%', '#9a7322'], ['100%', '#644810']], '100%', '100%');
+    grad('fnsRhodium', [['0%', '#cad0d9'], ['45%', '#ffffff'], ['75%', '#dbe0e8'], ['100%', '#9ea5b0']], '100%', '0%');
+    grad('fnsBarrel', [['0%', '#121317'], ['40%', '#2d323b'], ['70%', '#181a1f'], ['100%', '#0d0e12']], '100%', '0%');
+
+    // Ink bleed on the artwork.
+    // 字形上的墨迹微渗。
+    var inkSpread = svgEl('filter', { id: 'fnsInkSpread', x: '-10%', y: '-10%', width: '120%', height: '120%' });
+    inkSpread.appendChild(svgEl('feDropShadow', {
+      dx: '0.5', dy: '1.2', stdDeviation: '0.8', 'flood-color': dark ? '#000000' : '#0b101d', 'flood-opacity': '0.18'
+    }));
+    defs.appendChild(inkSpread);
+
+    // The pen's cast shadow. The sample animates the blur, offset and alpha ids; they are declared
+    // here so the ids exist, and the renderer nudges them as the pen moves.
+    // 钢笔投影。示例会驱动 blur/offset/alpha 三个 id；这里声明它们，好让渲染器随笔移动微调。
+    var penShadow = svgEl('filter', { id: 'fnsPenShadow', x: '-60%', y: '-60%', width: '220%', height: '220%' });
+    penShadow.appendChild(svgEl('feGaussianBlur', { in: 'SourceAlpha', stdDeviation: '5', id: 'fnsShadowBlur' }));
+    penShadow.appendChild(svgEl('feOffset', { dx: '16', dy: '22', id: 'fnsShadowOffset' }));
+    var comp = svgEl('feComponentTransfer');
+    comp.appendChild(svgEl('feFuncA', { type: 'linear', slope: '0.22', id: 'fnsShadowAlpha' }));
+    penShadow.appendChild(comp);
+    var merge = svgEl('feMerge');
+    merge.appendChild(svgEl('feMergeNode'));
+    merge.appendChild(svgEl('feMergeNode', { in: 'SourceGraphic' }));
+    penShadow.appendChild(merge);
+    defs.appendChild(penShadow);
+
+    var wetGlow = svgEl('filter', { id: 'fnsWetGlow' });
+    wetGlow.appendChild(svgEl('feGaussianBlur', { stdDeviation: '1.5', result: 'glow' }));
+    var glowMerge = svgEl('feMerge');
+    glowMerge.appendChild(svgEl('feMergeNode', { in: 'glow' }));
+    glowMerge.appendChild(svgEl('feMergeNode', { in: 'SourceGraphic' }));
+    wetGlow.appendChild(glowMerge);
+    defs.appendChild(wetGlow);
+
+    // ── The reveal mask ────────────────────────────────────────────────────────────────
+    //
+    // This is what the sample does and what my earlier rewrites got wrong: the artwork is not
+    // stroked progressively. It sits complete under a mask whose white strokes are 26 units wide,
+    // and only the dashes of those strokes are animated. That is why the lettering keeps its
+    // thick/thin character — the pen is revealing finished ink, not drawing a thin line.
+    //
+    // ── 揭示蒙版 ──────────────────────────────────────────────────────────────────────
+    //
+    // 这是示例的做法，也是我前几次重写搞错的地方：字形不是被一点点描出来的。
+    // 它完整地待在蒙版之下，蒙版里是 26 单位宽的白色描边，只有这些描边的 dash 在动。
+    // 这就是为什么字形保留了粗细变化 —— 笔是在揭示已经写好的墨，而不是在画一条细线。
+    var mask = svgEl('mask', {
+      id: 'fnsMask', maskUnits: 'userSpaceOnUse', x: '0', y: '0', width: '1100', height: '500'
     });
 
-    // The pen. Its origin is the nib tip, so rotation happens about the point that touches paper.
-    // 钢笔。原点在笔尖，于是旋转绕着接触纸面的那个点发生。
-    var pen = svgEl('g', { 'class': 'fns-ink-pen' });
-    var tip = svgEl('g', { 'class': 'fns-ink-pen-body' });
+    var segEls = {};
+    SEGDEFS.forEach(function (seg) {
+      var p = svgEl('path', {
+        id: 'fnsMask' + seg.id,
+        d: D[seg.id],
+        fill: 'none',
+        stroke: '#fff',
+        'stroke-width': '26',
+        'stroke-linecap': 'round',
+        'stroke-linejoin': 'round'
+      });
+      mask.appendChild(p);
+      segEls[seg.id] = p;
+    });
+    defs.appendChild(mask);
+    svg.appendChild(defs);
 
-    tip.appendChild(svgEl('path', {
-      'class': 'fns-ink-pen-barrel',
-      d: 'M -15,-132 L 15,-132 L 13.2,-72 L -13.2,-72 Z'
-    }));
-    tip.appendChild(svgEl('path', {
-      'class': 'fns-ink-pen-collar',
-      d: 'M -14.6,-78 L 14.6,-78 L 14.6,-72 L -14.6,-72 Z'
-    }));
-    tip.appendChild(svgEl('path', {
-      'class': 'fns-ink-pen-nib',
-      d: 'M 0,0 C 2.8,-7 8.5,-22 12,-34 C 15.5,-46 17.5,-58 15.5,-72 L -15.5,-72 C -17.5,-58 -15.5,-46 -12,-34 C -8.5,-22 -2.8,-7 0,0 Z'
-    }));
-    tip.appendChild(svgEl('path', {
-      'class': 'fns-ink-pen-plate',
-      d: 'M 0,-7 C 2.2,-14 6.8,-26 9.5,-36 C 11.8,-46 12.8,-56 11.2,-68 L -11.2,-68 C -12.8,-56 -11.8,-46 -9.5,-36 C -6.8,-26 -2.2,-14 0,-7 Z'
-    }));
-    tip.appendChild(svgEl('circle', { 'class': 'fns-ink-pen-hole', cx: '0', cy: '-35', r: '2.8' }));
-    tip.appendChild(svgEl('path', { 'class': 'fns-ink-pen-slit', d: 'M 0,0 L 0,-32' }));
-    tip.appendChild(svgEl('circle', { 'class': 'fns-ink-pen-tip', cx: '0', cy: '0', r: '1.4' }));
+    // ── Guide lines ────────────────────────────────────────────────────────────────────
+    // From the sample; they read as a craftsman's ruling and cost nothing.
+    // 参考线。取自示例；读起来像匠人的辅助线，代价为零。
+    var guides = svgEl('g', { opacity: '0.28', stroke: guide, 'stroke-dasharray': '3 7', 'stroke-width': '0.8' });
+    [[160, '3 7'], [240, '4 6'], [300, 'none'], [410, '3 7']].forEach(function (row) {
+      guides.appendChild(svgEl('line', {
+        x1: '80', y1: String(row[0]), x2: '1020', y2: String(row[0]),
+        'stroke-dasharray': row[1], 'stroke-width': row[0] === 300 ? '1.1' : '0.8'
+      }));
+    });
+    svg.appendChild(guides);
 
-    pen.appendChild(tip);
+    // ── The artwork, complete, under the mask ──────────────────────────────────────────
+    // ── 完整字形，位于蒙版之下 ──────────────────────────────────────────────────────────
+    var art = svgEl('g', { mask: 'url(#fnsMask)', filter: 'url(#fnsInkSpread)' });
+
+    var hair = svgEl('g', {
+      fill: 'none', stroke: 'url(#fnsDeepInk)',
+      'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'stroke-width': '2.6'
+    });
+    SEGDEFS.forEach(function (seg) { hair.appendChild(svgEl('path', { d: D[seg.id] })); });
+    art.appendChild(hair);
+
+    var swell = svgEl('g', { fill: 'none', stroke: 'url(#fnsDeepInk)', 'stroke-linecap': 'round' });
+    SWELLS.forEach(function (s) { swell.appendChild(svgEl('path', { d: s.d, 'stroke-width': String(s.w) })); });
+    art.appendChild(swell);
+
+    var sheen = svgEl('g', {
+      fill: 'none', stroke: 'url(#fnsWetSheen)', 'stroke-linecap': 'round',
+      opacity: '0.6', filter: 'url(#fnsWetGlow)'
+    });
+    SHEEN.forEach(function (s) { sheen.appendChild(svgEl('path', { d: s.d, 'stroke-width': String(s.w) })); });
+    art.appendChild(sheen);
+
+    svg.appendChild(art);
+
+    // The wet meniscus at the nib.
+    // 笔尖处的湿润墨点。
+    var inkPoint = svgEl('circle', {
+      id: 'fnsNibInk', cx: '-100', cy: '-100', r: '3',
+      fill: dark ? '#e8eefb' : '#0e1422', opacity: '0', filter: 'url(#fnsWetGlow)'
+    });
+    svg.appendChild(inkPoint);
+
+    // ── The pen ────────────────────────────────────────────────────────────────────────
+    //
+    // Structure and every coordinate from the sample: origin at the nib tip, body scaled 0.85.
+    // ── 钢笔 ──────────────────────────────────────────────────────────────────────────
+    //
+    // 结构与每一个坐标都取自示例：原点在笔尖，笔身缩放 0.85。
+    var pen = svgEl('g', { id: 'fnsPen', transform: 'translate(-300, -300)', filter: 'url(#fnsPenShadow)' });
+    var body = svgEl('g', { transform: 'scale(0.85)' });
+
+    body.appendChild(svgEl('path', { d: 'M -15,-130 L 15,-130 L 13.5,-72 L -13.5,-72 Z', fill: 'url(#fnsBarrel)' }));
+    body.appendChild(svgEl('path', { d: 'M -4,-130 L 3,-130 L 2.5,-72 L -3.5,-72 Z', fill: '#ffffff', opacity: '0.12' }));
+    body.appendChild(svgEl('rect', {
+      x: '-14.5', y: '-76', width: '29', height: '5', rx: '1',
+      fill: 'url(#fnsGoldSheen)', stroke: '#6d4f13', 'stroke-width': '0.6'
+    }));
+    body.appendChild(svgEl('line', { x1: '-14', y1: '-73.5', x2: '14', y2: '-73.5', stroke: '#fff', 'stroke-width': '0.8', opacity: '0.6' }));
+    body.appendChild(svgEl('path', {
+      d: 'M 0,0 C 2.8,-7 8.5,-22 12,-34 C 15.5,-46 17.5,-58 15.5,-72 L -15.5,-72 C -17.5,-58 -15.5,-46 -12,-34 C -8.5,-22 -2.8,-7 0,0 Z',
+      fill: 'url(#fnsGoldSheen)', stroke: '#745214', 'stroke-width': '0.7'
+    }));
+    body.appendChild(svgEl('path', {
+      d: 'M 0,-7 C 2.2,-14 6.8,-26 9.5,-36 C 11.8,-46 12.8,-56 11.2,-68 L -11.2,-68 C -12.8,-56 -11.8,-46 -9.5,-36 C -6.8,-26 -2.2,-14 0,-7 Z',
+      fill: 'url(#fnsRhodium)', stroke: '#929aa6', 'stroke-width': '0.4'
+    }));
+    body.appendChild(svgEl('circle', { cx: '0', cy: '-35', r: '2.8', fill: '#12151b', stroke: '#684a10', 'stroke-width': '0.7' }));
+    body.appendChild(svgEl('line', { x1: '0', y1: '0', x2: '0', y2: '-32.2', stroke: '#12151b', 'stroke-width': '0.75' }));
+    body.appendChild(svgEl('path', { d: 'M -7.5,-48 C -5,-55 -3,-58 0,-58 C 3,-58 5,-55 7.5,-48', fill: 'none', stroke: '#aa8227', 'stroke-width': '0.6' }));
+    body.appendChild(svgEl('path', { d: 'M -5.5,-43 C -3.5,-48 0,-50 0,-50 C 0,-50 3.5,-48 5.5,-43', fill: 'none', stroke: '#aa8227', 'stroke-width': '0.5' }));
+
+    var mark = svgEl('text', {
+      x: '0', y: '-40', 'font-size': '3.8', 'font-family': 'Georgia, serif',
+      'font-weight': 'bold', fill: '#7a5813', 'text-anchor': 'middle', 'letter-spacing': '0.4'
+    });
+    mark.textContent = '18K';
+    body.appendChild(mark);
+
+    body.appendChild(svgEl('circle', { cx: '0', cy: '0', r: '1.1', fill: '#f4f6fa', stroke: '#667080', 'stroke-width': '0.3' }));
+
+    pen.appendChild(body);
     svg.appendChild(pen);
 
     var hint = htmlEl('div', { 'class': 'fns-ink-hint' });
@@ -384,180 +368,186 @@ const blogWarpScript = `
 
     root.appendChild(svg);
     root.appendChild(hint);
-    return { root: root, svg: svg, pen: pen, tip: tip, hint: hint };
+
+    return {
+      root: root, svg: svg, pen: pen, inkPoint: inkPoint, hint: hint,
+      dark: dark
+    };
   }
 
-  var view = null;
+  // ── Timeline ─────────────────────────────────────────────────────────────────────────
+  var segments = null;
   var timeline = null;
-  var render = null;
+  var totalWeight = 0;
   var primed = false;
+  var render = null;
+  var startedAt = 0;
 
-  // Lengths need layout, so this runs once the overlay is in the document and laid out.
-  // 长度需要布局，所以在遮罩进入文档并完成布局之后跑一次。
+  function elapsedNow() { return (performance.now ? performance.now() : Date.now()) - startedAt; }
+
   function prime(layer) {
     if (primed || !layer) { return; }
-    var total = 0;
-    for (var i = 0; i < SEGMENTS.length; i++) {
-      var seg = SEGMENTS[i];
+
+    segments = SEGDEFS.map(function (def) {
+      var el = layer.svg.querySelector('#fnsMask' + def.id);
+      return { id: def.id, weight: def.weight, endAngle: def.endAngle, el: el, length: 0 };
+    });
+
+    totalWeight = 0;
+    segments.forEach(function (seg) {
+      // The sample's exact dash setup, including the +5 slack that keeps the round cap from
+      // peeking at offset zero.
+      // 示例原样的 dash 设置，包括那个 +5 余量 —— 没有它，圆头帽会在 offset 归零时露出一点。
       seg.length = seg.el.getTotalLength();
-      seg.el.style.strokeDasharray = seg.length + ' ' + (seg.length + 6);
-      seg.el.style.strokeDashoffset = seg.length;
-      seg.swellLen = [];
-      for (var j = 0; j < seg.swellEls.length; j++) {
-        var sp = seg.swellEls[j];
-        var sl = sp.getTotalLength();
-        seg.swellLen.push(sl);
-        sp.style.strokeDasharray = sl + ' ' + (sl + 6);
-        sp.style.strokeDashoffset = sl;
-      }
-      total += seg.weight;
-      seg.startPt = seg.el.getPointAtLength(0);
-    }
-    for (var k = 0; k < AIR.length; k++) { total += AIR[k].weight; }
+      seg.el.style.strokeDasharray = seg.length + ' ' + (seg.length + 5);
+      seg.el.style.strokeDashoffset = String(seg.length);
+      totalWeight += seg.weight;
+    });
+    AIRDEFS.forEach(function (t) { totalWeight += t.weight; });
 
     timeline = [];
     var acc = 0;
-    for (var m = 0; m < SEGMENTS.length; m++) {
-      var s2 = SEGMENTS[m];
-      // Not named start: this function is itself named start, and a var of that same name here
-      // shadowed it for the whole body. Every later call to start() inside prime() therefore hit
-      // a float instead of the function.
-      // 不叫 start：这个函数本身就叫 start，而同名的 var 会在整个函数体里遮蔽它。
-      // prime() 内之后每一次对 start() 的调用，实际都落在一个浮点数上。
-      var segStart = acc / total;
-      acc += s2.weight;
-      var segEnd = acc / total;
-      timeline.push({ type: 'draw', seg: s2, start: segStart, end: segEnd });
-      for (var a = 0; a < AIR.length; a++) {
-        if (AIR[a].from !== m) { continue; }
-        var aStart = acc / total;
-        acc += AIR[a].weight;
-        var aEnd = acc / total;
+    for (var i = 0; i < segments.length; i++) {
+      var seg = segments[i];
+      var t0 = acc / totalWeight;
+      acc += seg.weight;
+      var t1 = acc / totalWeight;
+      timeline.push({ type: 'draw', seg: seg, start: t0, end: t1 });
+
+      for (var a = 0; a < AIRDEFS.length; a++) {
+        if (AIRDEFS[a].from !== i) { continue; }
+        var air = AIRDEFS[a];
+        var a0 = acc / totalWeight;
+        acc += air.weight;
+        var a1 = acc / totalWeight;
         timeline.push({
           type: 'air',
-          fromPt: s2.el.getPointAtLength(s2.length),
-          toPt: SEGMENTS[AIR[a].to].el.getPointAtLength(0),
-          start: aStart, end: aEnd
+          fromPt: seg.el.getPointAtLength(seg.length),
+          toPt: segments[air.to].el.getPointAtLength(0),
+          start: a0, end: a1
         });
       }
     }
+
     render = makeRenderer(layer);
     primed = true;
   }
 
+  // The sample's easing: a symmetric ease-in-out, which is what makes the stroke accelerate out of
+  // a corner and settle into the next one.
+  // 示例的缓动：对称的慢入慢出，正是它让笔画从转角加速出来、再收进下一个转角。
   function handEase(t) { return t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2; }
 
   function makeRenderer(layer) {
-    // The rendered overlay is passed in and captured here, never read from the module-level var.
-    //
-    // finish() sets view back to null so a later departure can build a fresh one. But this closure
-    // used to read view.pen on every frame, and after the first page's pass had finished and been
-    // torn down, the next departure drew into the CURRENT view while the closure still pointed at
-    // the module var — which was null. Result: "Cannot read properties of null (reading 'pen')",
-    // thrown from paint, which aborted depart() before it ever started waiting. The reader saw the
-    // overlay flash for ~200ms and then nothing.
-    //
-    // 传入并在这里捕获被渲染的那一层遮罩，不读模块级变量。
-    //
-    // finish() 会把 view 置空，好让下一次出发能建一个新的。但这个闭包原本每一帧都读 view.pen；
-    // 首页那一遍播完并被拆掉之后，下一次出发画的是「当前」的 view，而闭包仍然指着那个模块变量，
-    // 它已经是 null。于是 "Cannot read properties of null (reading 'pen')" 从 paint 抛出来，
-    // depart() 在开始等待之前就被中断 —— 读者看到的遮罩闪了约 200ms，然后什么都没有。
-    function paint(p) {
-      if (p > 1) { p = 1; }
-      if (p < 0) { p = 0; }
-
+    // The rendered layer is captured here as a parameter, never read from a module-level variable.
+    // A previous version read the module variable inside this closure and crashed with
+    // "Cannot read properties of null" once that variable had been cleared after the first pass.
+    // 被渲染的那一层作为参数在这里捕获，不读模块级变量。
+    // 早先的版本在闭包里读模块变量，第一次播完那个变量被清空后就崩了。
+    function paint(progress) {
+      var p = Math.max(0, Math.min(1, progress));
       var penPos = null;
-      var penAngle = 39;
+      var penAngle = 40;
       var lifting = false;
 
       for (var i = 0; i < timeline.length; i++) {
         var item = timeline[i];
+
         if (item.type === 'draw') {
           var seg = item.seg;
-          var hairOff, frac;
-          if (p <= item.start) { hairOff = seg.length; frac = 0; }
-          else if (p >= item.end) { hairOff = 0; frac = 1; }
-          else {
-            var segT = (p - item.start) / (item.end - item.start);
-            frac = handEase(segT);
-            hairOff = seg.length - seg.length * frac;
-          }
-          seg.el.style.strokeDashoffset = hairOff;
-          for (var j = 0; j < seg.swellEls.length; j++) {
-            var sl = seg.swellLen[j];
-            seg.swellEls[j].style.strokeDashoffset = sl - sl * frac;
-          }
-          if (p > item.start && p < item.end) {
-            var drawn = seg.length * frac;
-            penPos = seg.el.getPointAtLength(drawn);
-            var next = seg.el.getPointAtLength(Math.min(seg.length, drawn + 2));
-            var drift = Math.atan2(next.y - penPos.y, Math.abs(next.x - penPos.x) + 0.1) * (12 / Math.PI);
+          if (p <= item.start) {
+            seg.el.style.strokeDashoffset = String(seg.length);
+          } else if (p >= item.end) {
+            seg.el.style.strokeDashoffset = '0';
+          } else {
+            var strokeT = (p - item.start) / (item.end - item.start);
+            var eased = handEase(strokeT);
+            var drawn = seg.length * eased;
+            seg.el.style.strokeDashoffset = String(seg.length - drawn);
+
+            // Exactly the sample's pen tracking: the nib sits at the point the mask has just
+            // revealed, and leans by the local tangent.
+            // 与示例完全相同的笔迹跟踪：笔尖就停在蒙版刚刚揭示到的那一点上，并按局部切线倾斜。
+            var pt = seg.el.getPointAtLength(drawn);
+            var nextPt = seg.el.getPointAtLength(Math.min(seg.length, drawn + 2));
+            penPos = pt;
+            var dx = nextPt.x - pt.x;
+            var dy = nextPt.y - pt.y;
+            var drift = Math.atan2(dy, Math.abs(dx) + 0.1) * (12 / Math.PI);
             penAngle = 39 + drift;
           }
-        } else {
-          if (p > item.start && p < item.end) {
-            lifting = true;
-            var ln = (p - item.start) / (item.end - item.start);
-            var eased = 0.5 - 0.5 * Math.cos(ln * Math.PI);
-            penPos = {
-              x: item.fromPt.x + (item.toPt.x - item.fromPt.x) * eased,
-              y: item.fromPt.y + (item.toPt.y - item.fromPt.y) * eased - 22 * Math.sin(ln * Math.PI)
-            };
-            penAngle = 40 - Math.sin(ln * Math.PI) * 4;
-          }
+        } else if (p > item.start && p < item.end) {
+          lifting = true;
+          var airT = (p - item.start) / (item.end - item.start);
+          var easedAir = 0.5 - 0.5 * Math.cos(airT * Math.PI);
+          var arc = -22 * Math.sin(airT * Math.PI);
+
+          penPos = {
+            x: item.fromPt.x + (item.toPt.x - item.fromPt.x) * easedAir,
+            y: item.fromPt.y + (item.toPt.y - item.fromPt.y) * easedAir + arc
+          };
+          penAngle = 40 - Math.sin(airT * Math.PI) * 4;
         }
       }
 
       if (penPos) {
-        layer.pen.style.opacity = '1';
         layer.pen.setAttribute('transform', 'translate(' + penPos.x + ',' + penPos.y + ') rotate(' + penAngle + ')');
-        if (lifting) { layer.pen.classList.add('is-lifting'); }
-        else { layer.pen.classList.remove('is-lifting'); }
-      } else {
-        // Between strokes — and so also at the seam of a repeat — the pen waits above the next
-        // stroke rather than disappearing, which is what the sample did at the end of its one pass.
-        // 笔画之间 —— 也就是每一遍的接缝处 —— 笔停在下一笔上方，而不是消失；示例在它那一遍结尾是消失的。
-        var home = SEGMENTS[0].startPt;
         layer.pen.style.opacity = '1';
+        layer.inkPoint.setAttribute('cx', String(penPos.x));
+        layer.inkPoint.setAttribute('cy', String(penPos.y));
+        layer.inkPoint.setAttribute('opacity', lifting ? '0' : '0.55');
+      } else {
+        // At the seam of a loop the pen waits above the first stroke rather than vanishing.
+        // 循环的接缝处，笔停在第一笔上方，而不是消失。
+        var home = segments[0].el.getPointAtLength(0);
         layer.pen.setAttribute('transform', 'translate(' + home.x + ',' + (home.y - 46) + ') rotate(39)');
-        layer.pen.classList.remove('is-lifting');
+        layer.pen.style.opacity = '1';
+        layer.inkPoint.setAttribute('opacity', '0');
       }
     }
     return paint;
   }
 
-  // ── The one overlay for this document ─────────────────────────────────────────────────
-  //
-  // Created immediately, before the first paint, and removed by finish(). Everything else in this
-  // file is either feeding it a phase or asking whether the page is ready to be looked at.
-  //
-  // 本文档唯一的那层遮罩
-  //
-  // 首帧之前就创建，由 finish() 拆掉。这个文件里其余的东西，
-  // 要么是给它喂相位，要么在问页面是不是已经可以被看了。
+  // ── Lifecycle ────────────────────────────────────────────────────────────────────────
+  var view = null;
   var finished = false;
   var raf = 0;
 
   function setHint(word) {
-    var w = view.hint.querySelector('.fns-ink-word');
+    var w = view && view.hint.querySelector('.fns-ink-word');
     if (w && w.textContent !== word) { w.textContent = word; }
   }
 
-  function finish(immediate) {
+  function imagesSettled() {
+    var imgs = document.images;
+    for (var i = 0; i < imgs.length; i++) {
+      var img = imgs[i];
+      if (img.complete) { continue; }
+      // A lazy image below the fold has not been asked for; waiting would hold the overlay until the
+      // reader scrolls.
+      // 视口之外的懒加载图还没被请求，等它会把遮罩扣到读者滚动为止。
+      if (img.loading === 'lazy') { continue; }
+      return false;
+    }
+    return true;
+  }
+
+  function documentSettled() {
+    if (document.readyState !== 'complete') { return false; }
+    return imagesSettled();
+  }
+
+  function finish() {
     if (finished) { return; }
     finished = true;
     if (raf) { cancelAnimationFrame(raf); raf = 0; }
 
-    // The navigation lock is released here and nowhere else. Releasing it in two places is how the
-    // back button ended up restoring a page with the lock still on.
-    // 导航锁只在这里释放，别处都不释放。在别处释放，正是返回键恢复出一个还带着锁的页面的原因。
     document.documentElement.classList.remove('fns-warping');
     document.documentElement.classList.add('fns-arrived');
 
-    if (view && view.root) {
-      view.root.classList.add('is-done');
-      var node = view.root;
+    var node = view && view.root;
+    if (node) {
+      node.classList.add('is-done');
       window.setTimeout(function () {
         if (node && node.parentNode) { node.parentNode.removeChild(node); }
       }, 420);
@@ -572,106 +562,35 @@ const blogWarpScript = `
   function tick() {
     if (finished) { return; }
     if (!primed && view) { prime(view); }
-    if (render) {
-      render((elapsedNow() % PASS_MS) / PASS_MS);
-    }
+    if (render) { render((elapsedNow() % PASS_MS) / PASS_MS); }
     raf = requestAnimationFrame(tick);
   }
 
-  // Builds the overlay. Called at load (so the sheet is up before the content is readable) and
-  // again by depart() if the previous one has already been torn down.
-  //
-  // 构建遮罩。加载时调用（让纸面在内容可读之前就在），并在遮罩已被拆掉时由 depart() 再次调用。
   function start() {
-    // The view variable alone decides whether there is an overlay to reuse; finished only records
-    // that the previous one was dismissed. Testing both at the top meant a rebuilt overlay was
-    // refused after the first reveal and the renderer was left pointing at nothing.
-    // 只看 view 决定有没有可复用的遮罩；finished 只记录上一层已被收起。
-    // 两个都作为前置条件，会让第一次揭示之后的每一次重建都被拒，而 renderer 留在空处。
     if (view) { return; }
-
-    // Reduced motion: no overlay at all. A reader who asked the system to stop animating should not
-    // be given a three-second screen in front of every click either.
-    // 减少动效：完全不建遮罩。要求系统停止动画的读者，也不该每次点击都先看三秒画面。
     if (STILL) { return; }
 
     view = buildOverlay();
-
-    // A rebuilt overlay has fresh path elements, so the cached lengths from the previous one are
-    // meaningless. primed must go back to false or prime() early-returns and the new strokes never
-    // get their dash geometry — they would all render fully drawn from the first frame.
-    //
-    // 重建出来的遮罩是全新的 path 元素，上一层的缓存长度对它没有意义。
-    // primed 必须回到 false，否则 prime() 会提前返回，新笔画拿不到 dash 几何 ——
-    // 它们会在第一帧就整条画满。
     primed = false;
     render = null;
 
-    // The overlay is a child of <html>, never <body>: a transform on body would capture it.
-    // 遮罩是 <html> 的子节点，绝不是 <body> 的：body 上的 transform 会捕获它。
     document.documentElement.appendChild(view.root);
     document.documentElement.classList.add('fns-warping');
 
-    // Draw the first frame synchronously so there is never a frame of unstyled or empty overlay
-    // between the tag being parsed and the animation starting.
-    // 同步画出第一帧，于是从标签被解析到动画开始之间，不存在一帧空白或没有样式的遮罩。
     void view.root.offsetWidth;
     startedAt = performance.now ? performance.now() : Date.now();
     prime(view);
-    // Only ever the renderer that prime() just built for THIS overlay. Guarding on render alone
-    // is not enough: after a previous page's pass the module var still held the old closure, whose
-    // captured overlay had already been removed from the document.
-    // 只用 prime() 刚为「这一层」遮罩建好的那个 renderer。只判断 render 是否存在不够：
-    // 上一页播完之后，模块变量里仍是旧闭包，而它捕获的遮罩早已被移出文档。
-    if (timeline && render) { render(0); }
+    if (render) { render(0); }
 
     raf = requestAnimationFrame(tick);
   }
 
-  // ── The departing sequence ───────────────────────────────────────────────────────────
-  //
-  // This is the whole contract, and it is a sequence rather than a race:
-  //
-  //   click → one full pass plays from the first stroke → the destination is fetched meanwhile →
-  //   when the pass is done AND the destination is in hand, navigate
-  //
-  // The previous version called location.href immediately after showing the overlay, which tore
-  // the document down mid-stroke: the reader saw a flash, not an animation. The version before that
-  // navigated at a pass boundary but only waited for the document, not the covers, so the reader
-  // got the animation and then watched placeholders spin.
-  //
-  // Both halves are load-bearing:
-  //   - the pass must complete, or the pen is yanked off the page mid-letter;
-  //   - the destination must be fetched, or the next page spends its own overlay waiting
-  //     (a section page carries a dozen covers at ~700ms each).
-  // Whichever finishes last decides, and the pass is never cut short.
-  //
-  // 出发的时序
-  //
-  // 这就是全部契约，它是一条序列而不是赛跑：
-  //
-  //   点击 → 从第一笔完整播一遍 → 同时取目标页 → 这一遍播完且目标页到手，才导航
-  //
-  // 上一版在显示遮罩之后立刻调 location.href，文档在笔画半途被拆掉：读者看到的是一闪，不是动画。
-  // 它之前的一版在遍与遍的边界导航，但只等文档不等封面，于是读者看完动画继续看转圈。
-  //
-  // 两半都是承重的：
-  //   - 这一遍必须播完，否则笔是被从字母中间拽走的；
-  //   - 目标页必须取到，否则下一页会用自己的遮罩继续等
-  //     （一个栏目页十几张封面，每张约 700ms）。
-  // 谁最后完成谁说了算，而这一遍永远不被截断。
-  var MAX_WAIT_MS = 6000;
-
+  // ── Fetching the destination ─────────────────────────────────────────────────────────
   function warmDestination(url) {
-    // Fetch the document and every cover it names, and report back when the covers have settled.
-    // 取目标文档以及它引用的每一张封面，并在封面落定时回报。
     return new Promise(function (resolve) {
       var done = false;
       function settle() { if (!done) { done = true; resolve(); } }
-
-      // A destination that never answers must not trap the reader on a loading screen.
-      // 永远不回应的目标页不能把读者困在加载画面上。
-      var bail = setTimeout(settle, MAX_WAIT_MS);
+      var bail = setTimeout(settle, 6000);
 
       fetch(url, { credentials: 'same-origin' })
         .then(function (r) { return r.text(); })
@@ -684,24 +603,20 @@ const blogWarpScript = `
             seen[src] = 1;
             srcs.push(src);
           }
-          // Cap the warm-up: hundreds of images should not spawn hundreds of requests competing
-          // with the document the reader is about to need.
-          // 给预热设上限：几百张图时不该放几百个请求，去和读者马上要用的文档抢带宽。
           srcs = srcs.slice(0, 14);
           if (!srcs.length) { clearTimeout(bail); settle(); return; }
 
-          // Wait for the warm-up images themselves. Loading them without waiting was the earlier
-          // mistake: the overlay lifted on schedule and the covers were still arriving.
-          // 等这些预热图自己完成。只加载不等，是更早那次的错误：
-          // 遮罩按时抬起，而封面还在路上。
           var left = srcs.length;
-          var finished = false;
-          function one() { left--; if (left <= 0 && !finished) { finished = true; clearTimeout(bail); settle(); } }
+          var settled = false;
+          function one() {
+            left--;
+            if (left <= 0 && !settled) { settled = true; clearTimeout(bail); settle(); }
+          }
           srcs.forEach(function (s) {
             try {
               var im = new Image();
               im.onload = one;
-              im.onerror = one;   // a broken cover is the page's problem, not a reason to wait
+              im.onerror = one;
               im.src = s;
             } catch (e) { one(); }
           });
@@ -710,39 +625,21 @@ const blogWarpScript = `
     });
   }
 
-  // Every navigation goes through here: play one pass, fetch meanwhile, leave when both are done.
-  // 每一次导航都走这里：播一遍、同时取目标页、两件事都完成再走。
+  // ── Departure: one pass, fetching in parallel, leave when both are done ──────────────
+  //
+  // The owner's sequence: 点击立刻播放 → 加载 → 播放完就进入新界面.
+  // 站主的时序：点击立刻播放 → 加载 → 播放完就进入新界面。
+  var departing = false;
+
   function depart(url) {
     if (!url) { return; }
     if (STILL) { location.href = url; return; }
-    // A second click during the pass would start a second animation and two fetches.
-    // 一遍进行中再点一次，会开第二套动画和两个请求。
     if (departing) { return; }
     departing = true;
 
-    // Fresh overlay, fresh clock. The pass always starts at the first stroke.
-    //
-    // start() rebuilds the DOM and the renderer together, so those two can never drift apart. The
-    // case that used to break: the first page's pass finished, finish() nulled view, and the next
-    // departure kept the old renderer while drawing into a new overlay.
-    //
-    // 新的遮罩、新的时钟。这一遍永远从第一笔开始。
-    //
-    // start() 把 DOM 与 renderer 一起重建，两者因此不可能走散。
-    // 以前会坏的那种情况：首页那一遍播完，finish() 把 view 置空，
-    // 而下一次出发仍留着旧的 renderer，却往新的遮罩里画。
-    // A fresh overlay for every departure. The overlay from the initial page load is gone by now —
-    // finish() removed it — and even if it were not, reusing it would mean re-using a renderer whose
-    // captured DOM has already been shown once. Rebuilding both together is what makes "the pass
-    // always starts at the first stroke" true rather than hopeful.
-    //
-    // 每一次出发都用新的遮罩。页面初次加载时那一层此刻已经不在了 —— finish() 把它移除了 ——
-    // 就算还在，复用它也等于复用一个已经展示过一次、捕获着旧 DOM 的 renderer。
-    // 把两者一起重建，才让「这一遍永远从第一笔开始」成为事实而不是期望。
+    // A fresh overlay and a fresh clock, so the pass always starts at the first stroke.
+    // 新的遮罩、新的时钟，这一遍永远从第一笔开始。
     if (view) {
-      // Defensive: a stray overlay left in the DOM (a cancelled navigation, say) is replaced rather
-      // than drawn into.
-      // 防御：DOM 里残留的遮罩（比如一次被取消的导航）就地换掉，而不是往里画。
       if (view.root && view.root.parentNode) { view.root.parentNode.removeChild(view.root); }
       view = null;
     }
@@ -752,56 +649,35 @@ const blogWarpScript = `
     if (render) { render(0); }
     setHint('LOADING');
 
-    var arrived = warmDestination(url);
-    var readyFlag = false;
-    arrived.then(function () { readyFlag = true; });
-
-    // The pass is the authority. The warm-up is best effort with a short grace period, because the
-    // requirement is "when the pass is done, go in" — waiting on a slow cover would turn that into
-    // "when the covers are done", which is the complaint from the previous round.
-    //
-    // 这一遍是准绳。预热是尽力而为，加一个很短的宽限：
-    // 要求是「这一遍播完就进去」，等一张慢封面会把它变成「等封面加载完」，
-    // 也就是上一轮被退回的那个问题。
+    var ready = false;
+    var left = false;
+    // The pass is the authority; the warm-up gets a short grace period. Waiting for a slow cover
+    // would turn "when the pass is done" into "when the covers are done".
+    // 这一遍是准绳，预热只给很短的宽限。等一张慢封面会把「这一遍播完」变成「等封面加载完」。
     var GRACE_MS = 500;
+
+    warmDestination(url).then(function () { ready = true; });
 
     function leave() {
       if (left) { return; }
       left = true;
       setHint('READY');
-      // Tell the destination not to play its own pass. Without this the reader sits through the
-      // animation twice.
-      // 告诉目标页别再播它自己那一遍。少了这个，读者要等两遍动画。
       try { sessionStorage.setItem(KEY_QUIET, '1'); } catch (e) {}
-      // One short beat so READY is actually seen rather than replaced in the same frame the pen
-      // stops.
-      // 留一拍，让 READY 真的被看到，而不是在笔停下的同一帧被替换掉。
       setTimeout(function () { location.href = url; }, 180);
     }
 
-    var left = false;
-
-    function waitForBoth() {
+    function watch() {
       if (left) { return; }
       var el = elapsedNow();
-      var passDone = el >= PASS_MS;
-      if (passDone && (readyFlag || el >= PASS_MS + GRACE_MS)) { leave(); return; }
-      requestAnimationFrame(waitForBoth);
+      if (el >= PASS_MS && (ready || el >= PASS_MS + GRACE_MS)) { leave(); return; }
+      requestAnimationFrame(watch);
     }
-
-    requestAnimationFrame(waitForBoth);
+    requestAnimationFrame(watch);
   }
-
-  var departing = false;
 
   window.fnsWarp = function (url) { depart(url); };
 
-  // ── Click delegation ──────────────────────────────────────────────────────────────────
-  //
-  // Only plain left clicks. Ctrl/cmd/middle mean "open elsewhere", and hijacking those is how a
-  // link stops behaving like a link.
-  //
-  // 点击代理。只接管普通左键，Ctrl/⌘/中键表示「在别处打开」，抢走它们等于让链接不再像链接。
+  // ── Click delegation ─────────────────────────────────────────────────────────────────
   var SKIP = /^(?:mailto:|tel:|javascript:|data:|blob:)/i;
 
   document.addEventListener('click', function (ev) {
@@ -831,28 +707,17 @@ const blogWarpScript = `
     window.fnsWarp(target.href);
   });
 
-  // ── Arrival, back/forward, and the bfcache trap ───────────────────────────────────────
+  // ── Arrival and back/forward ─────────────────────────────────────────────────────────
   //
-  // pageshow fires on every load, including a restore from bfcache. A restore hands back the old
-  // document exactly as it was left — which, for a page that was departed from, means
-  // html.fns-warping still applied with a half-finished overlay in the DOM. Nothing else in the page
-  // would ever take that off, so the reader got a white page and no way back. persisted=true is
-  // exactly that case, and it is the only place that can fix it.
+  // pageshow fires on every load, including a restore from bfcache. A restore hands the document
+  // back exactly as it was left — for a page that was departed from, still carrying fns-warping and
+  // a half-finished overlay. Nothing else would ever clear that, so the reader got a white page.
   //
-  // 抵达、前进后退，以及 bfcache 的陷阱
-  //
-  // pageshow 在每次加载时都会触发，包括从 bfcache 恢复。恢复交还的是旧文档离开时的原样 ——
-  // 对一个「从它出发过」的页面来说，就是 html.fns-warping 仍然生效、DOM 里还留着一张画到一半的遮罩。
-  // 页面里没有任何别的代码会把它摘掉，于是读者拿到一张白页且没有回去的路。
-  // persisted=true 正是这种情况，也只有这里能修它。
+  // pageshow 在每次加载时都会触发，包括从 bfcache 恢复。恢复交还的是文档离开时的原样 ——
+  // 对一个「从它出发过」的页面来说，仍带着 fns-warping 和一张画到一半的遮罩。
+  // 没有别的代码会清掉它，于是读者拿到一张白页。
   window.addEventListener('pageshow', function (ev) {
     if (ev.persisted) {
-      // Back/forward is a return, not an arrival: the reader has already seen this page, so it is
-      // shown immediately. A three-second signature in front of the back button would punish the
-      // one action people use most.
-      //
-      // 前进/后退是「回来」，不是「抵达」：这一页读者已经看过，所以直接显示。
-      // 在返回键前面放三秒签名，会惩罚人们用得最多的那个动作。
       document.documentElement.classList.remove('fns-warping', 'fns-arrived');
       if (view && view.root && view.root.parentNode) { view.root.parentNode.removeChild(view.root); }
       view = null;
@@ -860,26 +725,19 @@ const blogWarpScript = `
       finished = true;
       return;
     }
-    // A fresh document. If the overlay is already up from start() at the top of this file, the
-    // remaining question is when to lift it: one full pass AND every image settled.
-    //
-    // 新文档。如果遮罩已经由本文件末尾的 start() 建好，剩下的问题是什么时候抬起它：
-    // 一整遍写完且每张图落定。
     if (STILL) { return; }
-    waitThenReveal();
+    // A fresh document: hold the overlay for one whole pass and until the page can be looked at.
+    // 新文档：留住遮罩，直到完整播完一遍、并且页面真的可以被看。
+    revealWhenReady();
   });
 
-  // The arriving page holds the overlay for the same reason the departing one does: one whole pass,
-  // and only once the page can actually be looked at.
-  //
-  // 抵达页留住遮罩的理由与出发页相同：完整的一遍，而且只在页面真的可以被看的时候。
-  function waitThenReveal() {
-    var notice = false;
+  function revealWhenReady() {
+    var noticed = false;
     function step() {
       if (finished) { return; }
       if (elapsedNow() >= PASS_MS && documentSettled()) {
-        if (!notice) { notice = true; setHint('READY'); }
-        finish(false);
+        if (!noticed) { noticed = true; setHint('READY'); }
+        finish();
         return;
       }
       requestAnimationFrame(step);
@@ -887,19 +745,10 @@ const blogWarpScript = `
     requestAnimationFrame(step);
   }
 
-  // Before the first paint. DOMContentLoaded is too late for the overlay to be there on frame one,
-  // but the head script itself already runs early enough to create the node — this just starts the
-  // clock on a document that may still be parsing.
+  // ── Entry ────────────────────────────────────────────────────────────────────────────
   //
-  // The quiet flag is read here, before the overlay exists, so a page reached through a transition
-  // never paints one at all. Reading it later would mean creating the overlay and then removing it,
-  // which is a visible flash of the very thing we are trying not to show.
-  //
-  // 首帧之前。DOMContentLoaded 对「第一帧就有遮罩」来说太晚了，
-  // 但 head 脚本本身跑得足够早，已经能创建这个节点 —— 这里只是在一个可能还在解析的文档上启动时钟。
-  //
-  // 「不要播放」标记在这里读，在遮罩存在之前，于是经由过渡抵达的页面根本不会画出遮罩。
-  // 晚一步读就意味着先造出来再拆掉，而那正是我们不想让人看见的那一闪。
+  // Read before the overlay is built, so a page reached through a transition never paints one.
+  // 在构建遮罩之前读，于是经由过渡抵达的页面根本不会画出遮罩。
   var quiet = false;
   try {
     quiet = sessionStorage.getItem(KEY_QUIET) === '1';
@@ -907,9 +756,6 @@ const blogWarpScript = `
   } catch (e) {}
 
   if (quiet) {
-    // A short fade so the change of document does not read as a hard cut. The heavy lifting — the
-    // one full pass — already happened on the page we left.
-    // 一段短淡入，让换文档不至于像一次硬切。真正的那一遍书写，已经在离开的那一页上完成了。
     document.documentElement.classList.add('fns-arrived');
     window.setTimeout(function () {
       document.documentElement.classList.remove('fns-arrived');
@@ -921,15 +767,15 @@ const blogWarpScript = `
 
 `
 
-// blogWarpJS returns the transition script.
+// blogWarpJS returns the loading-overlay script.
 //
-// Served on every blog page and injected in <head>, not at the end of the body: the overlay has to
-// exist before the first frame or the reader sees the bare page and then a loading screen, which is
-// exactly the ordering the owner reported as "no loading animation on entry".
+// Injected from <head>, not at the end of <body>: the overlay has to exist before the first painted
+// frame, otherwise the reader sees the bare page and then a loading screen — the ordering the owner
+// reported as "no loading animation on entry".
 //
-// blogWarpJS 返回过渡脚本。
+// blogWarpJS 返回加载遮罩脚本。
 //
-// 它在每个博客页面上提供，并注入到 <head> 而不是 body 末尾：遮罩必须在首帧之前就存在，
+// 从 <head> 注入，而不是 body 末尾：遮罩必须在第一个被绘制的帧之前就存在，
 // 否则读者先看到光秃秃的页面、再看到加载画面 —— 那正是站主报的「入站时没有加载动画」。
 func blogWarpJS() string {
 	return blogWarpScript

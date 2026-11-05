@@ -79,9 +79,12 @@ func TestWarpScriptContract(t *testing.T) {
 	if !strings.Contains(js, "elapsedNow() >= PASS_MS") {
 		t.Error("起跳条件没有要求播完一整遍：笔会被从字母中间拽走")
 	}
-	// 且必须同时等到目标页落地。
-	if !strings.Contains(js, "readyFlag") {
+	// 且必须同时等到目标页落地（或播完后再给一小段宽限）。
+	if !strings.Contains(js, "warmDestination(url).then(function () { ready = true; })") {
 		t.Error("没有等目标页落地就起跳：下一页会在自己的遮罩里继续等")
+	}
+	if !strings.Contains(js, "GRACE_MS") {
+		t.Error("缺少宽限期：慢封面会把「播完就进」变成「等封面加载完」")
 	}
 	// 出发时不能立刻导航 —— 那会把文档在笔画半途拆掉。
 	if strings.Contains(js, "if (view) { setHint('LOADING'); }\n    location.href = url;") {
@@ -163,14 +166,21 @@ func TestInkScriptIsInHead(t *testing.T) {
 		{"reader", blogReaderPage},
 	}
 	for _, c := range cases {
-		if !strings.Contains(c.src, "<script>{{inkjs}}</script>") {
+		// Match on the action name, not the full "{{inkjs}}": html/template rewrites a Tree in
+		// place when it is first executed, turning the action into "{{inkjs | ...escaper}}". A
+		// full-string match therefore passes when this test runs alone and fails as soon as any
+		// other test has rendered the template — which is exactly what happened.
+		// 匹配动作名而不是完整的 "{{inkjs}}"：html/template 在首次执行时会就地改写 Tree，
+		// 把动作变成 "{{inkjs | ...escaper}}"。所以整串匹配在单独跑时通过，
+		// 一旦别的测试渲染过这个模板就失败 —— 之前正是这样。
+		if !strings.Contains(c.src, "{{inkjs") {
 			t.Errorf("%s 的 head 没有注入 inkjs：这一页的入站动画会缺席", c.name)
 		}
 	}
 
 	// The error page deliberately has none: a loading screen in front of a 404 is pure delay.
 	// 错误页刻意没有：在 404 前面放加载画面是纯粹的拖延。
-	if strings.Contains(blogErrorTmpl.Tree.Root.String(), "{{inkjs}}") {
+	if strings.Contains(blogErrorTmpl.Tree.Root.String(), "{{inkjs") {
 		t.Error("错误页注入了 inkjs：404 前面会挡一层加载画面")
 	}
 

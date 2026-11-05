@@ -2178,27 +2178,12 @@ html.ask-inline .ask-fab{display:none}
 @media (max-width:560px){.fns-ink-svg{width:92vw;max-height:56vh}}
 @media (max-height:520px){.fns-ink-svg{width:min(64vw,520px);max-height:72vh}}
 
-/* 笔画。圆头圆接是「手写」而不是「描图」的关键。 */
-.fns-ink-hair{
-  fill:none;stroke:var(--foreground);stroke-width:2.6;
-  stroke-linecap:round;stroke-linejoin:round;
-}
-.fns-ink-swell{
-  fill:none;stroke:var(--foreground);
-  stroke-linecap:round;stroke-linejoin:round;
-}
-
-/* 钢笔。黑色笔身在任何主题下都成立 —— 它是器物，不是文字。 */
-.fns-ink-pen{will-change:transform,opacity}
-.fns-ink-pen-barrel{fill:#121317;stroke:#000;stroke-width:.6}
-.fns-ink-pen-collar{fill:#b8933f}
-.fns-ink-pen-nib{fill:#d8ab4e;stroke:#745214;stroke-width:.7}
-.fns-ink-pen-plate{fill:#f2f4f8;stroke:#929aa6;stroke-width:.4}
-.fns-ink-pen-hole{fill:#12151b;stroke:#684a10;stroke-width:.7}
-.fns-ink-pen-slit{stroke:#12151b;stroke-width:.75}
-.fns-ink-pen-tip{fill:#f4f6fa;stroke:#667080;stroke-width:.3}
-/* 抬笔时笔略微淡一点，与落笔的重量区分开。 */
-.fns-ink-pen.is-lifting .fns-ink-pen-body{opacity:.9}
+/* 笔画的粗细、端点、渐变色全部由脚本按示例的 SVG 写进元素属性，
+   样式表不再参与 —— 上一版在这里写 stroke:var(--foreground)，
+   与脚本里按主题算出的墨色渐变互相打架，谁后到谁赢，字形粗细因此不稳定。
+   SVG 只保留一条：抬笔时整体略微发虚，与落笔的重量区分开。
+   （元素 id 见脚本：fnsPen / fnsMask* / fnsNibInk） */
+#fnsPen{will-change:transform,opacity}
 
 /* 加载提示。字距很宽，是这一层的第二个信息，不是主角。 */
 .fns-ink-hint{
