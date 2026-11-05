@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/haierkeys/fast-note-sync-service/internal/dto"
 	"go.uber.org/zap"
@@ -75,8 +76,8 @@ type blogQuizStore struct {
 	// Emails maps hash -> masked display form. The raw address is never written.
 	//
 	// Emails 是 hash → 打码后的展示形态。原文地址从不落盘。
-	Emails map[string]string                       `json:"emails"`
-	Wrong  map[string]map[string]*blogQuizWrong    `json:"wrong"`
+	Emails map[string]string                    `json:"emails"`
+	Wrong  map[string]map[string]*blogQuizWrong `json:"wrong"`
 }
 
 type blogQuizLog struct {
@@ -307,6 +308,8 @@ func quizQuestionDTO(h QuizHit) dto.BlogQuizQuestionDTO {
 		Answer:  h.Answer,
 		Explain: h.Recovery,
 		Source:  src,
+		School:  h.School,
+		Year:    h.Year,
 	}
 }
 
@@ -604,6 +607,28 @@ func (s *shareService) quizQuestionByIDLocked(notePath, id string) (dto.BlogQuiz
 // 客观题的答案是字母集合，因此顺序与分隔符都不该影响结果：先点 B 再点 A 的读者
 // 与先点 A 再点 B 的读者给的是同一个答案。主观题不会走到这里——它们是自评的。
 func quizAnswerMatches(kind int, answer, picked string) bool {
+	if kind == quizKindBlank {
+		want := quizNormalizeText(answer)
+		got := quizNormalizeText(picked)
+		if want == "" || got == "" {
+			return false
+		}
+		if got == want {
+			return true
+		}
+		// Hollowed sentences ask the reader to retype a span of the sentence they just read,
+		// and a correct recollection rarely reproduces it character for character: 软腭与硬腭
+		// 交界的部位 comes back as 软腭与硬腭交界处. Exact matching would mark that wrong and
+		// destroy the exercise; unbounded fuzziness would mark 骨上袋 correct for 骨下袋.
+		// The line is drawn at three quarters of the最长 side, measured by longest common
+		// subsequence so that inserted or dropped characters cost proportionally.
+		//
+		// 挖空题要求读者把刚看过的句子里的某一段重新打出来，而"记住了"很少逐字复现：
+		// 软腭与硬腭交界的部位 会被写成 软腭与硬腭交界处。逐字比对会把这种判错，练习就废了；
+		// 而无限宽松又会把 骨上袋 判成 骨下袋。线画在较长一边的四分之三处，用最长公共子序列
+		// 度量，使多写或少写一个字按比例扣分。
+		return quizSimilarity(got, want) >= 0.75
+	}
 	want := quizLetters(answer)
 	got := quizLetters(picked)
 	if len(want) == 0 || len(got) == 0 {
@@ -648,6 +673,76 @@ func quizLetters(s string) string {
 	}
 	sort.Slice(seen, func(i, j int) bool { return seen[i] < seen[j] })
 	return string(seen)
+}
+
+// quizNormalizeText reduces a typed answer to what the reader meant, ignoring how they
+// typed it: full-width punctuation, spacing, and case carry no information in a term like
+// 中1／3段 versus 中1/3段.
+//
+// It deliberately does NOT do fuzzy matching. The accepted answer is a verbatim span lifted
+// from the sentence the reader just studied, so a near-miss usually means they half-remembered
+// it — and telling them they were right would remove the only signal this exercise produces.
+//
+// quizNormalizeText 把输入的答案归一成读者"想写的东西"，忽略书写形式：全角标点、空格、
+// 大小写，在「中1／3段」与「中1/3段」之间不承载任何信息。
+//
+// 它刻意不做模糊匹配。正确答案是从读者刚看过的句子里逐字摘出来的片段，差一点通常意味着
+// 记了一半——那时判他正确，就把这个练习唯一能给出的信号抹掉了。
+func quizNormalizeText(s string) string {
+	var b strings.Builder
+	for _, r := range strings.TrimSpace(s) {
+		switch {
+		case r >= 0xFF01 && r <= 0xFF5E:
+			r = r - 0xFF00 + 0x20 // full-width ASCII -> half-width
+		case r == 0x3000:
+			continue
+		case r == '％':
+			r = '%'
+		}
+		if r == ' ' || r == '\t' || r == '\n' || r == '\r' {
+			continue
+		}
+		switch r {
+		case '，', '。', '、', '；', '：', '（', '）', '【', '】', '《', '》', '“', '”', '‘', '’',
+			',', '.', ';', ':', '(', ')', '[', ']', '"', '\'', '·', '-', '_':
+			continue
+		}
+		b.WriteRune(unicode.ToLower(r))
+	}
+	return b.String()
+}
+
+// quizSimilarity is the longest common subsequence over the longer of the two strings.
+// Subsequence rather than edit distance because the failure mode here is a missing or extra
+// character in the middle of a remembered phrase, and that should cost the same whether it
+// is an insertion or a deletion.
+//
+// quizSimilarity 是两串中较长者上的最长公共子序列比例。用子序列而不是编辑距离，是因为这里的
+// 失败形态是"记住的短语中间多一个或少一个字"，而多与少应当扣同样的分。
+func quizSimilarity(a, b string) float64 {
+	ra, rb := []rune(a), []rune(b)
+	if len(ra) == 0 || len(rb) == 0 {
+		return 0
+	}
+	prev := make([]int, len(rb)+1)
+	cur := make([]int, len(rb)+1)
+	for i := 1; i <= len(ra); i++ {
+		for j := 1; j <= len(rb); j++ {
+			if ra[i-1] == rb[j-1] {
+				cur[j] = prev[j-1] + 1
+			} else if prev[j] >= cur[j-1] {
+				cur[j] = prev[j]
+			} else {
+				cur[j] = cur[j-1]
+			}
+		}
+		prev, cur = cur, prev
+	}
+	longer := len(ra)
+	if len(rb) > longer {
+		longer = len(rb)
+	}
+	return float64(prev[len(rb)]) / float64(longer)
 }
 
 // ── Leaderboards ──────────────────────────────────────────────────────────────────────────

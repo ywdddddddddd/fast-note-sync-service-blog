@@ -46,6 +46,10 @@ const blogQuizCSS = `
 .quiz-bar{flex:1;height:3px;background:rgba(120,100,80,.14);border-radius:2px;overflow:hidden}
 .quiz-bar i{display:block;height:100%;width:0;background:rgba(150,110,70,.75);transition:width .28s ease}
 .quiz-q{font-size:16px;line-height:1.7;margin-bottom:16px;white-space:pre-wrap;word-break:break-word}
+.quiz-badge{font-size:12px;opacity:.5;margin:-10px 0 16px;letter-spacing:.02em}
+.quiz-field{display:flex;gap:10px;margin-top:4px}
+.quiz-input.ok{border-color:rgba(90,140,90,.6);background:rgba(90,140,90,.1)}
+.quiz-input.bad{border-color:rgba(170,90,80,.6);background:rgba(170,90,80,.09)}
 .quiz-opts{display:flex;flex-direction:column;gap:9px}
 .quiz-opt{appearance:none;text-align:left;font:inherit;font-size:14.5px;line-height:1.6;color:inherit;
   border:1px solid var(--line,rgba(120,100,80,.22));border-radius:12px;background:transparent;
@@ -196,12 +200,73 @@ const blogQuizScript = `
     return out.split('').sort().join('');
   }
 
+  // Mirror of quizNormalizeText in blog_quiz_store.go. Both sides must agree, because the
+  // browser judges instantly and the server judges again on submit — a disagreement shows up
+  // as a score that changes after the fact, which is worse than either rule alone.
+  //
+  // 与 blog_quiz_store.go 里的 quizNormalizeText 保持一致。两边必须同规则：浏览器即时判、
+  // 服务端提交时再判，规则不一致会表现为"提交后分数变了"，那比只用一边更糟。
+  function normText(s) {
+    s = String(s || '');
+    var out = '';
+    for (var i = 0; i < s.length; i++) {
+      var ch = s.charAt(i);
+      var code = s.charCodeAt(i);
+      if (code >= 0xFF01 && code <= 0xFF5E) { ch = String.fromCharCode(code - 0xFF00 + 0x20); }
+      if (code === 0x3000) continue;
+      if (ch === '％') ch = '%';
+      if (/[\s，。、；：（）【】《》“”‘’,.;:()\[\]"'·\-_]/.test(ch)) continue;
+      out += ch.toLowerCase();
+    }
+    return out;
+  }
+
+  // Mirror of quizSimilarity in blog_quiz_store.go: longest common subsequence over the
+  // longer string. Same 0.75 line as the server.
+  //
+  // 与 blog_quiz_store.go 的 quizSimilarity 一致：较长串上的最长公共子序列，阈值同为 0.75。
+  function simText(a, b) {
+    var ra = a.split(''), rb = b.split('');
+    if (!ra.length || !rb.length) return 0;
+    var prev = new Array(rb.length + 1).fill(0);
+    var cur = new Array(rb.length + 1).fill(0);
+    for (var i = 1; i <= ra.length; i++) {
+      for (var j = 1; j <= rb.length; j++) {
+        if (ra[i - 1] === rb[j - 1]) cur[j] = prev[j - 1] + 1;
+        else cur[j] = prev[j] >= cur[j - 1] ? prev[j] : cur[j - 1];
+      }
+      var t = prev; prev = cur; cur = t;
+      cur.fill(0);
+    }
+    var longer = Math.max(ra.length, rb.length);
+    return prev[rb.length] / longer;
+  }
+
+  function blankOk(mine, answer) {
+    var got = normText(mine), want = normText(answer);
+    if (!got || !want) return false;
+    if (got === want) return true;
+    return simText(got, want) >= 0.75;
+  }
+
   function render() {
     var q = store.list[store.idx];
     var view = el('div');
     view.appendChild(progress());
     view.appendChild(el('div', 'quiz-q', q.stem));
 
+    // The exam this question came from, one small line under the stem. Readers deciding
+    // whether a question is representative care who set it and when; the answer body does
+    // not need that weight.
+    //
+    // 题目来源考试，题干下方一行小字。读者判断一道题是否有代表性时会在意是谁、哪一年出的，
+    // 而正文不需要承担这个重量。
+    var prov = [];
+    if (q.school) prov.push(q.school);
+    if (q.year) prov.push(q.year);
+    if (prov.length) view.appendChild(el('div', 'quiz-badge', prov.join(' · ')));
+
+    var isBlank = q.kind === 5;
     var opts = el('div', 'quiz-opts');
     var chosen = [];
     var multi = q.kind === 2;
@@ -259,7 +324,34 @@ const blogQuizScript = `
         opts.appendChild(b);
       })(i, lettersPool.charAt(i));
     }
-    view.appendChild(opts);
+    if (!isBlank) view.appendChild(opts);
+
+    if (isBlank) {
+      // Hollowed sentence: the reader types the missing span. Enter submits, because this is
+      // the one question type where reaching for the mouse breaks the rhythm of recall.
+      //
+      // 挖空句：读者手打缺的那一段。回车即提交——这是唯一一种用鼠标会打断回忆节奏的题型。
+      var field = el('div', 'quiz-field');
+      var input = el('input', 'quiz-input quiz-blank');
+      input.type = 'text';
+      input.autocomplete = 'off';
+      input.spellcheck = false;
+      input.placeholder = '填出空缺的那一段';
+      var send = el('button', 'quiz-btn primary', '提交');
+      send.type = 'button';
+      send.onclick = function () {
+        if (!input.value.trim()) { input.focus(); return; }
+        settleBlank(input.value);
+      };
+      input.onkeydown = function (e) {
+        if (e.key === 'Enter') { e.preventDefault(); send.click(); }
+      };
+      field.appendChild(input);
+      field.appendChild(send);
+      view.appendChild(field);
+      setTimeout(function () { input.focus(); }, 30);
+    }
+
     view.appendChild(note);
     view.appendChild(nextWrap);
 
@@ -289,6 +381,31 @@ const blogQuizScript = `
       nextBtn.focus();
     }
 
+    function settleBlank(raw) {
+      var ok = blankOk(raw, q.answer);
+      store.answers[q.id] = raw;
+
+      var box = view.querySelector('.quiz-field');
+      if (box) {
+        var inp = box.querySelector('input');
+        var btn = box.querySelector('button');
+        if (inp) { inp.disabled = true; inp.className = 'quiz-input quiz-blank ' + (ok ? 'ok' : 'bad'); }
+        if (btn) btn.hidden = true;
+      }
+      note.hidden = false;
+      note.className = 'quiz-note ' + (ok ? 'ok' : 'bad');
+      note.textContent = (ok ? '对。' : '答案是「' + q.answer + '」。');
+      if (q.explain) {
+        note.appendChild(document.createElement('br'));
+        note.appendChild(document.createTextNode(q.explain));
+      }
+      if (q.source) {
+        note.appendChild(el('span', 'src', '出处：' + q.source));
+      }
+      nextBtn.hidden = false;
+      nextBtn.focus();
+    }
+
     show(view);
   }
 
@@ -307,8 +424,15 @@ const blogQuizScript = `
     var wrong = [];
     for (var i = 0; i < store.list.length; i++) {
       var q = store.list[i];
-      var got = letters(store.answers[q.id] || '');
-      if (got && got === letters(q.answer)) correct++;
+      var mine = store.answers[q.id] || '';
+      var ok;
+      if (q.kind === 5) {
+        ok = blankOk(mine, q.answer);
+      } else {
+        var got = letters(mine);
+        ok = got !== '' && got === letters(q.answer);
+      }
+      if (ok) correct++;
       else wrong.push(q);
     }
     var ms = Date.now() - store.started;

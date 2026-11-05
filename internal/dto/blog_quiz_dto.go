@@ -13,12 +13,20 @@ package dto
 // 错题本以这个 ID 为键，因此编号一变不该让读者的历史无声失效。
 type BlogQuizQuestionDTO struct {
 	ID      string   `json:"id"`
-	Kind    int      `json:"kind"` // 1 单选 2 多选 3 判断 4 主观
+	Kind    int      `json:"kind"` // 1 单选 2 多选 3 判断 4 主观 5 填空
 	Stem    string   `json:"stem"`
 	Options []string `json:"options,omitempty"`
-	Answer  string   `json:"answer,omitempty"` // objective: letters; subjective: full text
+	Answer  string   `json:"answer,omitempty"` // objective: letters; subjective/bank: full text
 	Explain string   `json:"explain,omitempty"`
 	Source  string   `json:"source,omitempty"` // chapter or subject, for the "出处" line
+	// School and Year are the exam the question was taken from. Rendered as one small line
+	// under the stem — 四川大学 · 2015 — because a reader deciding whether a question is
+	// representative cares who set it and when.
+	//
+	// School 与 Year 是这道题的来源考试，在题干下方渲染成一行小字——四川大学 · 2015。
+	// 读者判断这道题是否有代表性时，会在意是谁、哪一年出的。
+	School string `json:"school,omitempty"`
+	Year   string `json:"year,omitempty"`
 }
 
 // BlogQuizDTO is what the article page carries. It deliberately holds counts and a rank
@@ -52,7 +60,7 @@ type BlogQuizRankDTO struct {
 //
 // BlogQuizPickDTO 是"开始练习"的响应：两个题池，含答案。
 type BlogQuizPickDTO struct {
-	NotePath   string               `json:"notePath"`
+	NotePath   string                `json:"notePath"`
 	Objective  []BlogQuizQuestionDTO `json:"objective"`
 	Subjective []BlogQuizQuestionDTO `json:"subjective"`
 }
@@ -94,10 +102,10 @@ type BlogQuizResultDTO struct {
 //
 // BlogQuizWrongDTO 是错题本的一条。
 type BlogQuizWrongDTO struct {
-	Question BlogQuizQuestionDTO `json:"question"`
-	NotePath string              `json:"notePath"`
-	NoteSlug string              `json:"noteSlug"`
-	NoteTitle string             `json:"noteTitle"`
-	Wrong    int                 `json:"wrong"`
-	At       string              `json:"at"`
+	Question  BlogQuizQuestionDTO `json:"question"`
+	NotePath  string              `json:"notePath"`
+	NoteSlug  string              `json:"noteSlug"`
+	NoteTitle string              `json:"noteTitle"`
+	Wrong     int                 `json:"wrong"`
+	At        string              `json:"at"`
 }

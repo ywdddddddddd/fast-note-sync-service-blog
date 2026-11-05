@@ -37,10 +37,20 @@ SRC = [
 OUT = Path(__file__).resolve().parent.parent / "internal" / "service" / "assets" / "quiz" / "bank.json"
 
 # Question kinds. Keep the numbers stable — the Go side switches on them.
-K_SINGLE, K_MULTI, K_JUDGE, K_SUBJ = 1, 2, 3, 4
+K_SINGLE, K_MULTI, K_JUDGE, K_SUBJ, K_BLANK = 1, 2, 3, 4, 5
 
 OBJECTIVE_PREFIX = ("单选题", "多选题", "判断题")
 SUBJECTIVE = {"名词解释", "简答题", "论述题", "病例分析题"}
+
+# Fill-in questions, hollowed out ahead of time by scripts/hollow_blank.py. The bank's own
+# `stem` for these is byte-identical to `answer` — the sentence IS the answer — so there is
+# nothing to blank without deciding which span matters. That decision is made once, offline,
+# and committed; this script only consumes it.
+#
+# 填空题的挖空由 scripts/hollow_blank.py 提前完成。题库里这些题目的 stem 与 answer 逐字相同
+# （整句就是答案），不先判断"哪一段值得挖"就无处可挖。这个判断离线做一次并提交，
+# 本脚本只负责消费它。
+BLANK_FILE = Path(__file__).resolve().parent.parent / "internal" / "service" / "assets" / "quiz" / "blank.json"
 
 # Trailing junk some rows carry: a bare exam year shoved into the stem.
 YEAR_NOISE = re.compile(r"(?<![0-9(（])(20[0-2][0-9])(?![0-9)）年])")
@@ -97,6 +107,15 @@ def norm_stem_key(s: str) -> str:
 
 
 def main() -> None:
+    blanks: dict[str, dict] = {}
+    if BLANK_FILE.exists():
+        try:
+            for it in json.loads(BLANK_FILE.read_text(encoding="utf-8")).get("items", []):
+                if it.get("cut") and it.get("masked"):
+                    blanks[it["stem"]] = it
+        except json.JSONDecodeError:
+            sys.exit(f"{BLANK_FILE} is not valid JSON")
+
     frames = []
     for p in SRC:
         if not p.exists():
@@ -107,6 +126,13 @@ def main() -> None:
 
     records: dict[tuple, dict] = {}
     skipped = Counter()
+    # One question can be asked by several schools in several years. Keeping every pair would
+    # quadruple the payload for no reading benefit, so the most frequent pair wins — it is a
+    # real provenance either way, and the label is one line of small text.
+    #
+    # 同一道题可能被多所学校、多个年份考过。全部保留会让体积翻几倍而读者并不受益，
+    # 因此取出现次数最多的那一对——两种都是真实的出处，而这个标记只是一行小字。
+    provenance: dict[tuple, Counter] = {}
 
     for row in df.itertuples(index=False):
         d = row._asdict()
@@ -116,6 +142,10 @@ def main() -> None:
         recovery = clean_text(d.get("recovery", ""))
         subject = clean_text(d.get("subject", ""))
         chapter = clean_text(d.get("chapter", ""))
+        school = clean_text(d.get("school", ""))
+        year = clean_text(d.get("year", ""))
+        if year and not re.fullmatch(r"19\d{2}|20\d{2}", year):
+            year = ""
 
         if not stem:
             skipped["empty_stem"] += 1
@@ -153,6 +183,22 @@ def main() -> None:
 
             rec = {"k": kind, "s": stem, "o": opts, "a": ans}
 
+        elif qtype == "填空题":
+            hollow = blanks.get(stem)
+            if not hollow:
+                skipped["blank_not_hollowed"] += 1
+                continue
+            if not hollow.get("masked") or "____" not in hollow["masked"]:
+                skipped["blank_masked_bad"] += 1
+                continue
+            rec = {"k": K_BLANK, "s": hollow["masked"], "a": hollow["cut"]}
+            # The explanation field for these carries the original sentence: after answering
+            # a hollowed sentence, seeing the whole line is what closes the loop.
+            #
+            # 这类题的解析存原句：答完一个挖空句之后，看到完整的一句才算闭环。
+            if hollow.get("stem"):
+                rec["r"] = hollow["stem"]
+
         elif qtype in SUBJECTIVE:
             body = clean_text(answer_raw)
             if len(body) < 8:
@@ -174,9 +220,21 @@ def main() -> None:
         # Same question asked by twenty schools is one practice item, not twenty.
         # Keep the copy carrying the richest explanation.
         key = (rec["k"], norm_stem_key(stem))
+        if school:
+            provenance.setdefault(key, Counter())[(school, year)] += 1
         prev = records.get(key)
         if prev is None or len(rec.get("r", "")) > len(prev.get("r", "")):
             records[key] = rec
+
+    for key, rec in records.items():
+        counter = provenance.get(key)
+        if not counter:
+            continue
+        (school, year), _ = counter.most_common(1)[0]
+        if school:
+            rec["sc"] = school
+        if year:
+            rec["yr"] = year
 
     items = list(records.values())
     items.sort(key=lambda x: (x["k"], x["s"]))
@@ -187,10 +245,11 @@ def main() -> None:
     OUT.write_text(raw, encoding="utf-8")
 
     by_kind = Counter(r["k"] for r in items)
-    labels = {K_SINGLE: "单选", K_MULTI: "多选", K_JUDGE: "判断", K_SUBJ: "主观"}
+    labels = {K_SINGLE: "单选", K_MULTI: "多选", K_JUDGE: "判断", K_SUBJ: "主观", K_BLANK: "填空"}
     with_subject = sum(1 for r in items if r.get("u"))
     with_chapter = sum(1 for r in items if r.get("c"))
     with_recovery = sum(1 for r in items if r.get("r"))
+    with_school = sum(1 for r in items if r.get("sc"))
 
     print(f"源行数        {total_rows}")
     print(f"输出题数      {len(items)}   去重丢弃 {total_rows - len(items)}")
@@ -199,6 +258,7 @@ def main() -> None:
     print(f"有学科        {with_subject}  ({with_subject / len(items):.1%})")
     print(f"有章节        {with_chapter}  ({with_chapter / len(items):.1%})")
     print(f"有教材出处    {with_recovery}  ({with_recovery / len(items):.1%})")
+    print(f"有院校出处    {with_school}  ({with_school / len(items):.1%})")
     print(f"体积          {len(raw.encode('utf-8')) / 1e6:.2f} MB -> {OUT}")
     print("\n跳过原因:")
     for reason, n in skipped.most_common(12):

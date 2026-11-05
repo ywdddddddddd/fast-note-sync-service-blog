@@ -28,6 +28,7 @@ const (
 	quizKindMulti  = 2 // 多选
 	quizKindJudge  = 3 // 判断
 	quizKindSubj   = 4 // 主观题（名词解释/简答/论述/病例）
+	quizKindBlank  = 5 // 已挖空的填空句，答案是句中被挖掉的那一段
 )
 
 // quizQuestion is one bank row plus its precomputed term ids.
@@ -51,6 +52,14 @@ type quizQuestion struct {
 	Recovery string   `json:"r,omitempty"`
 	Subject  string   `json:"u,omitempty"`
 	Chapter  string   `json:"c,omitempty"`
+	// School and Year are the exam this question came from, e.g. 四川大学 2015. Two short
+	// fields rather than one pre-joined label: the renderer decides whether to show them
+	// together, and a joined string cannot be sorted or filtered later.
+	//
+	// School 与 Year 是这道题的出处考试，如 四川大学 2015。用两个短字段而不是一个拼好的标签：
+	// 由渲染层决定要不要一起显示，而拼死的字符串日后没法再排序或筛选。
+	School string `json:"sc,omitempty"`
+	Year   string `json:"yr,omitempty"`
 
 	terms []int32 // sorted, deduplicated term ids
 }
@@ -73,6 +82,8 @@ type QuizHit struct {
 	Recovery string
 	Subject  string
 	Chapter  string
+	School   string
+	Year     string
 
 	Score    float64
 	Coverage float64
@@ -179,6 +190,7 @@ func DefaultQuizOptions() QuizOptions {
 		SubjectPenalty: quizSubjectPenalty,
 	}
 }
+
 const (
 	// quizMinSharedTerms rejects questions that share only one term with the note. One
 	// bigram in common happens between any two dental notes — the same argument the
@@ -302,7 +314,7 @@ func quizSearchText(q *quizQuestion) string {
 		b.WriteString(" ")
 		b.WriteString(strings.Join(q.Options, " "))
 	}
-	if q.Kind == quizKindSubj {
+	if q.Kind == quizKindSubj || q.Kind == quizKindBlank {
 		b.WriteString(" ")
 		b.WriteString(q.Answer)
 	}
@@ -424,14 +436,16 @@ func QuizMatchWith(notePlain, subjectHint string, topObjective, topSubjective in
 		}
 
 		candidates = append(candidates, QuizHit{
-			Kind:     q.Kind,
-			Type:     q.Type,
-			Stem:     q.Stem,
-			Options:  q.Options,
-			Answer:   q.Answer,
-			Recovery: q.Recovery,
-			Subject:  q.Subject,
-			Chapter:  q.Chapter,
+			Kind:      q.Kind,
+			Type:      q.Type,
+			Stem:      q.Stem,
+			Options:   q.Options,
+			Answer:    q.Answer,
+			Recovery:  q.Recovery,
+			Subject:   q.Subject,
+			Chapter:   q.Chapter,
+			School:    q.School,
+			Year:      q.Year,
 			Score:     score,
 			Coverage:  float64(coverage),
 			SharedIDF: float64(num),
