@@ -281,12 +281,40 @@ func (s *shareService) askRT() *askRuntime {
 }
 
 // askRouteKey identifies a route for pacing and cooldown bookkeeping.
+//
+// It is keyed on the upstream identity, NOT on Name. Name is a display label that the operator may
+// legitimately reuse across several routes — this site runs four routes all called "GPT-6 Astra"
+// (OpenCode Go, two SenseNova keys, one SiliconFlow fallback) because the label is what readers see
+// and the real model behind each is an implementation detail.
+//
+// Keying on Name made those four share one cooldown entry: when OpenCode Go answered 429 the
+// bookkeeping cooled "GPT-6 Astra", so the two SenseNova fallbacks and the Qwen last resort were all
+// skipped by askRouteCooling before they were ever tried — the whole failover chain collapsed on a
+// single upstream hiccup. Measured in production: one 429 from OpenCode was enough to leave only
+// Fable 5.5 standing.
+//
+// base-url+model is unique per upstream and stable across restarts, so a cooldown now applies to
+// exactly the route that earned it.
+//
 // askRouteKey 为节流与冷却记账标识一条线路。
+//
+// 它按「上游身份」取键，不按 Name。Name 是展示用的标签，运营者完全可能让多条线路共用一个名字 ——
+// 本站就有四条都叫「GPT-6 Astra」（OpenCode Go、两个商汤 key、一个 SiliconFlow 兜底），
+// 因为读者看到的是这个标签，背后真实的模型属于实现细节。
+//
+// 按 Name 取键让这四条共用一个冷却条目：OpenCode Go 回 429 时，记账冷却的是「GPT-6 Astra」，
+// 于是两个商汤兜底和最后的 Qwen 在轮到之前就被 askRouteCooling 跳过 —— 整条故障转移链
+// 被一次上游抖动全部打掉。生产实测：OpenCode 的一次 429 之后，只剩 Fable 5.5 还站着。
+//
+// base-url+model 对每个上游唯一、且跨重启稳定，于是冷却只作用于真正挣到它的那条线路。
 func askRouteKey(r AskRoute) string {
+	if r.BaseURL != "" {
+		return r.BaseURL + "|" + r.Model
+	}
 	if r.Name != "" {
 		return r.Name
 	}
-	return r.BaseURL + "|" + r.Model
+	return r.Model
 }
 
 func (s *shareService) askRouteCooling(key string) bool {
