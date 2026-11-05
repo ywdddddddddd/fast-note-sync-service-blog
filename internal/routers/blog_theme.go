@@ -53,6 +53,10 @@ const blogCSS = `
   --sidebar:#fbfbfb;
   --c1:#34322d;--c2:#5c5a56;--c3:#858481;--c4:#adacaa;--c5:#d6d5d4;
   --dot:#d1d1d1;
+  /* The tile behind the brand mark. Deliberately identical in both themes: the artwork is black
+     line on transparency, so it needs a light field to be legible, and the owner wants the figure
+     to read the same day and night. See .brand-mark img for the full reasoning. */
+  --mark-tile:#e7e6e2;
   /* Knowledge-graph accent. The reference component uses a single solid green for the
      focused node; kept as its own token so it can be tuned without touching the
      warm-grey palette. */
@@ -158,16 +162,42 @@ img{max-width:100%;height:auto;border-radius:.5rem}
 .brand-mark{
   width:34px;height:34px;flex:0 0 34px;border-radius:.75rem;
   display:flex;align-items:center;justify-content:center;
-  background:color-mix(in srgb,var(--primary) 10%,transparent);color:var(--primary);
+  /* 承载块。这块浅色两套主题用同一个值，理由见下面 img 那条注释。 */
+  background:var(--mark-tile);color:var(--primary);
   overflow:hidden;
+  transition:background .18s ease;
 }
 .brand-mark svg{width:18px;height:18px}
-/* The mark is now the owner's artwork rather than a stroked glyph, so it fills the tile instead of
-   being sized as an icon. Cover rather than contain: the artwork already has its own margins, and
-   containing it inside a 34px tile would shrink the visible figure to a smudge.
-   品牌标记现在是站主自己的图案而不是描边字形，因此铺满方格而不是按图标尺寸居中。
-   用 cover 而不是 contain：图案本身已留白，contain 在 34px 里会把主体缩成一块污渍。 */
-.brand-mark img{width:100%;height:100%;object-fit:cover;display:block;border-radius:inherit}
+/* The mark is the owner's own artwork: a black line drawing on a transparent field, 4000 units
+   square with the figure inset. It therefore fills the tile rather than being sized as an icon.
+   Cover rather than contain: containing a 4000-unit square with built-in margins inside a 34px
+   tile would shrink the figure to a smudge.
+   ── Why the tile stays light in both themes ──
+   The artwork is pure black line on transparency. Inverting it in dark mode turned it into white
+   line on dark, which the owner rejected: the figure has to read the same way day and night. A
+   black line needs a light field to be visible, so the tile is light in both themes rather than
+   following the theme. That is a deliberate exception to the palette, not an oversight.
+   ── Why multiply ──
+   The drawing's own pixels are black-on-clear; multiply keeps the line black and lets the tile
+   colour through everywhere else, so there is no seam where an image edge would otherwise meet
+   the tile. It also means a future replacement that carries a white background would blend
+   instead of showing a pasted-on white square.
+
+   品牌标记现在是站主自己的图案：透明底上的黑色线稿，4000 单位见方，人像内缩。
+   因此它铺满方格而不是按图标尺寸居中。用 cover 而不是 contain：
+   把一个自带边距的 4000 单位方块 contain 进 34px 会把主体缩成一块污渍。
+   ── 为什么承载块在两套主题下都是浅色 ──
+   图案是透明底上的纯黑线稿。夜间把它反相会变成深底白线，站主否掉了这个做法：
+   人像昼夜必须读起来一样。黑线需要浅底才可见，所以承载块两套主题都取浅色，
+   而不是跟随主题。这是对配色的一处有意例外，不是疏忽。
+   ── 为什么用 multiply ──
+   图案自身是透明底黑线；multiply 让线保持黑、其余处透出承载块的底色，
+   于是图案边缘与承载块之间不存在接缝。它也意味着将来换一张自带白底的图会自然融合，
+   而不是显出一个贴上去的白方块。 */
+.brand-mark img{
+  width:100%;height:100%;object-fit:cover;display:block;border-radius:inherit;
+  mix-blend-mode:multiply;
+}
 .brand-name{font-size:1.0625rem;font-weight:700;letter-spacing:-.01em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .brand-sub{font-size:.75rem;color:var(--muted-foreground);white-space:nowrap}
 /* 同一条信息的两种长度。宽屏用完整写法，窄屏用压缩写法（字数按「万」计），
@@ -2100,22 +2130,105 @@ html.ask-inline .ask-fab{display:none}
 /* 首页内容的底衬只做在首页，避免在文章页把粒子也挡掉（那些页面不注入粒子）。 */
 .layout-home{position:relative;z-index:1}
 
-/* ── 穿越过渡 ───────────────────────────────────────────────────────── */
-/* 覆盖层。pointer-events:none：它盖住整个视口，若可点击，导航过程中页面上的东西都点不到。 */
-.fns-warp{position:fixed;inset:0;z-index:200;pointer-events:none}
+/* ── 转场（手写） ───────────────────────────────────────────────────── */
+/* 遮罩。pointer-events:none：它盖住整个视口，若可点击，导航过程中页面上的东西都点不到。
 
-/* 出发：页面在星空之下淡出并轻微放大，像是被甩在身后。 */
-html.fns-warping body{opacity:0;transform:scale(1.03);transition:opacity .7s ease,transform 1.1s cubic-bezier(.4,0,.9,.4)}
+   三处尺寸约束各有理由，缺一个就在某个状态上漏边：
+   - position:fixed + inset:0 让它贴住视口，而不是贴住文档；
+   - 100vw/100vh 兜住移动端地址栏收起时的视口变化；
+   - 它挂在 html 下而不是 body 下 —— body 在出发时会拿到 transform，
+     而被 transform 的元素会成为其 fixed 后代的包含块，遮罩就会被钉在文档顶部。
+     实测旧版 scrollY=1176 时画布矩形 y=-1176，整个在屏幕外。 */
+.fns-ink{
+  position:fixed;inset:0;width:100vw;height:100vh;
+  z-index:2147483000;pointer-events:none;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  background:var(--background);
+  opacity:1;
+  transition:opacity .38s cubic-bezier(.16,1,.3,1);
+}
+.fns-ink.is-done{opacity:0}
 
-/* 抵达：内容渐显。从略小、略淡的状态浮上来，与放大的离开方向相对，读起来像一次接续。 */
-html.fns-arrived .shell{opacity:0;transform:scale(.985)}
-html.fns-arrived body{}
-@keyframes fns-arrive-fade{from{opacity:0;transform:scale(.985)}to{opacity:1;transform:none}}
-html.fns-arrived .shell{animation:fns-arrive-fade .62s cubic-bezier(.22,1,.36,1) both}
+/* 纸面。极淡的墨色中心，让遮罩不是一块纯色板；两套主题各取自己的底色变量。 */
+.fns-ink::before{
+  content:'';position:absolute;inset:0;pointer-events:none;
+  background:radial-gradient(circle at 50% 46%,
+    color-mix(in srgb,var(--foreground) 3%,var(--background)) 0%,
+    var(--background) 62%);
+}
+
+/* 画面尺寸。
+   这里每一行都有实测依据：只写 width 加 height:auto 时，SVG 在 flex 容器里的高度算出来是 0，
+   遮罩上除了底色什么都没有 —— 这正是第一次跑通的版本。
+   - height 用 aspect-ratio 推导，但必须显式写 auto 之外的东西，否则 SVG 走「替换元素」那条
+     尺寸规则，在没有内在宽高时塌成 0；
+   - aspect-ratio 11/5 与 viewBox 1100x500 一致，字形不会被拉伸；
+   - max-height 兜住横屏手机：11/5 在 92vw 下可能高过视口。 */
+.fns-ink-svg{
+  position:relative;display:block;
+  width:min(86vw,760px);
+  aspect-ratio:11/5;height:auto;min-height:120px;
+  max-height:64vh;
+  overflow:visible;
+}
+@media (max-width:560px){.fns-ink-svg{width:92vw;max-height:56vh}}
+@media (max-height:520px){.fns-ink-svg{width:min(64vw,520px);max-height:72vh}}
+
+/* 笔画。圆头圆接是「手写」而不是「描图」的关键。 */
+.fns-ink-hair{
+  fill:none;stroke:var(--foreground);stroke-width:2.6;
+  stroke-linecap:round;stroke-linejoin:round;
+}
+.fns-ink-swell{
+  fill:none;stroke:var(--foreground);
+  stroke-linecap:round;stroke-linejoin:round;
+}
+
+/* 钢笔。黑色笔身在任何主题下都成立 —— 它是器物，不是文字。 */
+.fns-ink-pen{will-change:transform,opacity}
+.fns-ink-pen-barrel{fill:#121317;stroke:#000;stroke-width:.6}
+.fns-ink-pen-collar{fill:#b8933f}
+.fns-ink-pen-nib{fill:#d8ab4e;stroke:#745214;stroke-width:.7}
+.fns-ink-pen-plate{fill:#f2f4f8;stroke:#929aa6;stroke-width:.4}
+.fns-ink-pen-hole{fill:#12151b;stroke:#684a10;stroke-width:.7}
+.fns-ink-pen-slit{stroke:#12151b;stroke-width:.75}
+.fns-ink-pen-tip{fill:#f4f6fa;stroke:#667080;stroke-width:.3}
+/* 抬笔时笔略微淡一点，与落笔的重量区分开。 */
+.fns-ink-pen.is-lifting .fns-ink-pen-body{opacity:.9}
+
+/* 加载提示。字距很宽，是这一层的第二个信息，不是主角。 */
+.fns-ink-hint{
+  position:relative;margin-top:.7rem;display:flex;align-items:center;gap:.5rem;
+  font-size:.72rem;letter-spacing:.18em;text-transform:uppercase;font-weight:500;
+  color:var(--muted-foreground);font-family:var(--font-sans);
+}
+.fns-ink-word{white-space:nowrap}
+.fns-ink-dot{
+  width:5px;height:5px;border-radius:50%;background:var(--foreground);opacity:.5;
+  animation:fns-ink-pulse 1.4s infinite ease-in-out;
+}
+@keyframes fns-ink-pulse{
+  0%,100%{opacity:.25;transform:scale(.85)}
+  50%{opacity:.9;transform:scale(1.25)}
+}
+
+/* 出发：页面淡出。
+   scale 挪到 .shell 上，body 只留 opacity —— 遮罩挂在 html 下，本来就不受 body 影响，
+   但把位移从 body 上彻底移走，是让「遮罩永不被捕获」成为结构性的而不是巧合。 */
+html.fns-warping{overflow:hidden}
+html.fns-warping body{opacity:0;transition:opacity .5s ease}
+html.fns-warping .shell{transform:scale(1.015);transition:transform 1s cubic-bezier(.4,0,.9,.4)}
+
+/* 抵达：内容渐显。从略淡的状态浮上来，与离开方向相对，读起来像一次接续。 */
+@keyframes fns-arrive-fade{from{opacity:0}to{opacity:1}}
+html.fns-arrived .shell{animation:fns-arrive-fade .55s cubic-bezier(.22,1,.36,1) both}
 
 @media (prefers-reduced-motion:reduce){
-  html.fns-warping body{opacity:1;transform:none;transition:none}
-  html.fns-arrived .shell{animation:none;opacity:1;transform:none}
+  .fns-ink-dot{animation:none}
+  html.fns-warping{overflow:auto}
+  html.fns-warping body{opacity:1;transition:none}
+  html.fns-warping .shell{transform:none;transition:none}
+  html.fns-arrived .shell{animation:none;opacity:1}
 }
 
 /* ── 热门(首页右栏)──────────────────────────────────────────────────── */
@@ -3344,8 +3457,9 @@ html.is-wx .ask-panel{left:.45rem;right:.45rem;width:auto}
   transition:background .18s ease,color .18s ease;
 }
 .theme-btn:hover{background:var(--muted);color:var(--foreground)}
-.theme-btn svg{width:15px;height:15px}
-.theme-btn .ti{display:none}
+/* 基线图标与动画层共用一个 19px 盒子。静态 SVG 的 viewBox 是 16 单位满幅，
+   图案铺到 19px 之后墨迹约 14px，与下面缩放过的三份动画同一个视觉尺寸。 */
+.theme-btn .ti{display:none;width:19px;height:19px}
 .theme-btn[data-mode="system"] .ti-auto,
 .theme-btn[data-mode="dark"] .ti-dark,
 .theme-btn[data-mode="light"] .ti-light{display:block}
@@ -3360,12 +3474,33 @@ html.is-wx .ask-panel{left:.45rem;right:.45rem;width:auto}
    上面的静态 SVG 是基线，留在标记里；这几个 span 只在播放器真的画出一帧之后才接手
    （由脚本加上 has-lottie）。因此从不加载 /blog/lottie.js 的页面仍然显示正确的符号，
    慢链路也不会让按钮中途变空。 */
-.theme-btn .tl{display:none;width:19px;height:19px}
+.theme-btn .tl{display:none;width:19px;height:19px;flex:0 0 19px}
 .theme-btn.has-lottie .ti{display:none}
 .theme-btn.has-lottie[data-mode="system"] .tl-system,
 .theme-btn.has-lottie[data-mode="dark"] .tl-dark,
 .theme-btn.has-lottie[data-mode="light"] .tl-light{display:block}
 .theme-btn.has-lottie .tl svg{width:100%;height:100%;display:block}
+
+/* ── 三枚图标的视觉尺寸必须一致 ───────────────────────────────────────
+   三份动画共用 32x32 画板，但图案在画板里占的比例不同。实测（把每枚的 SVG 画进
+   64x64 画布读 alpha 包围盒）：
+
+     手机 32x44（宽 50.0% / 高 68.8%）
+     月亮 40x40（62.5% / 62.5%）
+     太阳 48x48（75.0% / 75.0%）
+
+   同一个 19px 盒子里，太阳的墨迹高 14.25px 而手机只有 13.07px，宽度更是 14.25 对 9.5 ——
+   切一次主题，图标就换一个视觉尺寸，太阳比手机宽出五成。桌面上按钮周围留白大，
+   30% 的差被稀释；移动端顶栏只有 52px、图标紧挨着汉堡边框，这个差就直接读成「尺寸异常」。
+   把每枚按自己的墨迹比例缩回去，墨迹高度统一到 14px：
+     手机 x1.071 / 月亮 x1.179 / 太阳 x0.982
+   宽度随之变成 10.2 / 14 / 14 —— 手机仍然更窄，那是手机本来就窄，不是缺陷。
+   用 scale 而不是 transform：本站的 transform 已被 .reveal.is-in 与封面内联占用，
+   独立变换属性不会有优先级之争。 */
+.theme-btn.has-lottie[data-mode="system"] .tl svg{scale:1.071}
+.theme-btn.has-lottie[data-mode="dark"] .tl svg{scale:1.179}
+.theme-btn.has-lottie[data-mode="light"] .tl svg{scale:0.982}
+
 /* 三份动画都是纯黑描边。亮色下压到与 --foreground 相称的浓度，暗色下反相。
    暗色有三种到达方式（显式 dark、显式 light、跟随系统），三条都要写，否则跟随系统的暗色
    会显示一枚谁都看不见的黑图标。 */
@@ -3825,13 +3960,13 @@ body.is-post .rail.is-spring,.graph-panel.is-spring{transition:none!important}
   transition:opacity .12s linear;
 }
 
-/* 暗色下顶栏头像反相。
-   那张图是一幅黑白人像，底色偏浅；贴在深色顶栏上时整块读起来只是一团灰。
-   反相之后底变深、人像变浅，与「问道」两个白字同一个方向。
-   三条到达暗色的路径都要覆盖（显式 dark、显式 light、跟随系统），
-   漏一条就会出现「系统是暗色、站内选了亮色，头像却反了」。 */
-html.dark .brand-mark img{filter:invert(1)}
-@media (prefers-color-scheme:dark){html:not(.light) .brand-mark img{filter:invert(1)}}
+/* 顶栏头像不再反相。
+   改反相是为了让深色底上的一团灰变亮，但代价是黑白互换 —— 站主否掉了那个方向：
+   人像昼夜必须读起来一样。现在做的是反过来的一件事：给黑线稿一块固定的浅色承载块
+   （--mark-tile），黑线因此在两套主题下都可见，图案本身一次都不用动。
+   承载块与顶栏之间的接缝靠两样东西消掉：承载块半透明（让顶栏底色透上来一点），
+   以及 img 的 multiply（图案边缘不再是贴上去的一块）。
+   所以这里不再有 invert，也没有按主题分叉 —— 分叉本身就是上一版出问题的地方。 */
 
 /* 阅读进度环。它同时是回到顶部按钮：一个只负责汇报的环，加上可点击之后就成了读者真能用的控件，
    而一个控件就是一个要瞄准的目标。
