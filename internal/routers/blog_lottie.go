@@ -255,26 +255,26 @@ const blogThemeLottieJS = `
         })(wraps[i]);
       }
 
-      // Called by the dock script. Always calls back exactly once, so the dock can never be left
-      // waiting on an animation that will not finish.
+      // Called by the dock script when the dock is about to open.
       //
-      // 由胶囊脚本调用。它保证回调恰好触发一次，胶囊因此不可能停在等待一段永远不会结束的动画上。
+      // It starts the animation and returns immediately. The first version held the dock back until
+      // the animation finished — 1.13 seconds of waiting before a menu opened, which the owner
+      // correctly called sluggish. A one-second gesture in front of a control is not an announcement,
+      // it is a delay. So the icon now reacts and the dock opens in the same moment; the animation
+      // plays underneath while the capsule grows over it and the orb fades out.
+      //
+      // 由胶囊脚本在即将展开时调用。
+      //
+      // 它启动动画后立刻返回。第一版是等动画播完再开胶囊——为了打开一个菜单而等 1.13 秒，
+      // 站主说得对，那叫拖沓。一个控件前面压着一秒的手势不是「告知」，是「延误」。
+      // 现在图标立刻响应、胶囊同一瞬间打开，动画在底下继续播，
+      // 而胶囊在它上面长出来、球随之淡出。
       window.fnsOrbPlay = function (done) {
         var a = anims[0];
-        if (!a || still) { done(); return; }
-        var finished = false;
-        function fin() {
-          if (finished) { return; }
-          finished = true;
-          try { a.removeEventListener('complete', fin); } catch (e) {}
-          done();
+        if (a && !still) {
+          try { a.goToAndPlay(0, true); } catch (e) {}
         }
-        a.addEventListener('complete', fin);
-        // A paused tab or a dropped frame can swallow the complete event; the timeout is the
-        // promise that the dock still opens.
-        // 标签页被切走或掉帧都可能吞掉 complete 事件；这个超时是「胶囊仍然会展开」的保证。
-        window.setTimeout(fin, 1500);
-        a.goToAndPlay(0, true);
+        done();
       };
     });
   }

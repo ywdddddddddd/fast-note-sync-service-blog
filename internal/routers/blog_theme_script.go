@@ -211,14 +211,16 @@ const blogThemeScript = `
       var reduce = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
       if (reduce) { return; }
 
-      // The list pages put their cards inside .cards, the article page is a single .card, and the
-      // shelf has its own column class. Selecting element names instead of roles would have missed
-      // all three — this list is the actual markup, checked against the rendered DOM rather than
-      // guessed from the CSS.
+      // The list pages put their cards inside .cards, the article page is a single .card, the shelf
+      // has its own column class, and the home page's栏目 list lives inside a drawer as plain rows
+      // under ul.rec. Selecting element names instead of roles would have missed all four — this
+      // list is the actual markup, checked against the rendered DOM rather than guessed from CSS.
       //
-      // 列表页的卡片在 .cards 里，文章页是一整块 .card，资料页有它自己的列类名。
-      // 凭角色去猜元素名会三处全部落空——这份清单来自实际渲染出来的 DOM，不是从 CSS 推的。
-      var SEL = '.cards > *, .post-card, .card, .post-body, .page-body, .aside, .rail, .footer, .shelf-col, .shelf-card';
+      // 列表页的卡片在 .cards 里，文章页是一整块 .card，资料页有它自己的列类名，
+      // 而首页的「栏目」是抽屉里 ul.rec 下面的普通行。
+      // 凭角色去猜元素名会四处全部落空——这份清单来自实际渲染出来的 DOM，不是从 CSS 推的。
+      var SEL = '.cards > *, .post-card, .card, .post-body, .page-body, .aside, .rail, .footer,' +
+                ' .shelf-col, .shelf-card, .sheet-rec > ul > li';
       var nodes = Array.prototype.slice.call(document.querySelectorAll(SEL));
       if (!nodes.length) { return; }
 
@@ -240,6 +242,20 @@ const blogThemeScript = `
         if (el.classList.contains('reveal')) { continue; }
         el.classList.add('reveal');
         var r = el.getBoundingClientRect();
+        // A zero-sized box means the container is display:none right now — the card lives inside a
+        // drawer that has not been opened yet. Its rect reports 0,0, which the first-screen test
+        // reads as "above the fold" and reveals instantly, so the card would already be settled by
+        // the time the drawer opened and the reader would never see it arrive. Observing instead
+        // lets it animate at the moment the drawer actually shows it.
+        //
+        // 盒子尺寸为零说明容器此刻是 display:none —— 卡片躺在还没打开的抽屉里。
+        // 它的 rect 会报 0,0，而「是否在首屏」的判断会把 0 当成「在顶上」，于是立刻标成已浮现，
+        // 等抽屉真的打开时它早已落定，读者永远看不到它进场。改成交给观察器，
+        // 让它在抽屉把这张卡片显示出来的那一刻播放。
+        if (r.width === 0 && r.height === 0) {
+          if (io) { io.observe(el); } else { el.classList.add('is-in'); }
+          continue;
+        }
         // First screen: stagger by order so the page assembles rather than appearing all at once.
         // 首屏：按顺序错开，页面是「组装起来」的，不是一瞬间全出现。
         if (r.top < vh * 0.92) {

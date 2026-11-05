@@ -2478,14 +2478,20 @@ html.fns-arrived .shell{animation:fns-arrive-fade .62s cubic-bezier(.22,1,.36,1)
   }
 
   /* 抓手：一道 2.5rem 宽的圆角短横，只出现在可拖的三个 sheet 上。
-     用 ::before 而不是新增 DOM —— 它没有任何语义，加节点只会让模板更难读。 */
+     用 ::before 而不是新增 DOM —— 它没有任何语义，加节点只会让模板更难读。
+
+     但这个盒子本身是顶部 56px 的整条透明热区，短横只是画在里面的一个背景图。
+     原因是 touch-action：手指按在抽屉顶部空白处时，浏览器会把竖向滑动理解成页面滚动，
+     随即发出 pointercancel，拖拽半途被取消、面板弹回原位 —— 表现就是「抽风」。
+     touch-action 只能作用于被触摸的那个盒子，所以热区必须是一个真实可命中的元素，
+     而不是一条 4px 的线。56px 与脚本里的 DRAG_ZONE 对齐，那里本来就是抓手的范围。 */
   body.is-post .aside::before,
   body.is-page .aside::before,
   body.is-home .aside::before,
   body.is-post .rail::before{
-    content:"";position:absolute;left:50%;top:.62rem;
-    width:2.5rem;height:.25rem;margin-left:-1.25rem;
-    border-radius:999px;background:var(--border);
+    content:"";position:absolute;left:0;right:0;top:0;height:56px;
+    touch-action:none;cursor:grab;
+    background:linear-gradient(var(--border),var(--border)) center .62rem/2.5rem .25rem no-repeat;
   }
 
   /* 长内容：三档可拖。--sheet-h 由脚本写入，初值 40%。 */
@@ -2528,7 +2534,11 @@ html.fns-arrived .shell{animation:fns-arrive-fade .62s cubic-bezier(.22,1,.36,1)
   body.drawer-nav .fns-scrim,
   body.drawer-toc .fns-scrim,
   body.drawer-hot .fns-scrim,
-  body.drawer-live .fns-scrim{
+  body.drawer-live .fns-scrim,
+  /* drawer-rec 漏了这一条：遮罩会 display:block 却停在 opacity:0，
+     而且 pointer-events 仍是 none —— 于是它既看不见、也收不到点击，
+     「点空白处关闭」于是完全不成立。首页那个「推荐·最近更新的栏目」走的正是 drawer-rec。 */
+  body.drawer-rec .fns-scrim{
     opacity:1;pointer-events:auto;
     -webkit-backdrop-filter:blur(2px);backdrop-filter:blur(2px);
   }
@@ -3711,12 +3721,22 @@ body.is-post .rail.is-spring,.graph-panel.is-spring{transition:none!important}
   .tilt{
     transform:perspective(820px) rotateX(var(--rx,0deg)) rotateY(var(--ry,0deg));
     transition:background-color .15s ease,border-color .15s ease,
-               transform .5s cubic-bezier(.22,1,.36,1);
+               transform .45s cubic-bezier(.22,1,.36,1);
   }
   .tilt.is-tilting{
-    transition:background-color .15s ease,border-color .15s ease,transform .1s linear;
-    will-change:transform;
+    /* 跟手期间只留 60ms 的平滑：再长就是延迟，读者会看到卡片在追光标。
+       松手回到 0 时用的是上面那条 450ms 的曲线，所以「离开」仍然是缓的。 */
+    transition:background-color .15s ease,border-color .15s ease,transform .06s linear;
   }
+  /* 封面与文字反向位移，形成真实的层次。
+     只旋转卡片是不够的：整块一起转，文字读起来是「贴在卡纸上跟着歪」，不是「浮在卡纸上面」。
+     封面用 --px（-nx*6），文字取反 0.75 倍，两者相对位移约 10px，
+     眼睛读到的就是封面在后、文字在前。 */
+  .tilt .card-link{
+    translate:calc(var(--px,0px) * -0.75) calc(var(--py,0px) * -0.75);
+    transition:translate .06s linear;
+  }
+  .tilt:not(.is-tilting) .card-link{transition:translate .45s cubic-bezier(.22,1,.36,1)}
   /* 封面的位移用 translate / scale 这两个独立属性，不写进 transform。
      封面图上有内联的 transform: scale(1)（封面加载脚本写上去的收尾态），
      内联样式压过样式表里任何同权重规则，用 transform 永远抢不过它；
