@@ -150,22 +150,33 @@ func TestWarpScriptContract(t *testing.T) {
 // 这条测试断言的是模板接线，而不是脚本内容：五个阅读模板的 head 里都要有 inkjs，
 // 且没有任何一处仍在 body 末尾塞 WarpJS。
 func TestInkScriptIsInHead(t *testing.T) {
-	var heads int
-	for _, tmpl := range []string{
-		blogChromePartials,
-		blogPostTmpl.Tree.Root.String(),
-		blogPageTmpl.Tree.Root.String(),
-		blogShelfPage,
-		blogReaderPage,
-	} {
-		if strings.Contains(tmpl, "<script>{{inkjs}}</script>") {
-			heads++
+	// Each of the five reading templates must inject {{inkjs}} from its own <head>.
+	// 五个阅读模板各自都要在自己的 <head> 里注入 {{inkjs}}。
+	cases := []struct {
+		name string
+		src  string
+	}{
+		{"home/list/archive (blogChromePartials)", blogChromePartials},
+		{"post", blogPostTmpl.Tree.Root.String()},
+		{"page", blogPageTmpl.Tree.Root.String()},
+		{"shelf", blogShelfPage},
+		{"reader", blogReaderPage},
+	}
+	for _, c := range cases {
+		if !strings.Contains(c.src, "<script>{{inkjs}}</script>") {
+			t.Errorf("%s 的 head 没有注入 inkjs：这一页的入站动画会缺席", c.name)
 		}
 	}
-	if heads < 5 {
-		t.Errorf("只有 %d 个 head 注入了 inkjs，应为 5 个", heads)
+
+	// The error page deliberately has none: a loading screen in front of a 404 is pure delay.
+	// 错误页刻意没有：在 404 前面放加载画面是纯粹的拖延。
+	if strings.Contains(blogErrorTmpl.Tree.Root.String(), "{{inkjs}}") {
+		t.Error("错误页注入了 inkjs：404 前面会挡一层加载画面")
 	}
 
+	// And nothing may still inject WarpJS at the end of <body>, which is what made the overlay
+	// arrive a beat after the page had already been painted.
+	// 也不能再有任何模板在 body 末尾注入 WarpJS —— 那正是遮罩晚于页面绘制一步出现的原因。
 	for _, tmpl := range []string{
 		blogPostTmpl.Tree.Root.String(),
 		blogPageTmpl.Tree.Root.String(),
