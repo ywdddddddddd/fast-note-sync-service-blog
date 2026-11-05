@@ -346,31 +346,69 @@ const blogThemeScript = `
 
       function clamp(v) { return v < -1 ? -1 : (v > 1 ? 1 : v); }
 
-      // The card's rect is read once per hover, not once per pointermove.
+      // Boundary rules, one line each. Each of these was a way the tilt could misbehave at an edge:
       //
-      // The old code called getBoundingClientRect inside the move handler. A fine pointer reports
-      // position at up to 120 Hz, and each of those calls forces the browser to flush pending layout
-      // before it can answer — so the handler itself was the bottleneck, and the tilt visibly lagged
-      // behind the cursor. The box cannot change while the pointer is inside it (nothing here
-      // reflows on hover), so one measurement at pointerenter is enough. Scrolling invalidates it.
+      //   B1 enter        respond on the first frame, no easing (the geometry is written per frame)
+      //   B2 leave        wait 70ms before resetting; a re-enter inside that window cancels it
+      //   B3 between cards the gap is 14px wide; B2 means crossing it never resets anything
+      //   B4 card edge    clamp the normalised position to the inner 85%, so the outer band holds
+      //                   the maximum angle. Without this the card rotates, its hit area moves,
+      //                   the pointer falls out, the card resets, the pointer is inside again —
+      //                   a feedback loop that reads as shuddering right at the border
+      //   B5 scroll       the card moved under a stationary pointer, so the cached rect and the
+      //                   angle are both stale: drop the rect and settle the card
+      //   B6 window blur  the pointer is gone without a pointerleave; settle everything
+      //   B7 tiny card    below 120px the parallax budget exceeds the card itself; skip it
       //
-      // 卡片的矩形每次悬停只量一次，而不是每次 pointermove 都量。
+      // 边界规则，一条一行。下面每一条都对应一次「在边上出问题」的可能：
       //
-      // 旧代码在 move 处理里调 getBoundingClientRect。精确指针的上报频率可达 120Hz，
-      // 而每一次调用都强制浏览器先冲刷待处理的布局才能回答——于是瓶颈就是这个处理函数本身，
-      // 倾斜明显地拖在光标后面。指针在卡片内时盒子不会变（这里没有任何悬停引发的重排），
-      // 所以 pointerenter 时量一次就够。滚动会作废这份缓存。
-      var rects = [];
+      //   B1 进入     第一帧就响应，不做缓动（几何是逐帧写入的）
+      //   B2 离开     等 70ms 再复位；这期间重新进入就取消复位
+      //   B3 卡片之间 间隙 14px；有 B2 在，跨过间隙不会触发任何复位
+      //   B4 卡片边缘 把归一化坐标钳在内侧 85%，让外侧那一条保持在最大角度。
+      //               少了这一条，卡片一转、命中区跟着动、指针就掉出去、卡片复位、指针又进来了——
+      //               一个反馈环，读起来就是在边界上发抖
+      //   B5 滚动     卡片在静止的指针下面移动了，缓存的矩形与角度都失效：作废矩形并让卡片落定
+      //   B6 窗口失焦 指针消失但没有 pointerleave；让所有卡片落定
+      //   B7 过小的卡 窄于 120px 时，视差预算比卡片本身还大；跳过
+      var INNER = 0.85;
+      var LEAVE_DELAY = 70;
+      var MIN_W = 120;
 
-      function dropRects() {
-        for (var k = 0; k < rects.length; k++) { rects[k].r = null; }
+      var cards = [];
+
+      function reset(slot) {
+        if (slot.timer) { window.clearTimeout(slot.timer); slot.timer = 0; }
+        slot.r = null;
+        slot.pending = null;
+        if (slot.raf) { window.cancelAnimationFrame(slot.raf); slot.raf = 0; }
+        slot.card.classList.remove('is-tilting');
+        slot.card.style.setProperty('--ry', '0deg');
+        slot.card.style.setProperty('--rx', '0deg');
+        slot.card.style.setProperty('--px', '0px');
+        slot.card.style.setProperty('--py', '0px');
       }
-      window.addEventListener('scroll', dropRects, { passive: true });
-      window.addEventListener('resize', dropRects, { passive: true });
+
+      function resetAll() {
+        for (var k = 0; k < cards.length; k++) { reset(cards[k]); }
+      }
+
+      // B5 / B6: both boundaries mean the same thing — we no longer know where the pointer is
+      // relative to the card, so the honest answer is "settle".
+      // B5 / B6 是同一种边界：我们已经不知道指针相对卡片在哪，诚实的答案就是「落定」。
+      window.addEventListener('scroll', resetAll, { passive: true });
+      window.addEventListener('resize', resetAll, { passive: true });
+      window.addEventListener('blur', resetAll);
 
       for (var i = 0; i < list.length; i++) {
         (function (card) {
           if (card.classList.contains('tilt')) { return; }
+
+          // B7: a card narrower than the parallax budget has no room to move in.
+          // B7：窄于视差预算的卡片没有可移动的余地。
+          var box = card.getBoundingClientRect();
+          if (box.width && box.width < MIN_W) { return; }
+
           card.classList.add('tilt');
 
           var sheen = document.createElement('span');
@@ -378,18 +416,19 @@ const blogThemeScript = `
           sheen.setAttribute('aria-hidden', 'true');
           card.appendChild(sheen);
 
-          var slot = { r: null };
-          rects.push(slot);
-          var pending = null;
-          var raf = 0;
+          var slot = { card: card, r: null, pending: null, raf: 0, timer: 0 };
+          cards.push(slot);
 
           function apply() {
-            raf = 0;
-            var ev = pending;
+            slot.raf = 0;
+            var ev = slot.pending;
             var r = slot.r;
             if (!ev || !r || !r.width || !r.height) { return; }
-            var nx = clamp((ev.clientX - r.left) / r.width - 0.5) * 2;   // -1..1
-            var ny = clamp((ev.clientY - r.top) / r.height - 0.5) * 2;
+            // B4: the outer band holds the maximum angle, so rotating the card cannot change
+            // which side of the edge the pointer is on.
+            // B4：外侧那一条保持最大角度，于是卡片旋转不会改变指针落在边缘的哪一侧。
+            var nx = clamp(((ev.clientX - r.left) / r.width - 0.5) * 2 / INNER);
+            var ny = clamp(((ev.clientY - r.top) / r.height - 0.5) * 2 / INNER);
             card.style.setProperty('--ry', (nx * MAX_DEG).toFixed(2) + 'deg');
             card.style.setProperty('--rx', (-ny * MAX_DEG).toFixed(2) + 'deg');
             card.style.setProperty('--px', (-nx * PARALLAX).toFixed(2) + 'px');
@@ -398,38 +437,35 @@ const blogThemeScript = `
             card.style.setProperty('--my', ((ny * 0.5 + 0.5) * 100).toFixed(1) + '%');
           }
 
+          // B1: respond on the first frame.
+          // B1：第一帧就响应。
           card.addEventListener('pointerenter', function (ev) {
             if (ev.pointerType !== 'mouse') { return; }
+            // B2: a re-enter inside the leave window cancels the pending reset instead of starting
+            // from a half-settled state.
+            // B2：在离开窗口内重新进入，取消待执行的复位，而不是从一个半落定的状态重新开始。
+            if (slot.timer) { window.clearTimeout(slot.timer); slot.timer = 0; }
             slot.r = card.getBoundingClientRect();
-            pending = ev;
+            slot.pending = ev;
             card.classList.add('is-tilting');
-            if (!raf) { raf = window.requestAnimationFrame(apply); }
+            if (!slot.raf) { slot.raf = window.requestAnimationFrame(apply); }
           });
 
-          // One rAF per frame, not one write per event: several pointer events can arrive between
-          // two frames, and writing style on each of them is wasted work the compositor throws away.
-          //
-          // 每帧只写一次，而不是每个事件写一次：两帧之间可能到达多个指针事件，
-          // 逐个写样式是合成器随后就会丢掉的无用功。
           card.addEventListener('pointermove', function (ev) {
             if (ev.pointerType !== 'mouse') { return; }
             if (!slot.r) { slot.r = card.getBoundingClientRect(); }
-            pending = ev;
-            if (!raf) { raf = window.requestAnimationFrame(apply); }
+            slot.pending = ev;
+            if (!slot.raf) { slot.raf = window.requestAnimationFrame(apply); }
           });
 
-          // Leaving puts everything back to zero rather than to the last value: a card stuck at
-          // three degrees is a card that looks broken.
-          // 离开时把每个值归零，而不是留在最后一个值上：一张卡在三度角停住，看起来就是坏了。
+          // B2: leaving is deferred. The pointer crossing the 14px gap between two cards fires
+          // leave-then-enter within a few milliseconds, and resetting on the leave frame made the
+          // two cards animate against each other.
+          // B2：离开是延迟的。指针跨过两张卡之间 14px 的间隙时，leave 与 enter 会在几毫秒内先后到达；
+          // 在 leave 那一帧就复位，会让两张卡对着彼此做动画。
           card.addEventListener('pointerleave', function () {
-            slot.r = null;
-            pending = null;
-            if (raf) { window.cancelAnimationFrame(raf); raf = 0; }
-            card.classList.remove('is-tilting');
-            card.style.setProperty('--ry', '0deg');
-            card.style.setProperty('--rx', '0deg');
-            card.style.setProperty('--px', '0px');
-            card.style.setProperty('--py', '0px');
+            if (slot.timer) { window.clearTimeout(slot.timer); }
+            slot.timer = window.setTimeout(function () { reset(slot); }, LEAVE_DELAY);
           });
         })(list[i]);
       }
