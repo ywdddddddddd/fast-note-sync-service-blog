@@ -136,10 +136,12 @@ const blogSheetScript = `
       el: el,
       startY: ev.clientY,
       startH: rect.height,
-      moved: false
+      moved: false,
+      samples: []
     };
     el.classList.add('is-dragging');
-    el.classList.remove('is-snapping');
+    el.classList.remove('is-snapping', 'is-spring');
+    if (springRaf) { cancelAnimationFrame(springRaf); springRaf = 0; }
     // Pointer capture keeps the gesture alive even when the finger leaves the strip.
     // 指针捕获让手势在手指离开那条热区后仍然有效。
     try { el.setPointerCapture(ev.pointerId); } catch (e) {}
@@ -149,14 +151,39 @@ const blogSheetScript = `
     if (!drag) return;
     var dy = drag.startY - ev.clientY;          // 向上为正 // up is positive
     if (Math.abs(dy) > 3) drag.moved = true;
-    var next = drag.startH + dy;
     var vh = window.innerHeight;
-    // Clamp so the sheet cannot be pushed below the bottom edge or above the viewport.
-    // 夹住上下界：既不能被推到底边以下，也不能高过视口。
-    var maxH = vh * 0.96;
-    if (next < 60) next = 60;
-    if (next > maxH) next = maxH;
+
+    // Rubber band instead of a wall.
+    //
+    // A hard clamp tells the finger "this is the end" by refusing to move at all, which reads as the
+    // gesture having failed. Past the limit the sheet keeps following, at 25% (top) and 35% (bottom)
+    // of the finger's travel, and a hard ceiling keeps a violent fling from throwing it off screen.
+    //
+    // 橡皮筋而不是一堵墙。
+    //
+    // 硬夹等于用「完全不动」告诉手指「到头了」，那读起来像手势失灵。
+    // 越过边界之后面板继续跟随，顶部按位移的 25%、底部按 35%，
+    // 再压一个硬上限，免得一次猛甩把它甩出屏幕。
+    var raw = drag.startH + dy;
+    var maxH = vh * 0.96, minH = 60;
+    var next = raw;
+    if (raw > maxH) { next = maxH + (raw - maxH) * 0.25; }
+    if (raw < minH) { next = minH - (minH - raw) * 0.35; }
+    if (next > maxH + 48) { next = maxH + 48; }
+    if (next < 24) { next = 24; }
+
     drag.el.style.setProperty('--sheet-h', ((next / vh) * 100).toFixed(2) + 'vh');
+
+    // Keep only the last 120ms of travel: that is the window the release velocity is read from.
+    // A longer window would let a slow drift at the start of the gesture outweigh the flick at the
+    // end, and the sheet would settle in a direction nobody asked for.
+    //
+    // 只保留最近 120ms 的位移：松手速度从这个窗口里读。
+    // 窗口更长会让手势开头那段慢速移动压过结尾的那一下，面板就会停在没人要求的方向上。
+    var now = (ev.timeStamp || performance.now());
+    drag.samples.push({ t: now, y: ev.clientY });
+    while (drag.samples.length > 2 && now - drag.samples[0].t > 120) { drag.samples.shift(); }
+
     if (drag.moved) ev.preventDefault();
   }
 
@@ -165,6 +192,16 @@ const blogSheetScript = `
     var el = drag.el;
     var frac = currentVFrac(el);
     el.classList.remove('is-dragging');
+
+    // Release velocity, px per ms, positive while the finger was still moving up.
+    // 松手速度，单位 px/ms，手指仍在向上时为正。
+    var vel = 0;
+    var s = drag.samples;
+    if (s.length >= 2) {
+      var a = s[0], b = s[s.length - 1];
+      var dt = b.t - a.t;
+      if (dt > 0) { vel = (a.y - b.y) / dt; }
+    }
 
     // Below the floor the gesture means "put it away", not "make it 28% tall".
     // 低于下限时这个手势的意思是"收起来"，而不是"变成 28% 高"。
@@ -185,11 +222,74 @@ const blogSheetScript = `
       return;
     }
 
-    var snapped = nearestStop(frac);
-    el.classList.add('is-snapping');
-    setFrac(el, snapped);
-    window.setTimeout(function () { el.classList.remove('is-snapping'); }, 320);
+    // The stop is chosen by where the sheet is, then nudged by how it was thrown: a flick that ends
+    // just short of a stop still reaches it, and a flick that would land on the stop it came from
+    // carries past it. Without the nudge the sheet always snaps backwards from a fast throw, which
+    // is the one motion that makes a gesture feel ignored.
+    //
+    // 停靠点先按面板现在的位置选，再按甩动的力度修正：
+    // 一次差一点就到停靠点的甩动仍然会到达它；一次本该落回起点的甩动会顺势越过。
+    // 少了这个修正，快速甩动总是往回吸，而那是唯一一种让手势显得被无视的运动。
+    var target = nearestStop(frac);
+    if (Math.abs(vel) > 0.55) {
+      var dir = vel > 0 ? 1 : -1;
+      for (var i = 0; i < STOPS.length; i++) {
+        if (dir > 0 && STOPS[i] > frac) { target = STOPS[i]; break; }
+        if (dir < 0 && STOPS[STOPS.length - 1 - i] < frac) { target = STOPS[STOPS.length - 1 - i]; break; }
+      }
+    }
+
     drag = null;
+    springTo(el, frac, vel, target);
+  }
+
+  // A real spring, integrated per frame.
+  //
+  // The old code added a class and let a CSS transition take over, which cannot use the gesture's
+  // velocity: every release started from zero and the sheet ignored how it was thrown. A spring
+  // that starts with the finger's own velocity is the difference between "it followed me and let go"
+  // and "it jumped to a stop".
+  //
+  // 真正的弹簧，逐帧积分。
+  //
+  // 原来的做法是加一个类、交给 CSS 过渡 —— 而过渡无法使用手势的速度：
+  // 每次松手都从零开始，面板完全无视它刚才是怎么被甩出去的。
+  // 一个带着手指速度起步的弹簧，就是「它跟着我、然后松开了」与「它跳到一个位置」的差别。
+  var springRaf = 0;
+
+  function springTo(el, fromFrac, velPxPerMs, targetFrac) {
+    if (springRaf) { cancelAnimationFrame(springRaf); springRaf = 0; }
+    var vh = window.innerHeight;
+    var x = fromFrac * vh;
+    var v = velPxPerMs;
+    var target = targetFrac * vh;
+    var last = 0;
+
+    // k = 0.0018, c = 0.075 → ω ≈ 0.042/ms, ζ ≈ 0.88: settles in roughly half a second with one
+    // small overshoot. Stiffer reads as a snap, softer reads as the sheet being slow to obey.
+    // k = 0.0018、c = 0.075 → ω ≈ 0.042/ms、ζ ≈ 0.88：约半秒收敛，只有一次很小的过冲。
+    // 更硬读起来像啪一下，更软读起来像面板反应迟钝。
+    var K = 0.0018, C = 0.075;
+
+    el.classList.add('is-spring');
+
+    function step(now) {
+      if (!last) { last = now; }
+      var dt = Math.min(48, Math.max(1, now - last));
+      last = now;
+      var a = (target - x) * K - v * C;
+      v += a * dt;
+      x += v * dt;
+      if (Math.abs(target - x) < 0.5 && Math.abs(v) < 0.05) {
+        el.style.setProperty('--sheet-h', ((target / vh) * 100).toFixed(2) + 'vh');
+        el.classList.remove('is-spring');
+        springRaf = 0;
+        return;
+      }
+      el.style.setProperty('--sheet-h', ((x / vh) * 100).toFixed(2) + 'vh');
+      springRaf = requestAnimationFrame(step);
+    }
+    springRaf = requestAnimationFrame(step);
   }
 
   // Open at 40% every time the sheet is opened fresh. A remembered height sounds nice but in

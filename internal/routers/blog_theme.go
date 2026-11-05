@@ -97,7 +97,12 @@ html.light{
   }
 }
 *,*::before,*::after{box-sizing:border-box}
-html{-webkit-text-size-adjust:100%;scroll-behavior:smooth}
+html{-webkit-text-size-adjust:100%;scroll-behavior:smooth;
+  /* 横向裁剪兜住被 transform 撑出去的东西。
+     卡片 3D 倾斜时，旋转后的包围盒会比原矩形宽几个像素，而变换后的元素是计入可滚动区域的——
+     鼠标停在靠右的卡片上，页面底部就会冒出一条横向滚动条。
+     用 clip 而不是 hidden：clip 不创建滚动容器，position:sticky 仍然有效。 */
+  overflow-x:clip}
 body{
   margin:0;background:var(--background);color:var(--foreground);
   /* 与分享页同一套字体：CustomFont 排在最前，回退栈与 local.css 保持一致。
@@ -3423,11 +3428,21 @@ body.drawer-rec .sheet-rec{transform:translateY(0)}
   background:color-mix(in srgb,var(--card) 66%,transparent);
   -webkit-backdrop-filter:blur(24px) saturate(1.7);
   backdrop-filter:blur(24px) saturate(1.7);
-  transition:width .42s cubic-bezier(.22,1,.36,1),background .3s ease;
+  /* 曲线尾部略过冲（1.4），读起来是「弹开的」而不是「被拉开的」；
+     宽度从 48 长到 202 是居中的，所以视觉上就是从球的位置向两侧生长。 */
+  transition:width .46s cubic-bezier(.34,1.4,.64,1),background .3s ease;
 }
 .dock.dock-collapsible.is-open{width:202px}
+/* 开合瞬间的一圈光晕：从胶囊边缘扩出去再消失。
+   球本身在胶囊内部，任何从球发出的光环都会被 overflow:hidden 裁掉，
+   所以光环挂在胶囊自己身上——读者看到的是「这里刚刚张开了」。 */
+@keyframes dockHalo{
+  0%{box-shadow:0 0 0 0 color-mix(in srgb,var(--foreground) 26%,transparent)}
+  100%{box-shadow:0 0 0 14px transparent}
+}
+.dock.dock-collapsible.is-open{animation:dockHalo .62s ease-out}
 .dock.dock-collapsible .dock-b{opacity:0;pointer-events:none;transition:opacity .22s ease}
-.dock.dock-collapsible.is-open .dock-b{opacity:.58;pointer-events:auto}
+.dock.dock-collapsible.is-open .dock-b{opacity:.58;pointer-events:auto;transition-delay:.07s}
 .dock.dock-collapsible.is-open .dock-b[aria-expanded="true"]{opacity:1}
 .dock.dock-collapsible .dock-thumb{opacity:0}
 .dock.dock-collapsible.is-open .dock-thumb{opacity:1}
@@ -3439,12 +3454,26 @@ body.drawer-rec .sheet-rec{transform:translateY(0)}
   transition:opacity .2s ease,transform .42s cubic-bezier(.22,1,.36,1);
 }
 .dock-orb svg{width:23px;height:23px;display:block}
+/* 收起球上的图标换成了 Lottie（assets/code.json）。
+   静态太极留在标记里当基线：只有播放器真的画出一帧、给按钮加上 has-lottie 之后才把它藏起来。
+   于是播放器没加载到的页面仍显示原来的太极，而不是一个会展开胶囊的空圆圈。 */
+.dock-orb.has-lottie .taiji-lottie > svg.taiji{display:none}
 .dock-orb:active{transform:translate(-50%,-50%) scale(.92)}
+/* 球先退场，胶囊再生长：两件事同时开始会让人觉得球是被胶囊「吃掉」的，
+   而它应该是「让位」。0.12s 比宽度动画（.46s）短得多，所以是先走完再长。 */
 .dock.dock-collapsible.is-open .dock-orb{
-  opacity:0;pointer-events:none;transform:translate(-50%,-50%) scale(.55);
+  opacity:0;pointer-events:none;
+  transform:translate(-50%,-50%) scale(.55);
+  transition:opacity .12s ease,transform .3s cubic-bezier(.22,1,.36,1);
 }
+/* 弹簧收尾期间不能用 CSS 过渡：位置由脚本逐帧写 --sheet-h，
+   再叠一层过渡等于把同一段运动平滑两次，看起来是粘的。 */
+body.is-post .aside.is-spring,body.is-page .aside.is-spring,body.is-home .aside.is-spring,
+body.is-post .rail.is-spring,.graph-panel.is-spring{transition:none!important}
+
 @media (prefers-reduced-motion:reduce){
   .dock.dock-collapsible,.dock.dock-collapsible .dock-b{transition:none}
+  .dock.dock-collapsible.is-open{animation:none}
 }
 
 /* Code blocks. A frame, a language label, a gutter and a copy button are added around the bare
@@ -3669,11 +3698,104 @@ body.drawer-rec .sheet-rec{transform:translateY(0)}
 .back-pill:hover{color:var(--foreground);border-color:color-mix(in srgb,var(--border) 40%,var(--foreground))}
 .back-pill svg{width:12px;height:12px}
 
+/* 3D 倾斜：卡片跟手轻微翻转，封面反向位移一点，光标处叠一层柔光。
+   只在「能悬停 + 精确指针」上启用——触屏没有 hover，倾斜只会卡在最后一次触碰的位置。
+   角度上限 8°、封面视差 6px：再大就不像一张卡片，而像一张贴在墙上的纸。
+
+   注意两处必须一起写：
+   - transition 里保留了原来的 background-color / border-color，
+     否则 .tilt 的同权重声明会把 .post-card 自己的悬停过渡整条覆盖掉。
+   - .cover 有 4% 的放大余量。封面原本就占右侧 60%，位移 6px 会把它右边缘拉出卡片，
+     而缩放保证任何角度下都不露底。 */
+@media (hover:hover) and (pointer:fine){
+  .tilt{
+    transform:perspective(820px) rotateX(var(--rx,0deg)) rotateY(var(--ry,0deg));
+    transition:background-color .15s ease,border-color .15s ease,
+               transform .5s cubic-bezier(.22,1,.36,1);
+  }
+  .tilt.is-tilting{
+    transition:background-color .15s ease,border-color .15s ease,transform .1s linear;
+    will-change:transform;
+  }
+  /* 封面的位移用 translate / scale 这两个独立属性，不写进 transform。
+     封面图上有内联的 transform: scale(1)（封面加载脚本写上去的收尾态），
+     内联样式压过样式表里任何同权重规则，用 transform 永远抢不过它；
+     而 translate 与 scale 是各自独立的属性，与 transform 叠加而不是互相覆盖。
+     两张卡片的倾斜和浮现也是同一个道理——这套页面里 transform 已经名花有主了。 */
+  .tilt .cover,.tilt .cover-ph{
+    translate:var(--px,0px) var(--py,0px);
+    scale:1.04;
+    transition:translate .1s linear;
+  }
+  .tilt-sheen{
+    position:absolute;inset:0;z-index:3;pointer-events:none;border-radius:inherit;
+    background:radial-gradient(240px circle at var(--mx,50%) var(--my,50%),
+      color-mix(in srgb,var(--foreground) 9%,transparent),transparent 62%);
+    opacity:0;transition:opacity .3s ease;
+  }
+  .tilt.is-tilting .tilt-sheen{opacity:1}
+}
+@media (prefers-reduced-motion:reduce){
+  .tilt{transform:none!important;transition:none!important}
+  .tilt-sheen{display:none}
+}
+
+/* 模糊进入：容器从模糊里聚焦出来，而不是从半透明变亮。
+   类只由脚本添加，因此没有 JavaScript 时不会有任何东西被藏起来。
+   浮现结束后 filter 会被整个移除（见脚本），因为非 none 的 filter 会成为
+   内部 fixed 后代的包含块、并破坏内部 sticky 子元素。
+
+   位移用独立的 translate 属性，而不是写进 transform：同一张卡片可能同时带着 3D 倾斜，
+   而 transform 只有一个，谁后写谁赢。两件事各占一个属性，谁也不覆盖谁。 */
+.reveal{
+  opacity:0;filter:blur(10px);translate:0 10px;
+  transition:opacity .52s ease,filter .52s ease,translate .52s cubic-bezier(.22,1,.36,1);
+}
+.reveal.is-in{opacity:1;filter:none;translate:0 0}
+@media (prefers-reduced-motion:reduce){
+  .reveal{opacity:1;filter:none;translate:0 0;transition:none}
+}
+
+/* 阅读进度条：视口底部整宽 2px，只在一页真的能滚动时出现，零点隐藏。
+   桌面用它取代原来的进度球——球是右下角的一个点，读者得抬头去找它；
+   一条贴着底边的线不占任何布局，眼睛读到最后一行的位置就正好是它的位置。
+   移动端不显示：那里底部是胶囊，一条线和它抢同一条边。 */
+.read-bar{
+  position:fixed;left:0;right:0;bottom:0;height:2px;z-index:63;
+  pointer-events:none;opacity:0;transition:opacity .22s ease;
+}
+.read-bar i{
+  display:block;height:100%;width:calc(var(--p,0) * 100%);
+  background:var(--foreground);
+}
+.read-bar.is-on{opacity:1}
+@media (max-width:860px){.read-bar{display:none}}
+
+/* 顶栏浮起：滚动到 8px 开始出现，64px 封顶。
+   不用 box-shadow —— 粘性元素投下的阴影会压住它下面的第一行字；
+   而从顶栏底边向下的一条 26px 渐变可以在收尾处自然消失，读起来像「页面沉到下面去了」。
+   强度由 --tb-e（0..1）驱动，脚本按 8→64px 线性给出。 */
+.topbar::after{
+  content:'';position:absolute;left:0;right:0;top:100%;height:26px;
+  pointer-events:none;opacity:var(--tb-e,0);
+  background:linear-gradient(to bottom,color-mix(in srgb,var(--foreground) 13%,transparent),transparent);
+  transition:opacity .12s linear;
+}
+
+/* 暗色下顶栏头像反相。
+   那张图是一幅黑白人像，底色偏浅；贴在深色顶栏上时整块读起来只是一团灰。
+   反相之后底变深、人像变浅，与「问道」两个白字同一个方向。
+   三条到达暗色的路径都要覆盖（显式 dark、显式 light、跟随系统），
+   漏一条就会出现「系统是暗色、站内选了亮色，头像却反了」。 */
+html.dark .brand-mark img{filter:invert(1)}
+@media (prefers-color-scheme:dark){html:not(.light) .brand-mark img{filter:invert(1)}}
+
 /* 阅读进度环。它同时是回到顶部按钮：一个只负责汇报的环，加上可点击之后就成了读者真能用的控件，
    而一个控件就是一个要瞄准的目标。
    位置：右下角两个浮动件必须互不接触。实测 4.6rem 时环的底边在 834，而文章页图谱入口的顶边在 831 ——
    叠了 3px，且环的 z-index 62 压在入口的 41 之上，于是那个入口的上沿被一条白边盖住。
-   抬到 6rem 之后两者留出 27px 的空隙。 */
+   抬到 6rem 之后两者留出 27px 的空隙。
+   注意：861px 以上这个环已被 .read-bar 取代而隐藏，它现在只服务移动端。 */
 .read-prog{
   position:fixed;right:1.15rem;bottom:6rem;z-index:62;
   width:42px;height:42px;border-radius:50%;border:1px solid var(--border);
@@ -3689,6 +3811,10 @@ body.drawer-rec .sheet-rec{transform:translateY(0)}
 .read-prog .rp-track{stroke:color-mix(in srgb,var(--border) 85%,transparent)}
 .read-prog .rp-bar{stroke:var(--foreground);stroke-linecap:round;transition:stroke-dashoffset .08s linear}
 .read-prog .rp-ico{position:relative;z-index:1;width:13px;height:13px}
+/* 桌面不再有进度球：回顶改由顶栏站名承担（见 theme 脚本）。
+   这条必须排在上面的 .read-prog 规则之后——同权重下后写的才生效，
+   写在前面会被 .read-prog 自己的 display:flex 覆盖回去。 */
+@media (min-width:861px){.read-prog{display:none}}
 
 /* TOC read state. The existing diamond marker stays — it is this site's vocabulary, not the
    reference site's 2px bar — but an entry the reader has scrolled past fades, which is what makes

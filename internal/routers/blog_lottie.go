@@ -36,14 +36,18 @@ var (
 
 	//go:embed assets/lottie-smartphone.json
 	lottieSmartphoneJSON []byte
+
+	//go:embed assets/code.json
+	lottieCodeJSON []byte
 )
 
-// lottieIcons maps the three theme states onto their artwork.
-// lottieIcons 把三个主题状态映射到各自的图。
+// lottieIcons maps the theme states and the mobile orb onto their artwork.
+// lottieIcons 把主题状态与移动端收起球映射到各自的图。
 var lottieIcons = map[string][]byte{
 	"moon.json":       lottieMoonJSON,
 	"sun.json":        lottieSunJSON,
 	"smartphone.json": lottieSmartphoneJSON,
+	"code.json":       lottieCodeJSON,
 }
 
 // serveLottiePlayer serves the lottie-web runtime.
@@ -106,22 +110,47 @@ func serveLottieIcon(c *gin.Context) {
 // 于是从不加载这个文件的页面仍然显示正确的符号，而慢链路上的读者也不会看到按钮中途变空。
 const blogThemeLottieJS = `
 (function () {
-  function init() {
+  var still = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  // One player, two customers. The theme button and the mobile orb both need lottie-web, and the
+  // file is 164 KB: loading it twice would be the obvious bug of two independent loaders racing to
+  // append the same script tag.
+  //
+  // 一个播放器，两个使用者。主题按钮与移动端收起球都要 lottie-web，而那个文件有 164 KB：
+  // 两个各自独立、抢着插入同一个 script 标签的加载器，是最显然的那种 bug。
+  var state = 0;           // 0 未请求 / 1 正在加载 / 2 就绪 / 3 失败
+  var queue = [];
+  function withPlayer(cb) {
+    if (window.lottie) { cb(true); return; }
+    if (state === 3) { cb(false); return; }
+    queue.push(cb);
+    if (state === 1) { return; }
+    state = 1;
+    function flush(ok) {
+      var list = queue;
+      queue = [];
+      for (var i = 0; i < list.length; i++) { list[i](ok); }
+    }
+    var s = document.createElement('script');
+    s.src = '/blog/lottie.js';
+    s.defer = true;
+    s.onload = function () {
+      state = window.lottie ? 2 : 3;
+      flush(state === 2);
+    };
+    s.onerror = function () { state = 3; flush(false); };
+    document.head.appendChild(s);
+  }
+
+  // ── theme button ────────────────────────────────────────────────────
+  function bootTheme() {
     var btn = document.getElementById('fns-theme');
     if (!btn || btn.getAttribute('data-lottie') === 'off') { return; }
     var els = btn.querySelectorAll('.tl');
     if (!els.length) { return; }
-    var still = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-    var s = document.createElement('script');
-    s.src = '/blog/lottie.js';
-    s.defer = true;
-    s.onload = boot;
-    s.onerror = function () { btn.setAttribute('data-lottie', 'off'); };
-    document.head.appendChild(s);
-
-    function boot() {
-      if (!window.lottie) { return; }
+    withPlayer(function (ok) {
+      if (!ok) { btn.setAttribute('data-lottie', 'off'); return; }
       var anims = {};
       var waiting = els.length;
 
@@ -140,7 +169,7 @@ const blogThemeLottieJS = `
       for (var i = 0; i < els.length; i++) {
         (function (el) {
           var path = el.getAttribute('data-src');
-          var state = el.getAttribute('data-state');
+          var st = el.getAttribute('data-state');
           if (!path) { done(); return; }
           var a = lottie.loadAnimation({
             container: el,
@@ -156,7 +185,7 @@ const blogThemeLottieJS = `
             btn.classList.remove('has-lottie');
             done();
           });
-          anims[state] = a;
+          anims[st] = a;
         })(els[i]);
       }
 
@@ -171,8 +200,86 @@ const blogThemeLottieJS = `
         var a = anims[btn.getAttribute('data-mode')];
         if (a) { a.goToAndPlay(0, true); }
       });
-    }
+    });
   }
+
+  // ── mobile orb ──────────────────────────────────────────────────────
+  //
+  // The orb only exists on reading pages, and only in its collapsed form. It plays once when the
+  // dock is about to open, then the dock opens — the animation is the announcement, not decoration.
+  //
+  // The static taiji stays inside the wrapper and is hidden only after a frame has actually been
+  // drawn. A page whose player never loads keeps a working orb with the original symbol; the worse
+  // outcome — an empty circle that still opens the dock — never happens.
+  //
+  // 收起球只存在于阅读页，且只有收起形态。它在胶囊即将展开时播一遍，然后展开——
+  // 这段动画是「要开了」的告知，不是装饰。
+  //
+  // 静态太极留在包裹层里，只有在真的画出一帧之后才隐藏。
+  // 播放器从未加载的页面仍然有一个能用、且显示原符号的球；
+  // 更糟的那个结果——一个空白圆圈照样能展开——不会发生。
+  function bootOrb() {
+    var wraps = document.querySelectorAll('.taiji-lottie');
+    if (!wraps.length) { return; }
+
+    withPlayer(function (ok) {
+      if (!ok) { return; }
+      var anims = [];
+      var waiting = wraps.length;
+
+      function ready() {
+        waiting--;
+        if (waiting > 0) { return; }
+        for (var i = 0; i < wraps.length; i++) {
+          var btn = wraps[i].closest('.dock-orb');
+          if (btn) { btn.classList.add('has-lottie'); }
+        }
+      }
+
+      for (var i = 0; i < wraps.length; i++) {
+        (function (el) {
+          var a = lottie.loadAnimation({
+            container: el,
+            renderer: 'svg',
+            loop: false,
+            autoplay: false,
+            path: '/blog/lottie/code.json',
+            rendererSettings: { progressiveLoad: true, hideOnTransparent: true }
+          });
+          a.addEventListener('DOMLoaded', function () {
+            a.goToAndStop(0, true);
+            ready();
+          });
+          a.addEventListener('data_failed', ready);
+          anims.push(a);
+        })(wraps[i]);
+      }
+
+      // Called by the dock script. Always calls back exactly once, so the dock can never be left
+      // waiting on an animation that will not finish.
+      //
+      // 由胶囊脚本调用。它保证回调恰好触发一次，胶囊因此不可能停在等待一段永远不会结束的动画上。
+      window.fnsOrbPlay = function (done) {
+        var a = anims[0];
+        if (!a || still) { done(); return; }
+        var finished = false;
+        function fin() {
+          if (finished) { return; }
+          finished = true;
+          try { a.removeEventListener('complete', fin); } catch (e) {}
+          done();
+        }
+        a.addEventListener('complete', fin);
+        // A paused tab or a dropped frame can swallow the complete event; the timeout is the
+        // promise that the dock still opens.
+        // 标签页被切走或掉帧都可能吞掉 complete 事件；这个超时是「胶囊仍然会展开」的保证。
+        window.setTimeout(fin, 1500);
+        a.goToAndPlay(0, true);
+      };
+    });
+  }
+
+  function init() { bootTheme(); bootOrb(); }
 
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', init);

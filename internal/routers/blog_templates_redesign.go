@@ -97,12 +97,14 @@ var blogChromePartials = `
 
 {{define "navdock"}}<div class="dock dock-collapsible" id="fns-dock" role="group" aria-label="页面入口" data-slot="0">
   <button type="button" class="dock-orb" id="fns-orb" aria-label="展开页面入口" aria-expanded="false">
-    <svg class="taiji" viewBox="0 0 24 24" aria-hidden="true">
+    <span class="taiji-lottie" data-lottie="code">
+      <svg class="taiji" viewBox="0 0 24 24" aria-hidden="true">
       <circle cx="12" cy="12" r="9.1" fill="none" stroke="currentColor" stroke-width="1.35"/>
       <path d="M12 2.9a4.55 4.55 0 0 1 0 9.1 4.55 4.55 0 0 0 0 9.1" fill="currentColor"/>
       <circle cx="12" cy="7.45" r="1.3" fill="var(--card)"/>
       <circle cx="12" cy="16.55" r="1.3" fill="currentColor"/>
     </svg>
+    </span>
   </button>
   <span class="dock-thumb" aria-hidden="true"></span>
   <a class="dock-b" href="/blog" aria-label="名片页 · 目录与推荐" title="目录与推荐在名片页"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M0 1.75A.75.75 0 0 1 .75 1h4.253c1.227 0 2.317.59 3 1.501A3.743 3.743 0 0 1 11.006 1h4.245a.75.75 0 0 1 .75.75v10.5a.75.75 0 0 1-.75.75h-4.507a2.25 2.25 0 0 0-1.591.659l-.622.621a.75.75 0 0 1-1.06 0l-.622-.621A2.25 2.25 0 0 0 5.258 13H.75a.75.75 0 0 1-.75-.75Zm7.251 10.324.004-5.073-.002-2.253A2.25 2.25 0 0 0 5.003 2.5H1.5v9h3.757a3.75 3.75 0 0 1 1.994.574ZM8.755 4.75l-.004 7.322a3.752 3.752 0 0 1 1.992-.572H14.5v-9h-3.495a2.25 2.25 0 0 0-2.25 2.25Z"/></svg></a>
@@ -239,12 +241,14 @@ var blogCardTmpl = template.Must(template.New("blog-card").Funcs(blogAssetFuncs)
 <div class="fns-scrim" id="fns-scrim" hidden></div>
 <div class="dock dock-collapsible" id="fns-dock" role="group" aria-label="页面入口" data-slot="0">
   <button type="button" class="dock-orb" id="fns-orb" aria-label="展开页面入口" aria-expanded="false">
-    <svg class="taiji" viewBox="0 0 24 24" aria-hidden="true">
+    <span class="taiji-lottie" data-lottie="code">
+      <svg class="taiji" viewBox="0 0 24 24" aria-hidden="true">
       <circle cx="12" cy="12" r="9.1" fill="none" stroke="currentColor" stroke-width="1.35"/>
       <path d="M12 2.9a4.55 4.55 0 0 1 0 9.1 4.55 4.55 0 0 0 0 9.1" fill="currentColor"/>
       <circle cx="12" cy="7.45" r="1.3" fill="var(--card)"/>
       <circle cx="12" cy="16.55" r="1.3" fill="currentColor"/>
     </svg>
+    </span>
   </button>
   <span class="dock-thumb" aria-hidden="true"></span>
   <button type="button" class="dock-b" data-i="0" id="dock-nav" aria-label="目录" aria-expanded="false"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M0 1.75A.75.75 0 0 1 .75 1h4.253c1.227 0 2.317.59 3 1.501A3.743 3.743 0 0 1 11.006 1h4.245a.75.75 0 0 1 .75.75v10.5a.75.75 0 0 1-.75.75h-4.507a2.25 2.25 0 0 0-1.591.659l-.622.621a.75.75 0 0 1-1.06 0l-.622-.621A2.25 2.25 0 0 0 5.258 13H.75a.75.75 0 0 1-.75-.75Zm7.251 10.324.004-5.073-.002-2.253A2.25 2.25 0 0 0 5.003 2.5H1.5v9h3.757a3.75 3.75 0 0 1 1.994.574ZM8.755 4.75l-.004 7.322a3.752 3.752 0 0 1 1.992-.572H14.5v-9h-3.495a2.25 2.25 0 0 0-2.25 2.25Z"/></svg></button>

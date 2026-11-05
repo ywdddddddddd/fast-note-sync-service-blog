@@ -31,6 +31,27 @@ func blogNavDockJS() string {
   if (orb) {
     orb.addEventListener('click', function (ev) {
       ev.stopPropagation();
+      var opening = !dock.classList.contains('is-open');
+      // Expanding announces itself first: the orb plays once, then the dock opens. The animation is
+      // the announcement, not decoration.
+      //
+      // A second press while it plays is dropped rather than queued. Two presses must not leave the
+      // dock in a state the reader did not ask for, and they must not stack two callbacks onto one
+      // animation.
+      //
+      // 展开先自我通报：球播一遍，然后胶囊打开。这段动画是告知，不是装饰。
+      //
+      // 播放期间的第二次按压直接丢弃，而不是排队。两次按压不该把胶囊留在一个读者没要求的状态里，
+      // 也不该在同一个动画上叠两个回调。
+      if (opening && window.fnsOrbPlay) {
+        if (orb.getAttribute('data-playing') === '1') { return; }
+        orb.setAttribute('data-playing', '1');
+        window.fnsOrbPlay(function () {
+          orb.removeAttribute('data-playing');
+          setOpen(true);
+        });
+        return;
+      }
       setOpen(!dock.classList.contains('is-open'));
     });
   }
@@ -221,6 +242,26 @@ func blogDockJS() string {
   if (collapsible && orb) {
     orb.addEventListener('click', function (ev) {
       ev.stopPropagation();
+      var opening = !dock.classList.contains('is-open');
+      // Expanding announces itself first: the orb plays once, then the dock opens. The animation is
+      // the announcement, not decoration.
+      //
+      // A second press while it plays is dropped rather than queued: two presses must not stack two
+      // callbacks onto one animation, nor leave the dock in a state nobody asked for.
+      //
+      // 展开先自我通报：球播一遍，然后胶囊打开。这段动画是告知，不是装饰。
+      //
+      // 播放期间的第二次按压直接丢弃，而不是排队：两次按压不该在同一个动画上叠两个回调，
+      // 也不该把胶囊留在一个没人要求的状态里。
+      if (opening && window.fnsOrbPlay) {
+        if (orb.getAttribute('data-playing') === '1') { return; }
+        orb.setAttribute('data-playing', '1');
+        window.fnsOrbPlay(function () {
+          orb.removeAttribute('data-playing');
+          setDockOpen(true);
+        });
+        return;
+      }
       setDockOpen(!dock.classList.contains('is-open'));
     });
     document.addEventListener('click', function (ev) {

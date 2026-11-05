@@ -718,12 +718,14 @@ var blogPostTmpl = template.Must(template.New("blog-post").Funcs(blogAssetFuncs)
        右书签保留，它管的是本页大纲，与全局目录不是一件事。 -->
   <div class="dock dock-collapsible" id="fns-dock" role="group" aria-label="阅读页入口" data-slot="0">
     <button type="button" class="dock-orb" id="fns-orb" aria-label="展开页面入口" aria-expanded="false">
-      <svg class="taiji" viewBox="0 0 24 24" aria-hidden="true">
+      <span class="taiji-lottie" data-lottie="code">
+        <svg class="taiji" viewBox="0 0 24 24" aria-hidden="true">
         <circle cx="12" cy="12" r="9.1" fill="none" stroke="currentColor" stroke-width="1.35"/>
         <path d="M12 2.9a4.55 4.55 0 0 1 0 9.1 4.55 4.55 0 0 0 0 9.1" fill="currentColor"/>
         <circle cx="12" cy="7.45" r="1.3" fill="var(--card)"/>
         <circle cx="12" cy="16.55" r="1.3" fill="currentColor"/>
       </svg>
+      </span>
     </button>
     <span class="dock-thumb" aria-hidden="true"></span>
     <button type="button" class="dock-b" data-i="0" id="dock-nav" aria-label="目录" aria-expanded="false">
@@ -769,6 +771,20 @@ var blogPostTmpl = template.Must(template.New("blog-post").Funcs(blogAssetFuncs)
   }
   orb.addEventListener('click', function (ev) {
     ev.stopPropagation();
+    var opening = !dock.classList.contains('is-open');
+    // Expanding announces itself first: the orb plays once, then the dock opens. A second press
+    // while it plays is dropped rather than queued.
+    //
+    // 展开先自我通报：球播一遍，然后胶囊打开。播放期间的第二次按压直接丢弃，而不是排队。
+    if (opening && window.fnsOrbPlay) {
+      if (orb.getAttribute('data-playing') === '1') { return; }
+      orb.setAttribute('data-playing', '1');
+      window.fnsOrbPlay(function () {
+        orb.removeAttribute('data-playing');
+        setOpen(true);
+      });
+      return;
+    }
     setOpen(!dock.classList.contains('is-open'));
   });
   document.addEventListener('click', function (ev) {
@@ -1088,12 +1104,14 @@ var blogPageTmpl = template.Must(template.New("blog-page").Funcs(blogAssetFuncs)
        局部图谱也没有（本页不携带图谱）。少两格比给对方一个点了没反应的键诚实。 -->
   <div class="dock dock-collapsible" id="fns-dock" role="group" aria-label="页面入口" data-slot="0">
     <button type="button" class="dock-orb" id="fns-orb" aria-label="展开页面入口" aria-expanded="false">
-      <svg class="taiji" viewBox="0 0 24 24" aria-hidden="true">
+      <span class="taiji-lottie" data-lottie="code">
+        <svg class="taiji" viewBox="0 0 24 24" aria-hidden="true">
         <circle cx="12" cy="12" r="9.1" fill="none" stroke="currentColor" stroke-width="1.35"/>
         <path d="M12 2.9a4.55 4.55 0 0 1 0 9.1 4.55 4.55 0 0 0 0 9.1" fill="currentColor"/>
         <circle cx="12" cy="7.45" r="1.3" fill="var(--card)"/>
         <circle cx="12" cy="16.55" r="1.3" fill="currentColor"/>
       </svg>
+      </span>
     </button>
     <span class="dock-thumb" aria-hidden="true"></span>
     <button type="button" class="dock-b" data-i="0" id="dock-toc" aria-label="本页大纲" aria-expanded="false">
@@ -1127,6 +1145,20 @@ var blogPageTmpl = template.Must(template.New("blog-page").Funcs(blogAssetFuncs)
   }
   orb.addEventListener('click', function (ev) {
     ev.stopPropagation();
+    var opening = !dock.classList.contains('is-open');
+    // Expanding announces itself first: the orb plays once, then the dock opens. A second press
+    // while it plays is dropped rather than queued.
+    //
+    // 展开先自我通报：球播一遍，然后胶囊打开。播放期间的第二次按压直接丢弃，而不是排队。
+    if (opening && window.fnsOrbPlay) {
+      if (orb.getAttribute('data-playing') === '1') { return; }
+      orb.setAttribute('data-playing', '1');
+      window.fnsOrbPlay(function () {
+        orb.removeAttribute('data-playing');
+        setOpen(true);
+      });
+      return;
+    }
     setOpen(!dock.classList.contains('is-open'));
   });
   document.addEventListener('click', function (ev) {
