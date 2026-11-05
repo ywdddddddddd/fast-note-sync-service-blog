@@ -305,6 +305,19 @@ type blogPostView struct {
 	// 在模板里拼装意味着把一个来自 URL 的 slug 用字符串连接塞进 JSON 文档，
 	// 而一个位置不对的引号就是这样变成坏掉的 JavaScript 的。
 	ReactionCfg template.JS
+	// Quiz carries the counts and leaderboard strip for the chapter-end exercise. It never
+	// carries questions: those travel only over POST, so they cannot end up in the page
+	// source or in a crawl.
+	//
+	// Quiz 携带章末练习的计数与榜单条，绝不含题目：题目只经 POST 传输，因此不可能进入
+	// 页面源码或被爬取。
+	Quiz *dto.BlogQuizDTO
+	// QuizJS is the exercise UI. It is a separate script from ReactionJS because the two
+	// have nothing to share and the exercise half is large.
+	//
+	// QuizJS 是练习界面。它与 ReactionJS 分开，因为两者没有可共享的东西，而练习这一半不小。
+	QuizJS  template.JS
+	QuizCSS template.CSS
 	// DislikeBurst enables the dislike particle burst; ParticleCount is how many particles one
 	// burst spawns. Both are settings because this blog gets opened in meetings and while
 	// screen-sharing, where a brown burst is not always wanted.
@@ -543,6 +556,36 @@ var blogPostTmpl = template.Must(template.New("blog-post").Funcs(blogAssetFuncs)
           </span>
         </div>
         <script type="application/json" id="fns-react-cfg">{{.ReactionCfg}}</script>
+
+        {{if .Quiz}}
+        <!-- Chapter-end exercise.
+             Only the shell is server-rendered. The questions themselves arrive from
+             POST /blog/quiz/pick, so neither the page source nor any GET response ever
+             contains a question — a crawler that does not run scripts and does not POST
+             cannot see the bank.
+
+             章末练习。
+             只有外壳是服务端渲染的。题目本身来自 POST /blog/quiz/pick，因此页面源码与任何 GET
+             响应都不含题干——不执行脚本、不发 POST 的爬虫看不到题库。 -->
+        <section class="quiz" id="fns-quiz" data-slug="{{.ActiveSlug}}" data-note="{{.Quiz.NotePath}}">
+          <div class="quiz-head">
+            <span class="quiz-title">章末练习</span>
+            <span class="quiz-sub">客观题 {{.Quiz.Objective}} 道 · 背诵对照 {{.Quiz.Subjective}} 条</span>
+          </div>
+          {{if .Quiz.Top}}
+          <ol class="quiz-board">
+            {{range .Quiz.Top}}<li{{if .Self}} class="self"{{end}}><span class="r">{{.Rank}}</span><span class="n">{{.Name}}</span><span class="s">{{.Correct}}/{{.Total}}</span></li>{{end}}
+          </ol>
+          {{end}}
+          <div class="quiz-actions">
+            <button type="button" class="quiz-btn primary" id="quiz-start">开始测验</button>
+            <button type="button" class="quiz-btn" id="quiz-recall">背诵对照</button>
+          </div>
+          <div class="quiz-stage" id="quiz-stage" hidden></div>
+        </section>
+        <style>{{.QuizCSS}}</style>
+        <script>{{.QuizJS}}</script>
+        {{end}}
       </article>
 
       {{if .ShowLocalGraph}}

@@ -173,6 +173,22 @@ type ShareService interface {
 	// AddBlogVisit 累加访问计数。
 	AddBlogVisit()
 
+	// BlogQuizPreview returns the counts and leaderboard strip shown under an article.
+	// BlogQuizPreview 返回文章下方显示的计数与榜单条。
+	BlogQuizPreview(post *dto.BlogPostDTO) *dto.BlogQuizDTO
+
+	// BlogQuizPick returns both question pools for one note, answers included.
+	// BlogQuizPick 返回一篇笔记的两个题池，含答案。
+	BlogQuizPick(ctx context.Context, slug string) (*dto.BlogQuizPickDTO, error)
+
+	// BlogQuizSubmit re-judges an attempt server-side and records it.
+	// BlogQuizSubmit 在服务端重新判一次作答并记录。
+	BlogQuizSubmit(ctx context.Context, in *dto.BlogQuizSubmitDTO) (*dto.BlogQuizResultDTO, error)
+
+	// BlogQuizWrongBook returns one reader's outstanding wrong questions.
+	// BlogQuizWrongBook 返回某位读者尚未掌握的错题。
+	BlogQuizWrongBook(email string) []dto.BlogQuizWrongDTO
+
 	// RecordBlogAccess stores one already-masked blog visit. Called by the access-log
 	// middleware, which owns the masking rules.
 	// RecordBlogAccess 存下一次已打码的博客访问。由访问日志中间件调用，打码规则归它所有。
@@ -267,8 +283,16 @@ type shareService struct {
 	//
 	// blogReactions 保存赞/踩计数与累计访问计数。未配置存储目录时为 nil；每个方法都能容忍它。
 	blogReactions *blogReactionLog  // Blog reactions and visit total // 博客反应与访问总数
-	config        *ServiceConfig    // Service configuration // 服务配置
-	markdown      goldmark.Markdown // Markdown renderer for the built-in blog // 内置博客的 Markdown 渲染器
+	// blogQuiz holds chapter-end exercise scores, the all-site total and the wrong-question
+	// book. Nil when no storage directory is configured; every method tolerates that, the
+	// same way blogReactions does — a deployment that cannot write the file still serves a
+	// working quiz, it just forgets the scores.
+	//
+	// blogQuiz 保存章末练习成绩、全站累计与错题本。未配置存储目录时为 nil；每个方法都能容忍它，
+	// 与 blogReactions 一样——写不了这个文件的部署仍然提供可用的练习，只是记不住成绩。
+	blogQuiz *blogQuizLog
+	config   *ServiceConfig    // Service configuration // 服务配置
+	markdown goldmark.Markdown // Markdown renderer for the built-in blog // 内置博客的 Markdown 渲染器
 
 	// Blog Q&A: cached published-note corpus and per-route pacing state.
 	// 博客问答：已发布笔记语料缓存，以及各线路的节流状态。
@@ -327,6 +351,7 @@ func NewShareService(repo domain.UserShareRepository, tokenManager pkgapp.TokenM
 		// 两者都是博客自己的运行时状态，而为一个很小的文件增设第二个配置项，
 		// 会是那个永远没人会设成不同值的配置项。
 		blogReactions: newBlogReactionLog(blogDataDir(config), logger),
+		blogQuiz:      newBlogQuizLog(blogDataDir(config), logger),
 		noteRepo:      noteRepo,
 		noteLinkRepo:  noteLinkRepo,
 		fileRepo:      fileRepo,

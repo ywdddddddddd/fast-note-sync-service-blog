@@ -178,6 +178,46 @@ func (m *MockShareService) AddBlogVisit() {
 	m.Called()
 }
 
+// BlogQuizPreview returns the counts and leaderboard strip shown under an article.
+// BlogQuizPreview 返回文章下方显示的计数与榜单条。
+func (m *MockShareService) BlogQuizPreview(post *dto.BlogPostDTO) *dto.BlogQuizDTO {
+	args := m.Called(post)
+	if v := args.Get(0); v != nil {
+		return v.(*dto.BlogQuizDTO)
+	}
+	return nil
+}
+
+// BlogQuizPick returns both question pools for one note.
+// BlogQuizPick 返回一篇笔记的两个题池。
+func (m *MockShareService) BlogQuizPick(ctx context.Context, slug string) (*dto.BlogQuizPickDTO, error) {
+	args := m.Called(ctx, slug)
+	if v := args.Get(0); v != nil {
+		return v.(*dto.BlogQuizPickDTO), args.Error(1)
+	}
+	return nil, args.Error(1)
+}
+
+// BlogQuizSubmit re-judges an attempt server-side and records it.
+// BlogQuizSubmit 在服务端重新判一次作答并记录。
+func (m *MockShareService) BlogQuizSubmit(ctx context.Context, in *dto.BlogQuizSubmitDTO) (*dto.BlogQuizResultDTO, error) {
+	args := m.Called(ctx, in)
+	if v := args.Get(0); v != nil {
+		return v.(*dto.BlogQuizResultDTO), args.Error(1)
+	}
+	return nil, args.Error(1)
+}
+
+// BlogQuizWrongBook returns one reader's outstanding wrong questions.
+// BlogQuizWrongBook 返回某位读者尚未掌握的错题。
+func (m *MockShareService) BlogQuizWrongBook(email string) []dto.BlogQuizWrongDTO {
+	args := m.Called(email)
+	if v := args.Get(0); v != nil {
+		return v.([]dto.BlogQuizWrongDTO)
+	}
+	return nil
+}
+
 // RenderBlogPage 渲染声明了指定页面别名的那一篇已发布笔记。
 func (m *MockShareService) RenderBlogPage(ctx context.Context, uid int64, alias string) (*dto.BlogPageDTO, error) {
 	args := m.Called(ctx, uid, alias)

@@ -157,6 +157,12 @@ func registerBlogRoutes(r *gin.Engine, appContainer *app.App) {
 	// 三态主题按钮的 Lottie 资源。和订阅源同理，注册在 "/blog/:slug" 之前：
 	// lottie.js 是一个文件，不是一篇笔记。
 	blog.GET("/blog/lottie.js", serveLottiePlayer)
+
+	// Chapter-end exercise. Registered before the "/blog/:slug" catch-all for the same
+	// reason as lottie.js: these are endpoints, not notes.
+	//
+	// 章末练习。与 lottie.js 同理注册在 "/blog/:slug" 之前：这些是接口，不是笔记。
+	registerBlogQuizRoutes(blog, shareSvc)
 	blog.GET("/blog/lottie/:name", serveLottieIcon)
 
 	// RSS feed. Registered before any "/blog/:slug" style route so the literal path wins.
@@ -574,6 +580,9 @@ func registerBlogRoutes(r *gin.Engine, appContainer *app.App) {
 			Body:        template.HTML(body), //nolint:gosec // rendered by goldmark from the user's own notes
 			TOC:         toc,
 			AskEnabled:  blogAskEnabled(appContainer),
+			Quiz:        shareSvc.BlogQuizPreview(post),
+			QuizJS:      template.JS(blogQuizJS()),
+			QuizCSS:     template.CSS(blogQuizCSS),
 
 			HasMath:          service.HasMathMarkup(body),
 			ShowLocalGraph:   showLocal,
