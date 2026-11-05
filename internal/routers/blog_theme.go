@@ -3724,19 +3724,34 @@ body.is-post .rail.is-spring,.graph-panel.is-spring{transition:none!important}
                transform .45s cubic-bezier(.22,1,.36,1);
   }
   .tilt.is-tilting{
-    /* 跟手期间只留 60ms 的平滑：再长就是延迟，读者会看到卡片在追光标。
-       松手回到 0 时用的是上面那条 450ms 的曲线，所以「离开」仍然是缓的。 */
-    transition:background-color .15s ease,border-color .15s ease,transform .06s linear;
+    /* 跟手期间 transform 不留任何过渡：位置已经由脚本按帧写入，
+       再叠一层过渡只会让卡片拖在光标后面。150ms 的底色过渡保留，那是悬停的呼吸。 */
+    transition:background-color .15s ease,border-color .15s ease;
+    box-shadow:0 24px 50px -22px color-mix(in srgb,var(--foreground) 34%,transparent);
+    will-change:transform;
   }
-  /* 封面与文字反向位移，形成真实的层次。
-     只旋转卡片是不够的：整块一起转，文字读起来是「贴在卡纸上跟着歪」，不是「浮在卡纸上面」。
-     封面用 --px（-nx*6），文字取反 0.75 倍，两者相对位移约 10px，
-     眼睛读到的就是封面在后、文字在前。 */
+  /* 文字浮起：与封面反向位移，并且整体放大一点点。
+     只位移不放大，读起来是「文字在卡纸表面横移」；加上 2% 的放大，
+     它才像从卡纸里朝读者抬起来一层。位移取反 1.15 倍、封面 7px、文字再退半格，
+     两者相对位移约 14px，层次在 8° 的倾角下已经很清楚。 */
   .tilt .card-link{
-    translate:calc(var(--px,0px) * -0.75) calc(var(--py,0px) * -0.75);
-    transition:translate .06s linear;
+    translate:calc(var(--px,0px) * -1.3) calc(var(--py,0px) * -1.3);
+    scale:1.03;
+    transition:none;
   }
-  .tilt:not(.is-tilting) .card-link{transition:translate .45s cubic-bezier(.22,1,.36,1)}
+  .tilt.is-tilting .card-link{will-change:translate,scale}
+  /* 倾斜时给文字一层极淡的托影。
+     封面在 .42 的不透明度下本来就把正文压得有点平；文字既然抬起来了，
+     它和封面之间就该有一道很浅的分离，否则「浮起」只剩下尺寸上的 3%，
+     而那 3% 单独看几乎察觉不到。 */
+  .tilt.is-tilting .card-h,
+  .tilt.is-tilting .card-sum,
+  .tilt.is-tilting .card-meta{
+    text-shadow:0 1px 2px color-mix(in srgb,var(--background) 72%,transparent);
+  }
+  .tilt:not(.is-tilting) .card-link{
+    transition:translate .45s cubic-bezier(.22,1,.36,1),scale .45s cubic-bezier(.22,1,.36,1);
+  }
   /* 封面的位移用 translate / scale 这两个独立属性，不写进 transform。
      封面图上有内联的 transform: scale(1)（封面加载脚本写上去的收尾态），
      内联样式压过样式表里任何同权重规则，用 transform 永远抢不过它；

@@ -336,7 +336,7 @@ const blogThemeScript = `
       if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) { return; }
 
       var MAX_DEG = 8;
-      var PARALLAX = 6;
+      var PARALLAX = 7;
 
       var list = Array.prototype.slice.call(
         document.querySelectorAll('.post-card, .sectioncard, .shelf-card'));
@@ -345,6 +345,28 @@ const blogThemeScript = `
       });
 
       function clamp(v) { return v < -1 ? -1 : (v > 1 ? 1 : v); }
+
+      // The card's rect is read once per hover, not once per pointermove.
+      //
+      // The old code called getBoundingClientRect inside the move handler. A fine pointer reports
+      // position at up to 120 Hz, and each of those calls forces the browser to flush pending layout
+      // before it can answer — so the handler itself was the bottleneck, and the tilt visibly lagged
+      // behind the cursor. The box cannot change while the pointer is inside it (nothing here
+      // reflows on hover), so one measurement at pointerenter is enough. Scrolling invalidates it.
+      //
+      // 卡片的矩形每次悬停只量一次，而不是每次 pointermove 都量。
+      //
+      // 旧代码在 move 处理里调 getBoundingClientRect。精确指针的上报频率可达 120Hz，
+      // 而每一次调用都强制浏览器先冲刷待处理的布局才能回答——于是瓶颈就是这个处理函数本身，
+      // 倾斜明显地拖在光标后面。指针在卡片内时盒子不会变（这里没有任何悬停引发的重排），
+      // 所以 pointerenter 时量一次就够。滚动会作废这份缓存。
+      var rects = [];
+
+      function dropRects() {
+        for (var k = 0; k < rects.length; k++) { rects[k].r = null; }
+      }
+      window.addEventListener('scroll', dropRects, { passive: true });
+      window.addEventListener('resize', dropRects, { passive: true });
 
       for (var i = 0; i < list.length; i++) {
         (function (card) {
@@ -356,10 +378,16 @@ const blogThemeScript = `
           sheen.setAttribute('aria-hidden', 'true');
           card.appendChild(sheen);
 
-          card.addEventListener('pointermove', function (ev) {
-            if (ev.pointerType !== 'mouse') { return; }
-            var r = card.getBoundingClientRect();
-            if (!r.width || !r.height) { return; }
+          var slot = { r: null };
+          rects.push(slot);
+          var pending = null;
+          var raf = 0;
+
+          function apply() {
+            raf = 0;
+            var ev = pending;
+            var r = slot.r;
+            if (!ev || !r || !r.width || !r.height) { return; }
             var nx = clamp((ev.clientX - r.left) / r.width - 0.5) * 2;   // -1..1
             var ny = clamp((ev.clientY - r.top) / r.height - 0.5) * 2;
             card.style.setProperty('--ry', (nx * MAX_DEG).toFixed(2) + 'deg');
@@ -368,13 +396,35 @@ const blogThemeScript = `
             card.style.setProperty('--py', (-ny * PARALLAX).toFixed(2) + 'px');
             card.style.setProperty('--mx', ((nx * 0.5 + 0.5) * 100).toFixed(1) + '%');
             card.style.setProperty('--my', ((ny * 0.5 + 0.5) * 100).toFixed(1) + '%');
+          }
+
+          card.addEventListener('pointerenter', function (ev) {
+            if (ev.pointerType !== 'mouse') { return; }
+            slot.r = card.getBoundingClientRect();
+            pending = ev;
             card.classList.add('is-tilting');
+            if (!raf) { raf = window.requestAnimationFrame(apply); }
+          });
+
+          // One rAF per frame, not one write per event: several pointer events can arrive between
+          // two frames, and writing style on each of them is wasted work the compositor throws away.
+          //
+          // 每帧只写一次，而不是每个事件写一次：两帧之间可能到达多个指针事件，
+          // 逐个写样式是合成器随后就会丢掉的无用功。
+          card.addEventListener('pointermove', function (ev) {
+            if (ev.pointerType !== 'mouse') { return; }
+            if (!slot.r) { slot.r = card.getBoundingClientRect(); }
+            pending = ev;
+            if (!raf) { raf = window.requestAnimationFrame(apply); }
           });
 
           // Leaving puts everything back to zero rather than to the last value: a card stuck at
           // three degrees is a card that looks broken.
           // 离开时把每个值归零，而不是留在最后一个值上：一张卡在三度角停住，看起来就是坏了。
           card.addEventListener('pointerleave', function () {
+            slot.r = null;
+            pending = null;
+            if (raf) { window.cancelAnimationFrame(raf); raf = 0; }
             card.classList.remove('is-tilting');
             card.style.setProperty('--ry', '0deg');
             card.style.setProperty('--rx', '0deg');
