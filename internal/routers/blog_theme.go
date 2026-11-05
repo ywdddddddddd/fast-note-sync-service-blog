@@ -2133,19 +2133,23 @@ html.ask-inline .ask-fab{display:none}
 /* ── 转场（手写） ───────────────────────────────────────────────────── */
 /* 遮罩。pointer-events:none：它盖住整个视口，若可点击，导航过程中页面上的东西都点不到。
 
-   三处尺寸约束各有理由，缺一个就在某个状态上漏边：
-   - position:fixed + inset:0 让它贴住视口，而不是贴住文档；
-   - 100vw/100vh 兜住移动端地址栏收起时的视口变化；
-   - 它挂在 html 下而不是 body 下 —— body 在出发时会拿到 transform，
-     而被 transform 的元素会成为其 fixed 后代的包含块，遮罩就会被钉在文档顶部。
-     实测旧版 scrollY=1176 时画布矩形 y=-1176，整个在屏幕外。 */
+   尺寸只靠 position:fixed + inset:0，**刻意不写 100vw/100vh**。
+   上一版两者都写了，而 100vh 在移动浏览器上不是视口的可靠来源：
+   它按「地址栏收起时的最大高度」算，且在地址栏收放时不会重算 ——
+   于是遮罩要么比视口高出一截（底部露出下一块的边），要么短一截（下方留一条页面）。
+   inset:0 由浏览器直接按视口解，没有这个问题，顺带也省掉滚动条宽度那 1px 的差。
+   另外它挂在 html 下而不是 body 下：body 在出发时会拿到 transform，
+   而被 transform 的元素会成为其 fixed 后代的包含块，遮罩就会被钉在文档顶部 ——
+   实测旧版 scrollY=1176 时画布矩形 y=-1176，整个在屏幕外。 */
 .fns-ink{
-  position:fixed;inset:0;width:100vw;height:100vh;
+  position:fixed;inset:0;
   z-index:2147483000;pointer-events:none;
   display:flex;flex-direction:column;align-items:center;justify-content:center;
   background:var(--background);
   opacity:1;
   transition:opacity .38s cubic-bezier(.16,1,.3,1);
+  /* overflow 兜住极端窄高比（横屏手机）：字形再高也不会把纸面撑出遮罩之外。 */
+  overflow:hidden;
 }
 .fns-ink.is-done{opacity:0}
 
@@ -2212,21 +2216,24 @@ html.ask-inline .ask-fab{display:none}
   50%{opacity:.9;transform:scale(1.25)}
 }
 
-/* 出发：页面淡出。
-   scale 挪到 .shell 上，body 只留 opacity —— 遮罩挂在 html 下，本来就不受 body 影响，
-   但把位移从 body 上彻底移走，是让「遮罩永不被捕获」成为结构性的而不是巧合。 */
+/* 出发/在途：页面在遮罩之下，遮罩本身不透明。
+   ── 这里刻意不再给 body 写 opacity:0 ──
+   上一版靠 html.fns-warping body{opacity:0} 让页面「消失」。那是一条失败即白屏的规则：
+   只要遮罩没能创建（脚本报错、资源没到、或者 bfcache 恢复了带着这个类的旧文档），
+   页面上就一个可见的字都没有，而且没有任何代码会把它恢复。站主报的「返回全白」正是它。
+   现在页面从来不被隐藏 —— 遮罩自己是不透明的、z-index 顶格的，盖住就是看不见。
+   于是任何一次脚本失败，代价退化成「没有加载动画」，而不是「整站白屏」。
+   overflow:hidden 保留：它防止滚轮在遮罩之下滚走文档。 */
 html.fns-warping{overflow:hidden}
-html.fns-warping body{opacity:0;transition:opacity .5s ease}
 html.fns-warping .shell{transform:scale(1.015);transition:transform 1s cubic-bezier(.4,0,.9,.4)}
 
-/* 抵达：内容渐显。从略淡的状态浮上来，与离开方向相对，读起来像一次接续。 */
+/* 抵达：内容渐显。从略淡的状态浮上来，与遮罩抬起方向相对，读起来像一次接续。 */
 @keyframes fns-arrive-fade{from{opacity:0}to{opacity:1}}
 html.fns-arrived .shell{animation:fns-arrive-fade .55s cubic-bezier(.22,1,.36,1) both}
 
 @media (prefers-reduced-motion:reduce){
   .fns-ink-dot{animation:none}
   html.fns-warping{overflow:auto}
-  html.fns-warping body{opacity:1;transition:none}
   html.fns-warping .shell{transform:none;transition:none}
   html.fns-arrived .shell{animation:none;opacity:1}
 }

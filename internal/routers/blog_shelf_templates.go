@@ -91,6 +91,7 @@ const blogShelfPage = `<!DOCTYPE html>
 <link rel="icon" type="image/svg+xml" href="/blog/icon.svg">
 <link rel="apple-touch-icon" href="/blog/icon.svg">
 <script>{{themejs}}</script>
+<script>{{inkjs}}</script>
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>{{.Title}}</title>
 {{if not .Indexable}}<meta name="robots" content="noindex,nofollow">{{end}}
@@ -182,6 +183,7 @@ const blogReaderPage = `<!DOCTYPE html>
 <link rel="icon" type="image/svg+xml" href="/blog/icon.svg">
 <link rel="apple-touch-icon" href="/blog/icon.svg">
 <script>{{themejs}}</script>
+<script>{{inkjs}}</script>
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>{{.BookTitle}} · {{.SiteName}}</title>
 {{if not .Indexable}}<meta name="robots" content="noindex,nofollow">{{end}}

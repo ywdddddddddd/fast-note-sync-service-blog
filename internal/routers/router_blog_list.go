@@ -103,7 +103,7 @@ func serveBlogList(c *gin.Context, appContainer *app.App, shareSvc service.Share
 			Sections:    list.Sections,
 			Nav:         nil,
 			TintJS:      template.JS(blogTintJS()),
-			WarpJS:      template.JS(blogWarpJS()),
+			WarpJS:      "", // 已改由 head 的 inkjs 注入；字段留下只为不惊动五个 view 结构体。
 		},
 		Kicker:     list.Kicker,
 		Section:    list.Section,
@@ -202,7 +202,7 @@ func serveBlogArchives(c *gin.Context, appContainer *app.App, shareSvc service.S
 			HasShelf:    shelfHasBooks(),
 			Sections:    home.Sections,
 			Nav:         home.Nav.Tree,
-			WarpJS:      template.JS(blogWarpJS()),
+			WarpJS:      "", // 已改由 head 的 inkjs 注入；字段留下只为不惊动五个 view 结构体。
 		},
 		Years:      years,
 		Total:      total,

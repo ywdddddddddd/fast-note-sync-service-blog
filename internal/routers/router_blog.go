@@ -286,7 +286,7 @@ func registerBlogRoutes(r *gin.Engine, appContainer *app.App) {
 				Sections:    home.Sections,
 				Nav:         home.Nav.Tree,
 				TintJS:      template.JS(blogTintJS()),
-				WarpJS:      template.JS(blogWarpJS()),
+				WarpJS:      "", // 已改由 head 的 inkjs 注入；字段留下只为不惊动五个 view 结构体。
 				WaveJS:      template.JS(blogWaveJS),
 			},
 			Stats:      home.Stats,
@@ -565,7 +565,7 @@ func registerBlogRoutes(r *gin.Engine, appContainer *app.App) {
 			Visits:      reactions.Visits,
 			ReactionJS:  template.JS(blogReactionJS()),
 			ReactionCfg: template.JS(reactionCfg),
-			WarpJS:      template.JS(blogWarpJS()),
+			WarpJS:      "", // 已改由 head 的 inkjs 注入；字段留下只为不惊动五个 view 结构体。
 			ActiveSlug:  slug,
 			PostTitle:   post.Title,
 			PostPath:    post.Path,
@@ -714,7 +714,7 @@ func serveBlogPage(c *gin.Context, appContainer *app.App, shareSvc service.Share
 		Body:        template.HTML(pageHTML),
 		TOC:         toc,
 		HasMath:     strings.Contains(page.HTML, "math-inline") || strings.Contains(page.HTML, "math-block"),
-		WarpJS:      template.JS(blogWarpJS()),
+		WarpJS:      "", // 已改由 head 的 inkjs 注入；字段留下只为不惊动五个 view 结构体。
 		WaveJS:      template.JS(blogWaveJS),
 		AskEnabled:  blogAskEnabled(appContainer),
 	}); err != nil {

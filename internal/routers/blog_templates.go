@@ -40,6 +40,31 @@ var blogAssetFuncs = template.FuncMap{
 		// 把它们拆开，会让从不渲染按钮的页面也背上 164 KB 的下载器。
 		return template.JS(blogThemeScript + blogThemeLottieJS)
 	},
+	// inkjs is the loading overlay, and it belongs in <head> rather than at the end of <body>.
+	//
+	// It is a separate function from themejs because the two have different audiences: themejs runs
+	// on the error page too (it needs the theme, it has no top bar), while the overlay is deliberately
+	// absent there — a loading screen in front of a 404 is pure delay. Only the five reading templates
+	// call this one.
+	//
+	// Why <head> at all: the overlay has to be on screen at the first painted frame. Injected at the
+	// end of <body> it arrives after the browser has already painted the bare page, which is what the
+	// owner reported as "no loading animation on entry" — the animation existed, it simply started
+	// a second and a half too late to be seen behind a white page.
+	//
+	// inkjs 是加载遮罩，它属于 <head> 而不是 <body> 末尾。
+	//
+	// 它与 themejs 分成两个函数，因为两者的受众不同：themejs 在错误页上也要跑
+	// （它需要主题，但没有顶栏），而遮罩在那里是刻意缺席的 —— 在 404 前面放加载画面是纯粹的拖延。
+	// 只有五个阅读模板会调用这一个。
+	//
+	// 为什么要放进 <head>：遮罩必须在第一个被绘制的帧上就在屏幕上。
+	// 注入到 <body> 末尾时，它抵达的时候浏览器已经把光秃秃的页面画出来了，
+	// 而那正是站主报的「入站时没有加载动画」—— 动画本身存在，只是晚了一秒半才出现，
+	// 完全被一张白页挡住。
+	"inkjs": func() template.JS {
+		return template.JS(blogWarpJS())
+	},
 }
 
 // Blog templates. Everything is rendered on the server, so the pages work with JavaScript
@@ -419,6 +444,7 @@ var blogPostTmpl = template.Must(template.New("blog-post").Funcs(blogAssetFuncs)
 <link rel="icon" type="image/svg+xml" href="/blog/icon.svg">
 <link rel="apple-touch-icon" href="/blog/icon.svg">
 <script>{{themejs}}</script>
+<script>{{inkjs}}</script>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{{.Title}}</title>
 {{if not .Indexable}}<meta name="robots" content="noindex, nofollow">{{end}}
@@ -594,7 +620,6 @@ var blogPostTmpl = template.Must(template.New("blog-post").Funcs(blogAssetFuncs)
 {{if .PreviewJSON}}<script type="application/json" id="link-previews">{{.PreviewJSON}}</script>
 <script>{{.PreviewJS}}</script>{{end}}
 {{if .ReactionJS}}<script>{{.ReactionJS}}</script>{{end}}
-{{if .WarpJS}}<script>{{.WarpJS}}</script>{{end}}
 
     <aside class="rail">
       <div class="panel sticky toc">
@@ -980,6 +1005,7 @@ var blogPageTmpl = template.Must(template.New("blog-page").Funcs(blogAssetFuncs)
 <link rel="icon" type="image/svg+xml" href="/blog/icon.svg">
 <link rel="apple-touch-icon" href="/blog/icon.svg">
 <script>{{themejs}}</script>
+<script>{{inkjs}}</script>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{{.PageTitle}} · {{.SiteName}}</title>
 {{if not .Indexable}}<meta name="robots" content="noindex, nofollow">{{end}}
@@ -1049,7 +1075,6 @@ var blogPageTmpl = template.Must(template.New("blog-page").Funcs(blogAssetFuncs)
     {{template "footer-legal" .}}
   </footer>
 </div>
-{{if .WarpJS}}<script>{{.WarpJS}}</script>{{end}}
 {{if .WaveJS}}<script>{{.WaveJS}}</script>{{end}}
 {{if .TOC}}<script>
 /* 目录滚动高亮 —— 与文章页同一段渐进增强；脚本不执行时目录链接仍可点击跳转。 */

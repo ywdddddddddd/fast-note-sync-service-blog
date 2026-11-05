@@ -37,6 +37,7 @@ var blogChromePartials = `
 <meta name="twitter:description" content="{{.Description}}">
 {{if .JSONLD}}<script type="application/ld+json">{{.JSONLD}}</script>{{end}}
 <script>{{themejs}}</script>
+<script>{{inkjs}}</script>
 <style>{{.CSS}}</style>
 </head>
 {{end}}
@@ -260,7 +261,6 @@ var blogCardTmpl = template.Must(template.New("blog-card").Funcs(blogAssetFuncs)
 
 <script>{{.DockJS}}</script>
 {{if .StatsJS}}<script>{{.StatsJS}}</script>{{end}}
-{{if .WarpJS}}<script>{{.WarpJS}}</script>{{end}}
 {{if .WaveJS}}<script>{{.WaveJS}}</script>{{end}}
 {{if .AskEnabled}}
 <div id="ask-root"></div>
@@ -324,7 +324,6 @@ var blogListTmpl = template.Must(template.New("blog-list").Funcs(blogAssetFuncs)
 {{template "navdock" .}}
 {{if .DockJS}}<script>{{.DockJS}}</script>{{end}}
 {{if .TintJS}}<script>{{.TintJS}}</script>{{end}}
-{{if .WarpJS}}<script>{{.WarpJS}}</script>{{end}}
 <script src="/blog/feed.js?v={{assetVer}}" defer></script>
 <script src="/blog/lightbox.js?v={{assetVer}}" defer></script>
 </body>
@@ -366,7 +365,6 @@ var blogArchivesTmpl = template.Must(template.New("blog-archives").Funcs(blogAss
 </div>
 {{template "navdock" .}}
 {{if .DockJS}}<script>{{.DockJS}}</script>{{end}}
-{{if .WarpJS}}<script>{{.WarpJS}}</script>{{end}}
 <script src="/blog/feed.js?v={{assetVer}}" defer></script>
 <script src="/blog/lightbox.js?v={{assetVer}}" defer></script>
 </body>
