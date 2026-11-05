@@ -80,6 +80,10 @@ const blogQuizCSS = `
 .quiz-score small{font-size:14px;font-weight:400;opacity:.55;margin-left:6px}
 .quiz-wrong{margin:12px 0 0;padding-left:18px;font-size:13.5px;line-height:1.8}
 .quiz-wrong li{margin-bottom:4px}
+.quiz-id{font-size:12px;opacity:.55;margin:-4px 0 14px;display:flex;align-items:center;gap:2px}
+.quiz-id-btn{appearance:none;background:none;border:0;padding:0 2px;color:inherit;font:inherit;
+  text-decoration:underline;text-underline-offset:2px;cursor:pointer;opacity:.85}
+.quiz-id-btn:hover{opacity:1}
 .quiz-form{display:flex;gap:10px;margin-top:16px;flex-wrap:wrap}
 .quiz-input{flex:1;min-width:200px;font:inherit;font-size:14px;padding:9px 13px;border-radius:10px;
   border:1px solid var(--line,rgba(120,100,80,.3));background:transparent;color:inherit}
@@ -154,8 +158,94 @@ const blogQuizScript = `
     stage.hidden = false;
   }
 
+  // ── identity ───────────────────────────────────────────────────────────
+  //
+  // The email is asked for before the first question, not after the last one. The score is
+  // attributed to a person, and asking at the end means a reader who abandons halfway leaves
+  // nothing behind while a reader who finishes is asked to type an identity they had no
+  // reason to expect. It also makes "who am I on this board" answerable from the first click.
+  //
+  // 邮箱在开第一题之前问，而不是答完最后一题之后。成绩是要记到某个人名下的：末尾才问，
+  // 半途离开的读者什么都没留下，而答完的读者会被要求填一个他此前并不知道要填的身份。
+  // 提前问，也让"我在榜上是谁"从第一次点击起就有答案。
+  var EMAIL_KEY = 'fns-quiz-email';
+
+  function getEmail() {
+    try { return localStorage.getItem(EMAIL_KEY) || ''; } catch (e) { return ''; }
+  }
+
+  function setEmail(v) {
+    try { localStorage.setItem(EMAIL_KEY, v); } catch (e) {}
+    refreshIdentity();
+  }
+
+  function maskEmail(e) {
+    var at = e.lastIndexOf('@');
+    if (at < 1) return '***';
+    return e.slice(0, 1) + '***' + e.slice(at);
+  }
+
+  function refreshIdentity() {
+    var host = startBtn.parentNode;
+    var line = document.getElementById('quiz-id');
+    var email = getEmail();
+    if (!email) {
+      if (line) line.remove();
+      return;
+    }
+    if (!line) {
+      line = el('div', 'quiz-id');
+      line.id = 'quiz-id';
+      host.parentNode.insertBefore(line, host.nextSibling);
+    }
+    line.innerHTML = '';
+    line.appendChild(document.createTextNode('身份：' + maskEmail(email) + '　'));
+    var swap = el('button', 'quiz-id-btn', '更换');
+    swap.type = 'button';
+    swap.onclick = function () {
+      try { localStorage.removeItem(EMAIL_KEY); } catch (e) {}
+      refreshIdentity();
+    };
+    line.appendChild(swap);
+  }
+
   // ── start ──────────────────────────────────────────────────────────────
   function start() {
+    if (!getEmail()) {
+      askEmail();
+      return;
+    }
+    beginQuiz();
+  }
+
+  function askEmail() {
+    var view = el('div');
+    view.appendChild(el('div', 'quiz-note',
+      '开始前先留一个邮箱，用来把成绩记到你名下。不验证、不外发，榜单上只显示 z***@qq.com 这种打码形式。'));
+    var form = el('div', 'quiz-form');
+    var input = el('input', 'quiz-input');
+    input.type = 'email';
+    input.autocomplete = 'email';
+    input.placeholder = 'you@example.com';
+    var go = el('button', 'quiz-btn primary', '开始测验');
+    go.type = 'button';
+    go.onclick = function () {
+      var v = (input.value || '').trim();
+      if (v.indexOf('@') < 1) { input.focus(); return; }
+      setEmail(v);
+      beginQuiz();
+    };
+    input.onkeydown = function (e) {
+      if (e.key === 'Enter') { e.preventDefault(); go.click(); }
+    };
+    form.appendChild(input);
+    form.appendChild(go);
+    view.appendChild(form);
+    show(view);
+    setTimeout(function () { input.focus(); }, 30);
+  }
+
+  function beginQuiz() {
     startBtn.disabled = true;
     startBtn.textContent = '出题中…';
     post('/blog/quiz/pick', { slug: slug }, function (status, data) {
@@ -572,6 +662,7 @@ const blogQuizScript = `
   }
 
   startBtn.onclick = start;
+  refreshIdentity();
   if (recallBtn) recallBtn.onclick = recall;
 })();
 `
