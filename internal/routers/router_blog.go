@@ -163,6 +163,10 @@ func registerBlogRoutes(r *gin.Engine, appContainer *app.App) {
 	//
 	// 章末练习。与 lottie.js 同理注册在 "/blog/:slug" 之前：这些是接口，不是笔记。
 	registerBlogQuizRoutes(blog, shareSvc)
+	// 分享卡上的二维码。同样必须在 "/blog/:slug" 之前注册，否则会被当成一篇笔记的 slug。
+	//
+	// 分享卡的二维码。同理，先于 "/blog/:slug" 注册。
+	registerBlogQRRoutes(blog)
 	blog.GET("/blog/lottie/:name", serveLottieIcon)
 
 	// RSS feed. Registered before any "/blog/:slug" style route so the literal path wins.
