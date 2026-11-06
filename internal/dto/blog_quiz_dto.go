@@ -75,8 +75,16 @@ type BlogQuizPickDTO struct {
 // Wrong 携带读者答错的题 ID，由浏览器算出以便立即展示。服务端按 Selections 重算，
 // 从不相信它收到的数字。
 type BlogQuizSubmitDTO struct {
-	Email      string            `json:"email"`
-	NotePath   string            `json:"notePath"`
+	Email string `json:"email"`
+	// Slug, not note path. The server needs the slug to re-render the article and rebuild
+	// the question set; a vault path cannot be resolved by RenderBlogBySlug. Sending the
+	// path here failed every submit from the browser while the command-line tests passed,
+	// because those were sending a slug — the field name lied, not the code.
+	//
+	// 这里是 slug 而不是笔记路径。服务端要靠 slug 重新渲染文章、重建题集，
+	// 而 vault 路径 RenderBlogBySlug 解析不了。此前浏览器提交必失败、命令行测试却通过，
+	// 正是因为测试传的是 slug——加了注释才发现是字段名在撒谎，不是代码。
+	Slug       string            `json:"slug"`
 	Selections map[string]string `json:"selections"` // question id -> chosen letters / text
 	Total      int               `json:"total"`
 	MS         int64             `json:"ms"`

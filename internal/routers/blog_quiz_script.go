@@ -116,7 +116,6 @@ const blogQuizScript = `
   if (!root) return;
 
   var slug = root.getAttribute('data-slug') || '';
-  var notePath = root.getAttribute('data-note') || '';
   var stage = document.getElementById('quiz-stage');
   var startBtn = document.getElementById('quiz-start');
   var recallBtn = document.getElementById('quiz-recall');
@@ -572,7 +571,7 @@ const blogQuizScript = `
       submit.textContent = '提交中…';
       post('/blog/quiz/submit', {
         email: email,
-        notePath: notePath,
+        slug: slug,
         selections: store.answers,
         total: store.list.length,
         ms: ms

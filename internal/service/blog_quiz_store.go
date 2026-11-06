@@ -421,14 +421,14 @@ func (s *shareService) BlogQuizPick(ctx context.Context, slug string) (*dto.Blog
 // 除了读者选了什么，浏览器不被信任任何东西：正确数、总数、正确率全部在这里按缓存的题目重算。
 // 改了页面 JS 的读者能改变自己屏幕上显示的东西，改变不了存下来的东西。
 func (s *shareService) BlogQuizSubmit(ctx context.Context, in *dto.BlogQuizSubmitDTO) (*dto.BlogQuizResultDTO, error) {
-	post, err := s.RenderBlogBySlug(ctx, in.NotePath)
+	post, err := s.RenderBlogBySlug(ctx, in.Slug)
 	if err != nil {
 		return nil, err
 	}
 	plain := quizPlainFromHTML(post.HTML)
-	sess := blogQuizSessionGet(in.NotePath, quizHash(plain))
+	sess := blogQuizSessionGet(in.Slug, quizHash(plain))
 	if sess == nil {
-		sess = buildQuizSession(in.NotePath, post.Path, plain)
+		sess = buildQuizSession(in.Slug, post.Path, plain)
 	}
 
 	correct := 0
@@ -504,7 +504,7 @@ func (s *shareService) BlogQuizSubmit(ctx context.Context, in *dto.BlogQuizSubmi
 					book[id] = item
 				}
 				item.NotePath = sess.notePath
-				item.NoteSlug = in.NotePath
+				item.NoteSlug = in.Slug
 				item.NoteTitle = post.Title
 				item.Wrong++
 				item.At = now

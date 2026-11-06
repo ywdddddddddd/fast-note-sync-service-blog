@@ -46,7 +46,7 @@ func registerBlogQuizRoutes(blog *gin.RouterGroup, shareSvc service.ShareService
 	// submit 在服务端重新判一次作答并更新榜单。
 	blog.POST("/blog/quiz/submit", func(c *gin.Context) {
 		var in dto.BlogQuizSubmitDTO
-		if err := c.ShouldBindJSON(&in); err != nil || strings.TrimSpace(in.NotePath) == "" {
+		if err := c.ShouldBindJSON(&in); err != nil || strings.TrimSpace(in.Slug) == "" {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid body"})
 			return
 		}
