@@ -318,6 +318,14 @@ type blogPostView struct {
 	// QuizJS 是练习界面。它与 ReactionJS 分开，因为两者没有可共享的东西，而练习这一半不小。
 	QuizJS  template.JS
 	QuizCSS template.CSS
+	// ShareData is the JSON blob the share cards are drawn from, and ShareJS is the drawing
+	// code. They are separate fields because the data has to be serialised by the caller
+	// (the template must not re-encode it), while the script is one constant string.
+	//
+	// ShareData 是画分享卡用的 JSON，ShareJS 是绘制代码。两者分开：数据必须由调用方
+	// 序列化（模板不该再做一次编码），而脚本是一个常量字符串。
+	ShareData template.JS
+	ShareJS   template.JS
 	// DislikeBurst enables the dislike particle burst; ParticleCount is how many particles one
 	// burst spawns. Both are settings because this blog gets opened in meetings and while
 	// screen-sharing, where a brown burst is not always wanted.
@@ -586,6 +594,9 @@ var blogPostTmpl = template.Must(template.New("blog-post").Funcs(blogAssetFuncs)
         <style>{{.QuizCSS}}</style>
         <script>{{.QuizJS}}</script>
         {{end}}
+
+        {{if .ShareData}}<script id=fns-share-data type=application/json>{{.ShareData}}</script>{{end}}
+        <script>{{.ShareJS}}</script>
       </article>
 
       {{if .ShowLocalGraph}}

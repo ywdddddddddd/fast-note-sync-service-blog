@@ -588,6 +588,8 @@ func registerBlogRoutes(r *gin.Engine, appContainer *app.App) {
 			Quiz:        shareSvc.BlogQuizPreview(post),
 			QuizJS:      template.JS(blogQuizJS()),
 			QuizCSS:     template.CSS(blogQuizCSS),
+			ShareData:   template.JS(blogShareData(post, postDesc, siteTitle)),
+			ShareJS:     template.JS(blogShareJS()),
 
 			HasMath:          service.HasMathMarkup(body),
 			ShowLocalGraph:   showLocal,
@@ -632,6 +634,65 @@ func blogLatestEntry(entries []*dto.BlogEntryDTO) *dto.BlogEntryDTO {
 		}
 	}
 	return best
+}
+
+// blogShareData 组装分享卡需要的字段，序列化后塞进页面。
+//
+// 放在服务端组装而不是让前端从 DOM 里抓，是因为 DOM 里的东西是给读者看的——标题带
+// 站点后缀、日期带装饰、摘要可能被折叠。卡片要的是干净的原值，从渲染结果反推会一路
+// 踩到这些装饰上。
+//
+// blogShareData assembles what the share cards need. Building it here rather than scraping
+// the DOM matters because the DOM holds presentation: the title carries a site suffix, the
+// date carries decoration, and the summary may be clamped.
+func blogShareData(post *dto.BlogPostDTO, desc, author string) string {
+	if post == nil {
+		return ""
+	}
+	cover := ""
+	if post.Cover != nil {
+		cover = post.Cover.URL
+	}
+	payload := map[string]string{
+		"title":   post.Title,
+		"date":    post.CreatedAt,
+		"summary": desc,
+		"words":   shareWordCount(post.HTML),
+		"section": shareSection(post.Path),
+		"cover":   cover,
+		"avatar":  blogAvatarURL,
+		"author":  author,
+	}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return ""
+	}
+	return string(raw)
+}
+
+// shareWordCount 数正文的字数，显示成「1871 字」。
+func shareWordCount(html string) string {
+	plain := blogPlainTextFromHTML(html)
+	n := len([]rune(strings.TrimSpace(plain)))
+	if n == 0 {
+		return ""
+	}
+	return strconv.Itoa(n) + " 字"
+}
+
+// shareSection 从笔记路径取顶层目录名，去掉「（5）」这类排序前缀。
+func shareSection(path string) string {
+	if path == "" {
+		return ""
+	}
+	seg := strings.SplitN(strings.ReplaceAll(path, "\\", "/"), "/", 2)[0]
+	seg = strings.TrimSpace(seg)
+	if i := strings.Index(seg, "）"); i == 0 {
+		seg = ""
+	} else if i > 0 && strings.HasPrefix(seg, "（") {
+		seg = strings.TrimSpace(seg[i+len("）"):])
+	}
+	return seg
 }
 
 // markActiveNav sets Active on the node whose slug matches the page being rendered.

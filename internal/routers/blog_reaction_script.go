@@ -1,4 +1,4 @@
-package routers
+﻿package routers
 
 import (
 	"github.com/haierkeys/fast-note-sync-service/internal/app"
@@ -241,7 +241,6 @@ const blogReactionScript = `
   var dislikeBtn = bar.querySelector('[data-act="dislike"]');
   var likeN = bar.querySelector('[data-n="like"]');
   var dislikeN = bar.querySelector('[data-n="dislike"]');
-  var shareBtn = bar.querySelector('[data-act="share"]');
 
   // The reader's own choice, kept locally so a reload does not forget it. It is a local
   // preference, not an identity: none of it is sent anywhere, and the server counts every
@@ -343,53 +342,9 @@ const blogReactionScript = `
   if (likeBtn) likeBtn.addEventListener('click', function () { act('like'); });
   if (dislikeBtn) dislikeBtn.addEventListener('click', function () { act('dislike'); });
 
-  // ── Share ──────────────────────────────────────────────────────────────────────────────
-  // Copy to clipboard, as asked. The copied text is the title and the address on two lines, so
-  // pasting into a chat produces something readable rather than a bare link.
-  //
-  // ── 分享 ───────────────────────────────────────────────────────────────────────────────
-  // 按要求复制到剪贴板。复制内容是标题与地址两行，因此粘进聊天窗口得到的是可读的东西，
-  // 而不是一条裸链接。
-  function fallbackCopy(text, done) {
-    // For a non-secure origin the async clipboard API is unavailable. A textarea plus
-    // execCommand is deprecated, but it is the only path left there, and sharing is a feature
-    // rather than decoration.
-    //
-    // 非安全来源下异步剪贴板 API 不可用。textarea 加 execCommand 已废弃，
-    // 但那是那里仅剩的路径，而分享是功能而不是装饰。
-    var ta = document.createElement('textarea');
-    ta.value = text;
-    ta.setAttribute('readonly', '');
-    ta.style.cssText = 'position:fixed;top:-1000px;left:-1000px';
-    document.body.appendChild(ta);
-    ta.select();
-    var ok = false;
-    try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
-    document.body.removeChild(ta);
-    if (ok) done(); else flashError();
-  }
+  // 分享按钮的点击由 blog_share_script.go 接管（菜单：复制链接 / 生成卡片）。
+  // 这里不再注册监听，否则两个处理器会先后触发：先复制链接，再弹出菜单。
 
-  if (shareBtn) shareBtn.addEventListener('click', function () {
-    var url = location.href.split('#')[0];
-    var title = document.title || '';
-    var text = title ? title + '\n' + url : url;
-    function done() {
-      shareBtn.classList.add('done');
-      var label = shareBtn.querySelector('[data-label]');
-      if (!label) return;
-      var prev = label.textContent;
-      label.textContent = '已复制';
-      window.setTimeout(function () {
-        label.textContent = prev;
-        shareBtn.classList.remove('done');
-      }, 1600);
-    }
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(text).then(done, function () { fallbackCopy(text, done); });
-    } else {
-      fallbackCopy(text, done);
-    }
-  });
 })();
 `
 
