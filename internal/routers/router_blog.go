@@ -672,7 +672,9 @@ func blogShareData(post *dto.BlogPostDTO, desc, author string) string {
 
 // shareWordCount 数正文的字数，显示成「1871 字」。
 func shareWordCount(html string) string {
-	plain := blogPlainTextFromHTML(html)
+	// 不能复用 blogPlainTextFromHTML：它给摘要用，会截到 140 字并加省略号，
+	// 拿它数字数会得到「141 字」这种对所有文章都一样的结果。
+	plain := blogStripTagsForCount(html)
 	n := len([]rune(strings.TrimSpace(plain)))
 	if n == 0 {
 		return ""
@@ -693,6 +695,31 @@ func shareSection(path string) string {
 		seg = strings.TrimSpace(seg[i+len("）"):])
 	}
 	return seg
+}
+
+
+// blogStripTagsForCount 去标签但**不截断**，专供字数统计。
+//
+// 摘要用的 blogPlainTextFromHTML 会在 140 字处截断并补省略号，那对摘要是对的，
+// 对字数是错的——每篇文章都会数出同一个数字。
+func blogStripTagsForCount(html string) string {
+	var b strings.Builder
+	depth := 0
+	for _, r := range html {
+		switch r {
+		case '<':
+			depth++
+		case '>':
+			if depth > 0 {
+				depth--
+			}
+		default:
+			if depth == 0 {
+				b.WriteRune(r)
+			}
+		}
+	}
+	return b.String()
 }
 
 // markActiveNav sets Active on the node whose slug matches the page being rendered.
