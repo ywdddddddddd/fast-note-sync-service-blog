@@ -64,9 +64,21 @@ type blogChrome struct {
 // 也就是顶栏下拉第一项指向的地方。
 type blogCardView struct {
 	blogChrome
-	Stats     *dto.BlogStatsDTO
-	Profile   *dto.BlogProfileDTO
-	Pills     []dto.BlogProfileLinkDTO
+	Stats   *dto.BlogStatsDTO
+	Profile *dto.BlogProfileDTO
+	Pills   []dto.BlogProfileLinkDTO
+	// Latest is the most recently created published note, shown beside the "关于" facts.
+	//
+	// The facts answer "who is this", and that answer is static; the newest text answers
+	// "are they still writing", which is the question a returning reader actually has. It
+	// lives in the same card because a separate 最新一篇 card would be one line of content
+	// in a block of its own.
+	//
+	// Latest 是最近创建的那篇已发布笔记，摆在「关于」那几行事实旁边。
+	//
+	// 事实回答"这是谁"，那个答案是不变的；最新的一篇回答"还写不写"，那才是回头客真正的问题。
+	// 放在同一张卡里，是因为单开一张「最新一篇」卡只会得到一行字。
+	Latest    *dto.BlogEntryDTO
 	Activity  *dto.BlogActivityDTO
 	// Recs feed the recommendation sheet the capsule opens and the rail on list pages.
 	//

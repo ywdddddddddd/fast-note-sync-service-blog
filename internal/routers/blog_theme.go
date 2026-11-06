@@ -3205,6 +3205,50 @@ html.is-wx .ask-panel{left:.45rem;right:.45rem;width:auto}
 .sec-label{margin:0;font-size:.8125rem;font-weight:600;letter-spacing:.08em;color:var(--muted-foreground);text-transform:uppercase}
 .sec-note{font-size:.75rem;color:var(--muted-foreground)}
 .kv{display:grid;grid-template-columns:144px 1fr;gap:.55rem 1rem;margin:0}
+/* 「关于」卡分两栏：左是人，右是最近写的一篇。右栏只在有最新笔记时出现，
+   没有就退回原来的单栏，卡片不会留一个空位。 */
+.kv-split{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(0,1fr);gap:2.2rem;align-items:start}
+.kv-latest{
+  display:flex;flex-direction:column;gap:.4rem;
+  padding-left:1.4rem;border-left:1px solid var(--border);
+  text-decoration:none;color:inherit;min-width:0;
+  transition:opacity .18s;
+}
+.kv-latest:hover{opacity:.78}
+.kv-latest-k{font-size:.75rem;color:var(--muted-foreground);letter-spacing:.08em}
+.kv-latest-t{
+  font-size:.95rem;line-height:1.55;font-weight:500;color:var(--foreground);
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;
+}
+.kv-latest-d{font-size:.78rem;color:var(--muted-foreground);font-variant-numeric:tabular-nums}
+/* 这张卡的「更多」紧挨着「关于」，不推到右端。
+   它是标题的附属词（关于 → 更多），不是这一栏的操作按钮；推到最右边会被读成
+   "这一块还有个别的入口"，而读者的视线从「关于」出发根本走不到那儿。
+   标题行沿用 .kv 的两栏骨架（144px 标签列 + 1rem 间隔），因此「更多」的左边
+   正好落在「Y 染色体」那一列的左边：它是右栏的第一行，而不是标题的尾巴。
+   字号、字重、字距与 .sec-label 完全一致：两者是同一行字，只是后半句可点。 */
+.kv-block .sec-head{
+  display:grid;grid-template-columns:144px minmax(0,1fr);
+  gap:0 1rem;align-items:baseline;
+}
+.kv-block .sec-more{
+  justify-self:start;
+  font-size:.8125rem;font-weight:600;letter-spacing:.08em;
+  color:var(--muted-foreground);line-height:inherit;
+}
+.kv-block .sec-more-a{font-size:inherit;line-height:1}
+.sec-more{
+  font-size:.78rem;color:var(--muted-foreground);text-decoration:none;
+  display:inline-flex;align-items:center;gap:.28rem;
+  transition:color .18s;
+}
+.sec-more:hover{color:var(--foreground)}
+.sec-more-a{font-size:.85rem;line-height:1;transition:translate .18s}
+.sec-more:hover .sec-more-a{translate:2px 0}
+@media (max-width:860px){
+  .kv-split{grid-template-columns:minmax(0,1fr);gap:1.1rem}
+  .kv-latest{padding-left:0;padding-top:.9rem;border-left:0;border-top:1px solid var(--border)}
+}
 .kv-row{display:contents}
 .kv dt{margin:0;font-size:.875rem;color:var(--muted-foreground)}
 .kv dd{margin:0;font-size:.9375rem;color:var(--foreground);font-weight:500}

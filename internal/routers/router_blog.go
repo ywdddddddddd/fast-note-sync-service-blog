@@ -298,6 +298,7 @@ func registerBlogRoutes(r *gin.Engine, appContainer *app.App) {
 			Stats:      home.Stats,
 			Profile:    home.Profile,
 			Pills:      home.Pills,
+			Latest:     blogLatestEntry(home.Entries),
 			Activity:   home.Activity,
 			Recs:       home.Recs,
 			DockJS:     template.JS(blogDockJS()),
@@ -604,6 +605,29 @@ func registerBlogRoutes(r *gin.Engine, appContainer *app.App) {
 		c.Status(http.StatusOK)
 		_, _ = c.Writer.Write(pbuf.Bytes())
 	})
+}
+
+// blogLatestEntry returns the newest published entry, or nil when every date is missing.
+//
+// Comparing the rendered date strings rather than parsing them is deliberate: they are
+// already "2006-01-02", which sorts lexicographically the same way it sorts chronologically,
+// and a parse would have to invent a policy for the empty case anyway.
+//
+// blogLatestEntry 返回最近创建的一篇已发布条目；所有日期都缺失时返回 nil。
+//
+// 这里直接比较渲染好的日期字符串而不是解析它们：格式已经是 2006-01-02，字典序与时间序一致，
+// 而解析反而要为"空日期"另立一条规则。
+func blogLatestEntry(entries []*dto.BlogEntryDTO) *dto.BlogEntryDTO {
+	var best *dto.BlogEntryDTO
+	for _, e := range entries {
+		if e == nil || e.CreatedAt == "" {
+			continue
+		}
+		if best == nil || e.CreatedAt > best.CreatedAt {
+			best = e
+		}
+	}
+	return best
 }
 
 // markActiveNav sets Active on the node whose slug matches the page being rendered.

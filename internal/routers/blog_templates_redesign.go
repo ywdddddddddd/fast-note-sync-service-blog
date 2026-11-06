@@ -170,10 +170,22 @@ var blogCardTmpl = template.Must(template.New("blog-card").Funcs(blogAssetFuncs)
 
   {{if .Profile}}{{if .Profile.Meta}}
   <section class="card card-pad kv-block" data-anim="2">
-    <div class="sec-head"><h2 class="sec-label">关于</h2></div>
-    <dl class="kv">
-      {{range .Profile.Meta}}<div class="kv-row"><dt>{{.Label}}</dt><dd>{{.Value}}</dd></div>{{end}}
-    </dl>
+    <div class="sec-head">
+      <h2 class="sec-label">关于</h2>
+      {{range .Pages}}{{if eq .Alias "about"}}<a class="sec-more" href="{{.URL}}">更多<span class="sec-more-a" aria-hidden="true">→</span></a>{{end}}{{end}}
+    </div>
+    <div class="kv-split">
+      <dl class="kv">
+        {{range .Profile.Meta}}<div class="kv-row"><dt>{{.Label}}</dt><dd>{{.Value}}</dd></div>{{end}}
+      </dl>
+      {{if .Latest}}
+      <a class="kv-latest" href="/blog/{{.Latest.Slug}}">
+        <span class="kv-latest-k">最近更新</span>
+        <span class="kv-latest-t">{{.Latest.Title}}</span>
+        {{if .Latest.CreatedAt}}<span class="kv-latest-d">{{.Latest.CreatedAt}}</span>{{end}}
+      </a>
+      {{end}}
+    </div>
   </section>
   {{end}}{{end}}
 
