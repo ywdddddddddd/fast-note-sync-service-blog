@@ -140,9 +140,16 @@ func blogShareJS() string {
       if(i===lines.length-1) ctx.fillText(lines[i],padX,y); else justify(ctx,lines[i],padX,y,textW);
     }
 
-    ctx.fillStyle=t.muted; ctx.font='400 16px '+FONT;
-    var meta=[data.words, data.section].filter(Boolean), mx=padX;
-    for(var m=0;m<meta.length;m++){ ctx.fillText(meta[m],mx,H-50); mx+=ctx.measureText(meta[m]).width+30; }
+    // 字数与栏目挪到右上角，与标题同一基线、右边缘对齐二维码右边：
+    // 卡片右下角留给了二维码，元信息再压在下面会和它抢注意力；右上角是这张卡唯一
+    // 还没有被占用的角，而且与左侧的日期形成一条对角基线。
+    var meta=[data.words, data.section].filter(Boolean).join(' · ');
+    if(meta){
+      ctx.textAlign='right';
+      ctx.fillStyle=t.fg; ctx.font='600 18px '+FONT;
+      ctx.fillText(meta, W-padX, H-206);
+      ctx.textAlign='left';
+    }
 
     if(qrImg.complete && qrImg.naturalWidth) ctx.drawImage(qrImg,qrX,qrY,qrS,qrS);
     return o.c;
