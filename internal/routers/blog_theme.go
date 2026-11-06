@@ -2354,6 +2354,47 @@ html.fns-arrived .shell{animation:fns-arrive-fade .55s cubic-bezier(.22,1,.36,1)
 .pc-profile-meta li>span{
   min-width:0;overflow-wrap:anywhere;
 }
+/* 块引用放进 profile-meta 时，改成一左一右：事实在左，引文在右并竖排。
+   竖排不是装饰——这块空白本来就是一个又高又窄的缺口，横排的文字填进去只会在
+   右半边留下一段更小的空白；而竖排的每一行天然是高大于宽，正好落进那个缺口。
+   写作 writing-mode 而不是逐字换行：换行会把标点排到行首（中文禁则），
+   而竖排模式下浏览器自己知道竖排的标点该放哪。
+   用 :has 判断「有没有引文」，没有就保持原来的两列事实网格；不支持 :has 的浏览器
+   退化为引文落在网格下方，仍然可读。
+   一直保持两列到 460px：竖排只占一百来像素宽，而它旁边的空白正是它该占的位置；
+   把断点设在 860 会让手机和平板看到「事实在上、引文在下」两个孤岛，
+   而那正是这块布局原本要解决的问题。 */
+.pc-profile-meta:has(>blockquote){
+  display:grid;
+  grid-template-columns:minmax(0,1fr) auto;
+  gap:1.8rem;align-items:start;
+}
+.pc-profile-meta:has(>blockquote)>ul{
+  display:grid;grid-template-columns:minmax(0,1fr);
+  gap:.55rem;list-style:none;margin:0;padding:0;
+}
+.pc-profile-meta>blockquote{
+  margin:0;padding:0;border:0;background:none;
+  writing-mode:vertical-rl;
+  text-orientation:mixed;
+  justify-self:end;
+  font-size:1.05rem;line-height:1.9;letter-spacing:.24em;
+  color:color-mix(in srgb,var(--foreground) 88%,transparent);
+}
+.pc-profile-meta>blockquote p{margin:0}
+.pc-profile-meta>blockquote p+p{margin-right:1.3rem}
+.pc-profile-meta>blockquote p:last-child{
+  margin-right:1.9rem;
+  font-size:.84rem;letter-spacing:.1em;
+  color:var(--muted-foreground);
+}
+@media (max-width:360px){
+  .pc-profile-meta:has(>blockquote){
+    grid-template-columns:minmax(0,1fr);
+    gap:1.2rem;
+  }
+  .pc-profile-meta>blockquote{justify-self:start;font-size:.95rem;letter-spacing:.18em}
+}
 @media (max-width:560px){
   .pc-profile-meta{grid-template-columns:minmax(0,1fr)}
 }
