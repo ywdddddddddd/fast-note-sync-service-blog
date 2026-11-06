@@ -1267,18 +1267,33 @@ func (s *shareService) RenderBlogBySlug(ctx context.Context, slug string) (*dto.
 		HTML:  html,
 		Path:  post.Path,
 	}
-	// An absolute cover reference works here; a local attachment does not, because resolving it
-	// needs a vault id this path does not carry. See BlogPostDTO.Cover.
-	// 绝对的封面引用在这里可用；本地附件不行，因为解析它需要一条本路径不携带的 vault id。
-	// 见 BlogPostDTO.Cover。
-	if ref, cov := parseBlogCover(post.Content, post.Path); cov != nil &&
-		(strings.HasPrefix(ref, "http://") || strings.HasPrefix(ref, "https://")) {
-		out.Cover = &dto.BlogCoverDTO{
-			URL:    ref,
-			Kind:   cov.Kind,
-			FocusX: cov.FocusX,
-			FocusY: cov.FocusY,
-			Zoom:   cov.Zoom,
+	// 封面：绝对地址原样用；本地附件走缩略图路由。
+	//
+	// 这条路径原先只处理绝对地址，理由是"解析本地附件需要一个这里没有的 vault id"。
+	// 那个理由只说对了一半：vault id 确实不在这条路径上，但它在笔记表里，而这条路径
+	// 手上正好有笔记 id（share.ResID）。于是分享卡长期只能拿到空封面，读者看到的是回退色块。
+	//
+	// 这里顺带调用 ensureCoverResource：从正文之外挑的封面从来不在分享记录的授权清单里，
+	// 不补这一步，缩略图接口会 403，页面上只剩一张破图。
+	if ref, cov := parseBlogCover(post.Content, post.Path); cov != nil {
+		switch {
+		case strings.HasPrefix(ref, "http://") || strings.HasPrefix(ref, "https://"):
+			out.Cover = &dto.BlogCoverDTO{
+				URL: ref, Kind: cov.Kind,
+				FocusX: cov.FocusX, FocusY: cov.FocusY, Zoom: cov.Zoom,
+			}
+		default:
+			if note, nerr := s.noteRepo.GetByID(ctx, share.ResID, uid); nerr == nil && note != nil {
+				if file, ferr := s.resolveBlogCoverFile(ctx, uid, note.VaultID, post.Path, ref); ferr == nil && file != nil {
+					s.ensureCoverResource(ctx, uid, share, file)
+					out.Cover = &dto.BlogCoverDTO{
+						URL: "/blog/thumb?id=" + strconv.FormatInt(file.ID, 10) +
+							"&share_token=" + url.QueryEscape(token),
+						Kind:   cov.Kind,
+						FocusX: cov.FocusX, FocusY: cov.FocusY, Zoom: cov.Zoom,
+					}
+				}
+			}
 		}
 	}
 	if !share.CreatedAt.IsZero() {
