@@ -85,28 +85,125 @@ func TestBlogFriendInitial(t *testing.T) {
 	}
 }
 
-// TestBlogFriendCopyText 复制文本是三行固定格式，地址必须是绝对的。
+// TestBlogFriendCopyText 六字段卡的顺序与缺项省略。
+//
+// 顺序是站名/简述/邮箱/链接/订阅/标识；可选三项缺失时整行消失，不能留下「邮箱：」这样的空值行。
 func TestBlogFriendCopyText(t *testing.T) {
-	got := blogFriendCopyText("问道", "https://yaowendao.asia/")
-	want := "站名：问道\n地址：https://yaowendao.asia/blog\nRSS：https://yaowendao.asia/blog/rss.xml"
-	if got != want {
-		t.Fatalf("blogFriendCopyText() = %q, want %q", got, want)
+	cases := []struct {
+		name string
+		site *dto.BlogSiteInfoDTO
+		want string
+	}{
+		{
+			name: "FullSixFields",
+			site: &dto.BlogSiteInfoDTO{
+				Desc:   "一个记录学习与生活的地方",
+				Email:  "me@example.com",
+				Avatar: "https://example.com/a.png",
+			},
+			want: "站名：问道\n简述：一个记录学习与生活的地方\n邮箱：me@example.com\n" +
+				"链接：https://yaowendao.asia/blog\n订阅：https://yaowendao.asia/blog/rss.xml\n" +
+				"标识：https://example.com/a.png",
+		},
+		{
+			name: "OnlyDesc",
+			site: &dto.BlogSiteInfoDTO{Desc: "只有简述"},
+			want: "站名：问道\n简述：只有简述\n" +
+				"链接：https://yaowendao.asia/blog\n订阅：https://yaowendao.asia/blog/rss.xml",
+		},
+		{
+			name: "OnlyEmailAndAvatar",
+			site: &dto.BlogSiteInfoDTO{Email: "me@example.com", Avatar: "https://example.com/a.png"},
+			want: "站名：问道\n邮箱：me@example.com\n" +
+				"链接：https://yaowendao.asia/blog\n订阅：https://yaowendao.asia/blog/rss.xml\n" +
+				"标识：https://example.com/a.png",
+		},
+		{
+			name: "NilSiteKeepsThreeLines",
+			site: nil,
+			want: "站名：问道\n链接：https://yaowendao.asia/blog\n订阅：https://yaowendao.asia/blog/rss.xml",
+		},
+		{
+			name: "WhitespaceOnlyFieldsAreOmitted",
+			site: &dto.BlogSiteInfoDTO{Desc: "   ", Email: "", Avatar: "\t"},
+			want: "站名：问道\n链接：https://yaowendao.asia/blog\n订阅：https://yaowendao.asia/blog/rss.xml",
+		},
+		{
+			name: "NewlinesAreFlattened",
+			site: &dto.BlogSiteInfoDTO{Desc: "第一行\n第二行", Email: "me@example.com\r\nsecond@example.com"},
+			want: "站名：问道\n简述：第一行 第二行\n邮箱：me@example.com second@example.com\n" +
+				"链接：https://yaowendao.asia/blog\n订阅：https://yaowendao.asia/blog/rss.xml",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := blogFriendCopyText("问道", "https://yaowendao.asia/", tc.site)
+			if got != tc.want {
+				t.Fatalf("blogFriendCopyText() = %q, want %q", got, tc.want)
+			}
+			if strings.Contains(got, "简述：\n") || strings.Contains(got, "邮箱：\n") || strings.Contains(got, "标识：\n") {
+				t.Fatalf("copy card contains an empty value line: %q", got)
+			}
+		})
+	}
+}
+
+// TestBlogShareDataAvatar 分享卡头像：site.avatar 覆盖内嵌图，空值回退内嵌图。
+func TestBlogShareDataAvatar(t *testing.T) {
+	post := &dto.BlogPostDTO{
+		Title:     "标题",
+		CreatedAt: "2026-11-07",
+		HTML:      "<p>正文</p>",
+		Path:      "（1）技术/示例.md",
+	}
+	withSite := blogShareData(post, "摘要", "问道", "https://example.com/site.png")
+	if !strings.Contains(withSite, `"avatar":"https://example.com/site.png"`) {
+		t.Fatalf("share data did not use site avatar: %s", withSite)
+	}
+	if strings.Contains(withSite, `"avatar":"`+blogAvatarURL+`"`) {
+		t.Fatalf("share data kept the embedded avatar alongside the site avatar: %s", withSite)
+	}
+
+	fallback := blogShareData(post, "摘要", "问道", "")
+	if !strings.Contains(fallback, `"avatar":"`+blogAvatarURL+`"`) {
+		t.Fatalf("share data did not fall back to the embedded avatar: %s", fallback)
+	}
+
+	if got := blogShareData(nil, "摘要", "问道", ""); got != "" {
+		t.Fatalf("blogShareData(nil) = %q, want empty", got)
+	}
+}
+
+// TestBlogProfileAvatar 名片头像三档兜底：简历 → site.avatar → 内嵌。
+func TestBlogProfileAvatar(t *testing.T) {
+	cases := []struct{ note, site, want string }{
+		{"https://note.example.com/a.png", "https://site.example.com/a.png", "https://note.example.com/a.png"},
+		{"", "https://site.example.com/a.png", "https://site.example.com/a.png"},
+		{"", "", blogAvatarURL},
+	}
+	for _, tc := range cases {
+		if got := blogProfileAvatar(tc.note, tc.site); got != tc.want {
+			t.Errorf("blogProfileAvatar(%q, %q) = %q, want %q", tc.note, tc.site, got, tc.want)
+		}
 	}
 }
 
 // TestFriendsPageRendersCardsGroupsAndButton 友链页的三样东西：卡片、分组标题、复制按钮。
 func TestFriendsPageRendersCardsGroupsAndButton(t *testing.T) {
 	friends := []dto.BlogFriendDTO{
-		{Name: "张三", URL: "https://zhangsan.example.com", Desc: "记录生活与技术", Group: "技术博客"},
+		{Name: "张三", URL: "https://zhangsan.example.com", Desc: "记录生活与技术", Group: "技术博客",
+			Email: "zhangsan@example.com", Feed: "https://zhangsan.example.com/rss.xml"},
 		{Name: "李四", URL: "https://lisi.example.com", Avatar: "https://lisi.example.com/av.png", Group: "生活"},
 		{Name: "王五", URL: "https://wangwu.example.com", Desc: "没有分组"},
 	}
+	copyText := "站名：Notes\n简述：记录\n邮箱：me@example.com\n链接：https://x.example.com/blog\n" +
+		"订阅：https://x.example.com/blog/rss.xml\n标识：https://x.example.com/a.png"
 	out := renderFriendsPage(t, blogPageView{
 		PageAlias:       "friends",
 		PageTitle:       "友链",
 		SiteName:        "Notes",
 		FriendGroups:    blogFriendGroups(friends),
-		FriendsCopyText: "站名：Notes\n地址：https://x.example.com/blog\nRSS：https://x.example.com/blog/rss.xml",
+		FriendsCopyText: copyText,
 	})
 
 	for _, want := range []string{
@@ -120,11 +217,18 @@ func TestFriendsPageRendersCardsGroupsAndButton(t *testing.T) {
 		`src="https://lisi.example.com/av.png"`,
 		`onerror="this.remove()"`,
 		`class="friends-copy"`,
-		"data-copy=\"站名：Notes\n地址：https://x.example.com/blog\nRSS：https://x.example.com/blog/rss.xml\"",
+		"data-copy=\"" + copyText + "\"",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("friends page missing %q", want)
 		}
+	}
+	// email 与 feed 只存不显示：它们不应出现在卡片标记里。
+	if strings.Contains(out, "zhangsan@example.com") {
+		t.Error("friend email must not be rendered on the page")
+	}
+	if strings.Contains(out, "https://zhangsan.example.com/rss.xml") {
+		t.Error("friend feed must not be rendered on the page")
 	}
 
 	// 未分组条目排在最前，且它的区块没有标题头。

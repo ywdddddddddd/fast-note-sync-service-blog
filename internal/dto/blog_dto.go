@@ -367,6 +367,33 @@ type BlogFriendDTO struct {
 	Avatar string `json:"avatar,omitempty"`
 	Desc   string `json:"desc,omitempty"`
 	Group  string `json:"group,omitempty"`
+	// Email and Feed are carried but not rendered. They exist so a future blogroll can contact
+	// the owner or poll the feed without re-reading the note; the friends page itself shows cards,
+	// not contact details. Feed has already passed the http(s) check when it arrives here.
+	//
+	// Email 与 Feed 只存不显示。它们为日后的友链聚合保留「怎么联系、怎么订阅」两项数据，
+	// 使聚合不必重读笔记；友链页本身只画卡片，不展示联系方式。Feed 到达这里时已通过 http(s) 校验。
+	Email string `json:"email,omitempty"`
+	Feed  string `json:"feed,omitempty"`
+}
+
+// BlogSiteInfoDTO is the friends note's own `site:` block: the information a visitor copies when
+// applying for a mutual link.
+//
+// It is deliberately separate from BlogFriendDTO: an entry describes someone else's site, while
+// this block describes this site. Title, URL and feed are not stored here because the server
+// already knows them (config title and request base URL), and duplicating them in the note would
+// let the copy card disagree with the page it sits on.
+//
+// BlogSiteInfoDTO 是友链笔记自己的 `site:` 块：访客申请互换友链时要复制走的本站信息。
+//
+// 它与 BlogFriendDTO 刻意分开：条目描述别人的站点，这个块描述本站。站名、地址与订阅源不存
+// 在这里，因为服务端本来就知道（配置标题与请求基地址），在笔记里再写一遍只会让复制卡
+// 与它所在的页面说法不一致。
+type BlogSiteInfoDTO struct {
+	Desc   string `json:"desc,omitempty"`
+	Email  string `json:"email,omitempty"`
+	Avatar string `json:"avatar,omitempty"`
 }
 
 // BlogPageDTO a rendered page note (about). A page is a note that carries a `page:` marker in its

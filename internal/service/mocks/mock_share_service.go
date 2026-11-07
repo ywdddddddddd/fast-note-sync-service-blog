@@ -227,6 +227,16 @@ func (m *MockShareService) RenderBlogPage(ctx context.Context, uid int64, alias 
 	return nil, args.Error(1)
 }
 
+// GetBlogSiteInfo returns the friends note's site block.
+// GetBlogSiteInfo 返回友链笔记的 site 块。
+func (m *MockShareService) GetBlogSiteInfo(ctx context.Context, uid int64) (*dto.BlogSiteInfoDTO, error) {
+	args := m.Called(ctx, uid)
+	if v := args.Get(0); v != nil {
+		return v.(*dto.BlogSiteInfoDTO), args.Error(1)
+	}
+	return nil, args.Error(1)
+}
+
 // GetBlogHome assembles the blog home page datasets.
 // GetBlogHome 组装博客首页数据。
 func (m *MockShareService) GetBlogHome(ctx context.Context, uid int64, baseURL string, publishedOnly bool, maxNodes int) (*dto.BlogHomeDTO, error) {

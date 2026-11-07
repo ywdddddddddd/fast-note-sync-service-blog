@@ -250,14 +250,21 @@ func registerBlogRoutes(r *gin.Engine, appContainer *app.App) {
 			return
 		}
 
-		// A note may declare its own portrait; when it does not, the embedded one is used. The
-		// fallback lives here rather than in the parser because the parser only knows the note,
-		// while the embedded URL is a router-owned asset.
+		// The portrait chain has three levels: the résumé note's own avatar, then the friends
+		// page's site.avatar, then the embedded asset. The middle level is only consulted when the
+		// note declares nothing, so a page with its own portrait never pays for the extra lookup.
+		// The last level lives here rather than in the parser because the parser only knows the
+		// note, while the embedded URL is a router-owned asset.
 		//
-		// 笔记可以声明自己的头像；没声明时用内嵌的那张。兜底放在这里而不是解析器里，
-		// 因为解析器只认识笔记，而内嵌 URL 是路由层自己的资源。
+		// 头像链条有三档：简历笔记自己的 avatar → 友链页的 site.avatar → 内嵌图片。
+		// 只有笔记什么都没声明时才查中间一档，因此自带头像的页面不必付这次额外查找的代价。
+		// 最后一档放在这里而不是解析器里，因为解析器只认识笔记，而内嵌 URL 是路由层自己的资源。
 		if home.Profile != nil && home.Profile.Avatar == "" {
-			home.Profile.Avatar = blogAvatarURL
+			siteAvatar := ""
+			if site, err := shareSvc.GetBlogSiteInfo(c.Request.Context(), uid); err == nil && site != nil {
+				siteAvatar = site.Avatar
+			}
+			home.Profile.Avatar = blogProfileAvatar(home.Profile.Avatar, siteAvatar)
 		}
 
 		// One visit per page render. It counts refreshes and crawlers too, which is why the label
@@ -567,6 +574,18 @@ func registerBlogRoutes(r *gin.Engine, appContainer *app.App) {
 			postDesc = s
 		}
 
+		// The share card portrait follows the site identity: site.avatar declared on the friends
+		// page wins over the embedded asset, so the image the owner edits in Obsidian is the one a
+		// shared article previews. A missing friends page or an invalid avatar falls through to the
+		// embedded portrait inside blogShareData.
+		//
+		// 分享卡头像跟随站点身份：友链页声明的 site.avatar 优先于内嵌图，站主在 Obsidian 里改的
+		// 那张就是文章被分享时预览到的那张。友链页缺失或头像非法时，回退发生在 blogShareData 内部。
+		siteAvatar := ""
+		if site, serr := shareSvc.GetBlogSiteInfo(c.Request.Context(), uid); serr == nil && site != nil {
+			siteAvatar = site.Avatar
+		}
+
 		var pbuf bytes.Buffer
 		if perr := blogPostTmpl.Execute(&pbuf, blogPostView{
 			Title:       post.Title + " · " + siteTitle,
@@ -600,7 +619,7 @@ func registerBlogRoutes(r *gin.Engine, appContainer *app.App) {
 			Quiz:        shareSvc.BlogQuizPreview(post),
 			QuizJS:      template.JS(blogQuizJS()),
 			QuizCSS:     template.CSS(blogQuizCSS),
-			ShareData:   template.JS(blogShareData(post, postDesc, siteTitle)),
+			ShareData:   template.JS(blogShareData(post, postDesc, siteTitle, siteAvatar)),
 			ShareJS:     template.JS(blogShareJS()),
 
 			HasMath:          service.HasMathMarkup(body),
@@ -657,13 +676,27 @@ func blogLatestEntry(entries []*dto.BlogEntryDTO) *dto.BlogEntryDTO {
 // blogShareData assembles what the share cards need. Building it here rather than scraping
 // the DOM matters because the DOM holds presentation: the title carries a site suffix, the
 // date carries decoration, and the summary may be clamped.
-func blogShareData(post *dto.BlogPostDTO, desc, author string) string {
+//
+// avatar is the site.avatar resolved by the caller; an empty value means "no site identity
+// declared" and falls back to the embedded portrait. The fallback lives here so every caller gets
+// the same guarantee without repeating it.
+//
+// blogShareData 组装分享卡需要的字段。放在服务端组装而不是让前端从 DOM 里抓，是因为 DOM 里的
+// 东西是给读者看的——标题带站点后缀、日期带装饰、摘要可能被折叠。卡片要的是干净的原值，
+// 从渲染结果反推会一路踩到这些装饰上。
+//
+// avatar 是调用方解析出的 site.avatar；空值表示「没有声明站点身份」，回退到内嵌头像。
+// 兜底放在这里，使每个调用方都得到同样的保证而不必各写一遍。
+func blogShareData(post *dto.BlogPostDTO, desc, author, avatar string) string {
 	if post == nil {
 		return ""
 	}
 	cover := ""
 	if post.Cover != nil {
 		cover = post.Cover.URL
+	}
+	if avatar == "" {
+		avatar = blogAvatarURL
 	}
 	payload := map[string]string{
 		"title":   post.Title,
@@ -672,7 +705,7 @@ func blogShareData(post *dto.BlogPostDTO, desc, author string) string {
 		"words":   shareWordCount(post.HTML),
 		"section": shareSection(post.Path),
 		"cover":   cover,
-		"avatar":  blogAvatarURL,
+		"avatar":  avatar,
 		"author":  author,
 	}
 	raw, err := json.Marshal(payload)
@@ -708,7 +741,6 @@ func shareSection(path string) string {
 	}
 	return seg
 }
-
 
 // blogStripTagsForCount 去标签但**不截断**，专供字数统计。
 //
@@ -765,19 +797,86 @@ func blogPageRouteAliases() []string {
 	return service.BlogPageAliases()
 }
 
-// blogFriendCopyText builds the text behind the friends page's copy button.
+// blogFriendCopyText builds the six-field card behind the friends page's copy button.
 //
-// It is the site's own information, not the visitor's: the reader copies it and sends it to the
-// owner when applying for a link. The address and feed are absolute because the text leaves the
-// browser — a relative path pasted into a chat window points nowhere.
+// The field order is fixed — 站名 / 简述 / 邮箱 / 链接 / 订阅 / 标识 — because the point of this
+// text is to be pasted into someone else's note verbatim, and a card whose lines move around is
+// harder to compare with the one you received. Optional lines are omitted entirely rather than
+// rendered empty: "邮箱：" with nothing after it is worse than no line at all.
 //
-// blogFriendCopyText 组装友链页复制按钮的文本。
+// 站名、链接与订阅 come from the server (config title, request base URL and the feed route), so the
+// card can never disagree with the page it was copied from. 简述、邮箱与标识 come from the note's
+// site: block and are optional.
 //
-// 复制的是本站信息而不是访客自己的：读者复制后发给站主申请友链。
-// 地址与订阅源都是绝对地址，因为这段文本会离开浏览器——粘贴到聊天窗口里的相对路径哪里也去不了。
-func blogFriendCopyText(siteTitle, base string) string {
+// blogFriendCopyText 组装友链页复制按钮背后的六字段卡。
+//
+// 字段顺序固定——站名 / 简述 / 邮箱 / 链接 / 订阅 / 标识——因为这段文本的用途是原样粘贴进
+// 对方的笔记，行序会变的卡片更难与收到的那张对照。可选行整行省略而不是留空值：
+// 「邮箱：」后面什么都没有，比没有这一行更糟。
+//
+// 站名、链接与订阅由服务端提供（配置标题、请求基地址与订阅源路由），因此这张卡不可能与
+// 它复制自的那个页面说法不一致。简述、邮箱与标识来自笔记的 site: 块，均可选。
+func blogFriendCopyText(siteTitle, base string, site *dto.BlogSiteInfoDTO) string {
 	base = strings.TrimRight(base, "/")
-	return "站名：" + siteTitle + "\n地址：" + base + "/blog\nRSS：" + base + "/blog/rss.xml"
+	lines := []string{"站名：" + siteTitle}
+	if site != nil {
+		if v := blogCopyLine(site.Desc); v != "" {
+			lines = append(lines, "简述："+v)
+		}
+		if v := blogCopyLine(site.Email); v != "" {
+			lines = append(lines, "邮箱："+v)
+		}
+	}
+	lines = append(lines,
+		"链接："+base+"/blog",
+		"订阅："+base+"/blog/rss.xml",
+	)
+	if site != nil {
+		if v := blogCopyLine(site.Avatar); v != "" {
+			lines = append(lines, "标识："+v)
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+// blogCopyLine makes one optional value safe to sit on a single line of the copy card.
+//
+// YAML permits a folded or literal scalar to carry newlines, and pasting such a value into the
+// card would break its one-field-per-line shape. Newlines and tabs are collapsed to spaces;
+// everything else is left as the owner wrote it.
+//
+// blogCopyLine 让一个可选值能安全地占复制卡的一行。
+//
+// YAML 允许折叠或字面量标量携带换行；把这样的值粘进卡片会破坏「一行一项」的形状。
+// 换行与制表符压成空格，其余内容保持站主写下的样子。
+func blogCopyLine(v string) string {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return ""
+	}
+	return strings.NewReplacer("\r\n", " ", "\r", " ", "\n", " ", "\t", " ").Replace(v)
+}
+
+// blogProfileAvatar applies the card page's portrait fallback chain: the résumé note's own avatar,
+// then the friends page's site.avatar, then the embedded asset.
+//
+// The order is deliberate: a portrait declared on the résumé is the most specific statement about
+// whose page this is; site.avatar is the site-wide identity used on the friends copy card; the
+// embedded image is the last resort that guarantees a portrait always exists.
+//
+// blogProfileAvatar 应用名片页头像的三级兜底：简历笔记自己的 avatar → 友链页的 site.avatar →
+// 内嵌图片。
+//
+// 顺序是有意的：简历上声明的头像是对「这是谁的名片」最具体的表述；site.avatar 是友链复制卡
+// 上的站点身份；内嵌图是最后一级，保证永远有一张头像可用。
+func blogProfileAvatar(noteAvatar, siteAvatar string) string {
+	if noteAvatar != "" {
+		return noteAvatar
+	}
+	if siteAvatar != "" {
+		return siteAvatar
+	}
+	return blogAvatarURL
 }
 
 // serveBlogPage renders a page note at its alias route.
@@ -852,7 +951,13 @@ func serveBlogPage(c *gin.Context, appContainer *app.App, shareSvc service.Share
 	friendGroups := blogFriendGroups(page.Friends)
 	friendsCopy := ""
 	if page.Alias == "friends" {
-		friendsCopy = blogFriendCopyText(siteTitle, base)
+		// The site block is optional: a missing or broken one degrades the card to the three lines
+		// the server can fill by itself. A lookup failure must not fail the page for the same reason.
+		//
+		// site 块是可选的：缺失或损坏时，卡片退化为服务端自己能填的三行。查找失败同样不能让
+		// 页面失败，理由相同。
+		site, _ := shareSvc.GetBlogSiteInfo(c.Request.Context(), uid)
+		friendsCopy = blogFriendCopyText(siteTitle, base, site)
 	}
 
 	var buf bytes.Buffer

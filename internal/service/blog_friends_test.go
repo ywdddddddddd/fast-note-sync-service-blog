@@ -86,6 +86,22 @@ func TestParseBlogFriends(t *testing.T) {
 			want: []dto.BlogFriendDTO{{Name: "张三", URL: "https://zhangsan.com", Desc: "一句话", Group: "技术"}},
 		},
 		{
+			name: "EmailAndFeedAreCarried",
+			content: "---\nfriends:\n" +
+				"  - name: 小倪 | BioEZ\n    url: https://bioez.xyz\n" +
+				"    email: nixulei@snnu.edu.cn\n    feed: https://bioez.xyz/rss.xml\n" +
+				"  - name: 无联系方式\n    url: https://plain.example.com\n" +
+				"  - name: 坏订阅\n    url: https://badfeed.example.com\n" +
+				"    email: \"  keep@example.com  \"\n    feed: javascript:alert(1)\n" +
+				"---\n",
+			want: []dto.BlogFriendDTO{
+				{Name: "小倪 | BioEZ", URL: "https://bioez.xyz", Email: "nixulei@snnu.edu.cn", Feed: "https://bioez.xyz/rss.xml"},
+				{Name: "无联系方式", URL: "https://plain.example.com"},
+				// 非法 feed 只丢字段，条目本身保留；email 不做形状校验，去空白后原样留下。
+				{Name: "坏订阅", URL: "https://badfeed.example.com", Email: "keep@example.com"},
+			},
+		},
+		{
 			name:    "EmptyListHasNoCards",
 			content: "---\npage: friends\nfriends: []\n---\n正文\n",
 			want:    nil,
@@ -96,6 +112,97 @@ func TestParseBlogFriends(t *testing.T) {
 			got := parseBlogFriends(tc.content)
 			if !reflect.DeepEqual(got, tc.want) {
 				t.Fatalf("parseBlogFriends() = %#v, want %#v", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestParseBlogSiteInfo site 块的三项事实：全、半、坏。
+//
+// site 是复制卡里「本站」那一半的数据，缺失时卡片要退化为服务端自己能填的三行，而不是报错。
+// 因此这里的期望大量是 nil——那是降级，不是失败。
+func TestParseBlogSiteInfo(t *testing.T) {
+	cases := []struct {
+		name    string
+		content string
+		want    *dto.BlogSiteInfoDTO
+	}{
+		{
+			name: "FullBlock",
+			content: "---\npage: friends\nsite:\n" +
+				"  desc: 一个记录学习与生活的地方\n" +
+				"  email: me@example.com\n" +
+				"  avatar: https://example.com/avatar.png\n" +
+				"---\n正文\n",
+			want: &dto.BlogSiteInfoDTO{
+				Desc:   "一个记录学习与生活的地方",
+				Email:  "me@example.com",
+				Avatar: "https://example.com/avatar.png",
+			},
+		},
+		{
+			name:    "OnlyDesc",
+			content: "---\npage: friends\nsite:\n  desc: 只有一句话\n---\n正文\n",
+			want:    &dto.BlogSiteInfoDTO{Desc: "只有一句话"},
+		},
+		{
+			name:    "OnlyEmail",
+			content: "---\npage: friends\nsite:\n  email: me@example.com\n---\n正文\n",
+			want:    &dto.BlogSiteInfoDTO{Email: "me@example.com"},
+		},
+		{
+			name:    "OnlyAvatar",
+			content: "---\npage: friends\nsite:\n  avatar: https://example.com/a.png\n---\n正文\n",
+			want:    &dto.BlogSiteInfoDTO{Avatar: "https://example.com/a.png"},
+		},
+		{
+			name: "InvalidAvatarDropsOnlyTheField",
+			content: "---\npage: friends\nsite:\n" +
+				"  desc: 保留\n  email: keep@example.com\n  avatar: javascript:alert(1)\n" +
+				"---\n正文\n",
+			want: &dto.BlogSiteInfoDTO{Desc: "保留", Email: "keep@example.com"},
+		},
+		{
+			name:    "InvalidAvatarAloneYieldsNil",
+			content: "---\npage: friends\nsite:\n  avatar: data:image/png;base64,AAAA\n---\n正文\n",
+			want:    nil,
+		},
+		{
+			name:    "BrokenYAMLYieldsNil",
+			content: "---\npage: friends\nsite: [\n---\n正文\n",
+			want:    nil,
+		},
+		{
+			name:    "SiteNotAMappingYieldsNil",
+			content: "---\npage: friends\nsite: https://example.com\n---\n正文\n",
+			want:    nil,
+		},
+		{
+			name:    "EmptySiteYieldsNil",
+			content: "---\npage: friends\nsite:\n---\n正文\n",
+			want:    nil,
+		},
+		{
+			name:    "NoSiteKeyYieldsNil",
+			content: "---\npage: friends\nfriends: []\n---\n正文\n",
+			want:    nil,
+		},
+		{
+			name:    "NoFrontmatterYieldsNil",
+			content: "site:\n  desc: 正文里的字\n",
+			want:    nil,
+		},
+		{
+			name:    "ValuesAreTrimmed",
+			content: "---\nsite:\n  desc: \"  简介  \"\n  email: \"  me@example.com  \"\n  avatar: \"  https://example.com/a.png  \"\n---\n",
+			want:    &dto.BlogSiteInfoDTO{Desc: "简介", Email: "me@example.com", Avatar: "https://example.com/a.png"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := parseBlogSiteInfo(tc.content)
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("parseBlogSiteInfo() = %#v, want %#v", got, tc.want)
 			}
 		})
 	}

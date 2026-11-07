@@ -121,6 +121,20 @@ type ShareService interface {
 	// RenderBlogPage 渲染声明了指定页面别名的那一篇已发布笔记；没有任何笔记声明它时返回未找到。
 	RenderBlogPage(ctx context.Context, uid int64, alias string) (*dto.BlogPageDTO, error)
 
+	// GetBlogSiteInfo returns the friends note's `site:` block — the site's own copy-card data —
+	// or nil when no friends page is published or the block is absent/invalid.
+	//
+	// It reads the same source list the blog already builds but never renders a body: callers on
+	// the article and card paths need three strings, not a page. That is why it does not go
+	// through RenderBlogPage.
+	//
+	// GetBlogSiteInfo 返回友链笔记的 `site:` 块——本站复制卡数据；没有已发布的友链页，
+	// 或该块缺失/损坏时返回 nil。
+	//
+	// 它读取博客本已构建的同一份来源清单，但绝不渲染正文：文章页与名片页需要的是三个字符串，
+	// 而不是一张页面。这也是它不经过 RenderBlogPage 的原因。
+	GetBlogSiteInfo(ctx context.Context, uid int64) (*dto.BlogSiteInfoDTO, error)
+
 	// GetBlogHome assembles the blog home page datasets: dashboard stats, tags, folder
 	// navigation and the knowledge graph. publishedOnly keeps the graph scoped to notes that
 	// are themselves published, so a public page never leaks unshared note titles.
@@ -1550,32 +1564,76 @@ func (s *shareService) AddBlogVisit() {
 // blogFriendEntry is one `friends:` item as written in a page note's frontmatter.
 //
 // The keys are the ones the page consumes; anything else an author adds to an entry is ignored by
-// the decoder, so the data format can grow without a server change.
+// the decoder, so the data format can grow without a server change. Email and Feed are carried for
+// a future blogroll and are not rendered today.
 //
 // blogFriendEntry 是页面笔记 frontmatter 里 `friends:` 的一条。
 //
 // 这里声明的键就是页面会用到的；作者在条目里加的其它键由解码器忽略，
-// 因此数据格式可以自行扩展而不必改服务端。
+// 因此数据格式可以自行扩展而不必改服务端。Email 与 Feed 为日后的友链聚合保留，
+// 今天不参与渲染。
 type blogFriendEntry struct {
 	Name   string `yaml:"name"`
 	URL    string `yaml:"url"`
 	Avatar string `yaml:"avatar"`
 	Desc   string `yaml:"desc"`
 	Group  string `yaml:"group"`
+	Email  string `yaml:"email"`
+	Feed   string `yaml:"feed"`
+}
+
+// blogSiteEntry is the friends note's own `site:` block: the three facts the server cannot derive
+// from config or the request.
+//
+// blogSiteEntry 是友链笔记自己的 `site:` 块：服务端无法从配置或请求里推导出的三项事实。
+type blogSiteEntry struct {
+	Desc   string `yaml:"desc"`
+	Email  string `yaml:"email"`
+	Avatar string `yaml:"avatar"`
 }
 
 // blogFriendsFrontmatter is the frontmatter shape read for a friends page.
 //
-// Only `friends` is declared. Every other property — tags, timestamps, arbitrary author fields —
-// is ignored rather than rejected, so a friends page keeps the rest of its properties like any
-// other note.
+// Only `friends` and `site` are declared. Every other property — tags, timestamps, arbitrary
+// author fields — is ignored rather than rejected, so a friends page keeps the rest of its
+// properties like any other note.
 //
 // blogFriendsFrontmatter 是友链页读取的 frontmatter 形状。
 //
-// 只声明 `friends`。其它属性——标签、时间、作者自定义字段——被忽略而不是报错，
+// 只声明 `friends` 与 `site`。其它属性——标签、时间、作者自定义字段——被忽略而不是报错，
 // 因此友链页可以像任何笔记一样保留自己的其余属性。
 type blogFriendsFrontmatter struct {
 	Friends []blogFriendEntry `yaml:"friends"`
+	Site    blogSiteEntry     `yaml:"site"`
+}
+
+// blogFrontmatterYAML returns the YAML between the opening and closing `---`, if the note has a
+// frontmatter block at all.
+//
+// Every frontmatter reader on this path uses the same extractor: the friends list and the site
+// block are two views of the same bytes, and two copies of the delimiter logic would eventually
+// disagree about a CRLF file or a closing marker at the end of the note.
+//
+// blogFrontmatterYAML 返回开头与闭合 `---` 之间的 YAML；笔记没有 frontmatter 块时返回 false。
+//
+// 这条路径上的每个 frontmatter 读取都走同一个提取函数：友链列表与 site 块是同一段字节的
+// 两种视图，两份定界符逻辑早晚会在 CRLF 文件或笔记末尾的闭合标记上产生分歧。
+func blogFrontmatterYAML(content string) ([]byte, bool) {
+	block := frontmatterRegex.FindString(content)
+	if block == "" {
+		return nil, false
+	}
+	// The regex guarantees a newline after the opening `---` and a closing `---` at the end.
+	// Strip both delimiters and hand the inner YAML to the decoder.
+	//
+	// 正则保证开头的 `---` 之后有换行、结尾有闭合的 `---`。去掉两端的定界符，
+	// 把中间的 YAML 交给解码器。
+	open := strings.Index(block, "\n")
+	close := strings.LastIndex(block, "---")
+	if open < 0 || close <= open {
+		return nil, false
+	}
+	return []byte(block[open+1 : close]), true
 }
 
 // parseBlogFriends reads and validates the `friends:` list from a note's frontmatter.
@@ -1588,6 +1646,10 @@ type blogFriendsFrontmatter struct {
 //   - name and url are both required; either being empty drops the entry.
 //   - url and avatar accept only http/https. Anything else (javascript:, data:, file:, ...) drops
 //     the whole entry rather than the field: a partially trusted entry is worse than a missing one.
+//   - feed follows the same http(s) rule, but it is metadata rather than a link the page renders.
+//     An invalid feed therefore drops only the field and keeps the entry.
+//   - email is kept whenever it is non-empty. It is a contact record, not a rendered value: a
+//     strict shape check would silently discard whatever the owner actually wrote there.
 //   - group is kept in first-appearance order by the template; empty means "ungrouped".
 //
 // parseBlogFriends 读取并校验笔记 frontmatter 里的 `friends:` 列表。
@@ -1600,25 +1662,16 @@ type blogFriendsFrontmatter struct {
 //   - name 与 url 都必填，任一为空即丢弃该条。
 //   - url 与 avatar 只接受 http/https。其它 scheme（javascript:、data:、file: 等）整条丢弃，
 //     而不是只丢字段：一条「部分可信」的友链比一条不出现的更糟。
+//   - feed 同样只接受 http/https，但它是元数据而不是页面渲染的链接，因此非法 feed 只丢字段、保留条目。
+//   - email 非空即保留。它是联系方式的记录而不是展示值：严格校验形状，会把站主真正写下的东西静默丢掉。
 //   - group 的分组顺序由模板保持首次出现序；空值表示未分组。
 func parseBlogFriends(content string) []dto.BlogFriendDTO {
-	block := frontmatterRegex.FindString(content)
-	if block == "" {
+	raw, ok := blogFrontmatterYAML(content)
+	if !ok {
 		return nil
 	}
-	// The regex guarantees a newline after the opening `---` and a closing `---` at the end.
-	// Strip both delimiters and hand the inner YAML to the decoder.
-	//
-	// 正则保证开头的 `---` 之后有换行、结尾有闭合的 `---`。去掉两端的定界符，
-	// 把中间的 YAML 交给解码器。
-	open := strings.Index(block, "\n")
-	close := strings.LastIndex(block, "---")
-	if open < 0 || close <= open {
-		return nil
-	}
-
 	var fm blogFriendsFrontmatter
-	if err := yaml.Unmarshal([]byte(block[open+1:close]), &fm); err != nil {
+	if err := yaml.Unmarshal(raw, &fm); err != nil {
 		return nil
 	}
 
@@ -1636,15 +1689,62 @@ func parseBlogFriends(content string) []dto.BlogFriendDTO {
 		if avatar != "" && !blogTrustedExternalURL(avatar) {
 			continue
 		}
+		feed := strings.TrimSpace(f.Feed)
+		if feed != "" && !blogTrustedExternalURL(feed) {
+			feed = ""
+		}
 		out = append(out, dto.BlogFriendDTO{
 			Name:   name,
 			URL:    link,
 			Avatar: avatar,
 			Desc:   strings.TrimSpace(f.Desc),
 			Group:  strings.TrimSpace(f.Group),
+			Email:  strings.TrimSpace(f.Email),
+			Feed:   feed,
 		})
 	}
 	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// parseBlogSiteInfo reads the `site:` block from a friends note's frontmatter.
+//
+// A missing block, a YAML error or a `site:` that is not a mapping yields nil: the copy card then
+// degrades to the three lines the server can fill by itself, which is still a usable card. An
+// invalid avatar scheme drops only the avatar, because the other two fields are independent facts
+// and neither is a navigation target.
+//
+// Unlike a friend entry, email here is a display value rather than a contact record: it is trimmed
+// and kept as written, and the copy-text builder flattens newlines into one line.
+//
+// parseBlogSiteInfo 读取友链笔记 frontmatter 里的 `site:` 块。
+//
+// 块缺失、YAML 写坏、或 `site:` 不是映射时返回 nil：复制卡退化为服务端自己能填的三行，
+// 那仍是一张可用的卡。头像 scheme 非法只丢头像，因为另外两项是独立的事实，且都不是导航目标。
+//
+// 与友链条目不同，这里的 email 是展示值而不是联系记录：只去首尾空白、按原样保留，
+// 由复制文本构造器把换行压成一行。
+func parseBlogSiteInfo(content string) *dto.BlogSiteInfoDTO {
+	raw, ok := blogFrontmatterYAML(content)
+	if !ok {
+		return nil
+	}
+	var fm blogFriendsFrontmatter
+	if err := yaml.Unmarshal(raw, &fm); err != nil {
+		return nil
+	}
+	avatar := strings.TrimSpace(fm.Site.Avatar)
+	if avatar != "" && !blogTrustedExternalURL(avatar) {
+		avatar = ""
+	}
+	out := &dto.BlogSiteInfoDTO{
+		Desc:   strings.TrimSpace(fm.Site.Desc),
+		Email:  strings.TrimSpace(fm.Site.Email),
+		Avatar: avatar,
+	}
+	if out.Desc == "" && out.Email == "" && out.Avatar == "" {
 		return nil
 	}
 	return out
@@ -1756,6 +1856,30 @@ func (s *shareService) RenderBlogPage(ctx context.Context, uid int64, alias stri
 		out.Friends = parseBlogFriends(src.Content)
 	}
 	return out, nil
+}
+
+// GetBlogSiteInfo returns the friends note's own `site:` block.
+//
+// It resolves the note from the same source list the blog builds, so the block follows the page's
+// publication state: unshared or expired, it disappears and callers fall back to their defaults.
+// The body is never rendered — only the frontmatter is decoded — because article and card pages
+// call this on every view, and a goldmark pass per page is not something they can afford.
+//
+// GetBlogSiteInfo 返回友链笔记自己的 `site:` 块。
+//
+// 它从博客本已构建的同一份来源清单解析笔记，因此该块跟随页面的发布状态：取消分享或过期后
+// 它就消失，调用方各自回退到默认值。正文从不渲染——只解码 frontmatter——因为文章页与名片页
+// 每次浏览都会调用它，而每页多跑一遍 goldmark 是它们负担不起的。
+func (s *shareService) GetBlogSiteInfo(ctx context.Context, uid int64) (*dto.BlogSiteInfoDTO, error) {
+	sources, _, err := s.loadBlogSources(ctx, uid)
+	if err != nil {
+		return nil, err
+	}
+	src, _ := pageNote(sources, "friends")
+	if src == nil {
+		return nil, nil
+	}
+	return parseBlogSiteInfo(src.Content), nil
 }
 
 func (s *shareService) CreateShortLink(ctx context.Context, uid int64, vaultName string, path string, pathHash string, baseURL string, longURL string, isForce bool) (string, error) { // Find vault first to get ID
