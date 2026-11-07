@@ -2317,6 +2317,96 @@ html.fns-arrived .shell{animation:fns-arrive-fade .55s cubic-bezier(.22,1,.36,1)
 /* 页面笔记的「最后更新」。同样不能用 --muted：那是背景色，白底上不可见。 */
 .page-meta{margin:-.2rem 0 1.6rem;font-size:.8125rem;color:var(--muted-foreground)}
 
+/* ── 友链页 ──────────────────────────────────────────────────────────── */
+/* 卡片网格。分组只是网格外的一层 <section> 加一个标题；没有分组时就是一组无标题的区块，
+   因此平铺与分组共用同一套卡片样式，不存在第二条会与分组慢慢走样的分支。 */
+.friends{margin:2rem 0 0}
+.friends-group+.friends-group{margin-top:1.7rem}
+.friends-group-title{
+  display:flex;align-items:center;gap:.7rem;
+  margin:0 0 .85rem;
+  font-size:.9375rem;font-weight:600;line-height:1.4;letter-spacing:.01em;
+  color:var(--foreground);
+}
+/* 标题右侧的细线把分组名与网格分开，同时把标题行撑满宽度——
+   否则一个短标题会让分组看起来像紧接着正文的一段话。 */
+.friends-group-title::after{content:"";flex:1;height:1px;background:var(--border)}
+.friends-grid{
+  display:grid;grid-template-columns:repeat(auto-fill,minmax(15rem,1fr));
+  gap:.75rem;
+}
+.friend-card{
+  display:flex;align-items:center;gap:.8rem;min-width:0;
+  padding:.8rem .9rem;
+  border:1px solid var(--border);border-radius:.85rem;
+  background:color-mix(in srgb,var(--muted) 22%,transparent);
+  color:var(--foreground);
+  transition:border-color .16s ease,background-color .16s ease,transform .16s ease;
+}
+.friend-card:hover{
+  border-color:color-mix(in srgb,var(--foreground) 26%,transparent);
+  background:color-mix(in srgb,var(--muted) 40%,transparent);
+  transform:translateY(-1px);
+}
+/* 首字母色块垫在图片下面：没有头像时它直接可见；有头像而图片加载失败时，
+   onerror 把 <img> 移除，色块重新露出来。一条标记服务三种状态。 */
+.friend-avatar{
+  position:relative;flex:0 0 2.75rem;
+  display:flex;align-items:center;justify-content:center;
+  width:2.75rem;height:2.75rem;
+  border-radius:50%;overflow:hidden;
+  border:1px solid var(--border);
+  background:color-mix(in srgb,var(--muted) 75%,transparent);
+  color:var(--muted-foreground);
+  font-size:1.05rem;font-weight:600;line-height:1;
+}
+.friend-avatar img{
+  position:absolute;inset:0;width:100%;height:100%;
+  object-fit:cover;border-radius:0;
+}
+.friend-main{display:flex;flex-direction:column;gap:.1rem;min-width:0}
+.friend-name{
+  font-size:.9375rem;font-weight:600;line-height:1.45;color:var(--foreground);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+/* 外链标记。整张卡片就是链接，加一个 ↗ 比在右侧再放一个图标更省位置。 */
+.friend-name::after{content:"↗";margin-left:.22em;font-size:.75em;font-weight:400;color:var(--muted-foreground)}
+.friend-desc{
+  font-size:.8125rem;line-height:1.55;color:var(--muted-foreground);
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;
+}
+/* 申请区块。分隔线把它与网格分开：上面是「已经在这里的人」，下面是「怎么加进来」。 */
+.friends-apply{
+  display:flex;flex-wrap:wrap;align-items:center;gap:.75rem;
+  margin:1.8rem 0 0;padding-top:1.2rem;
+  border-top:1px solid var(--border);
+}
+.friends-copy{
+  display:inline-flex;align-items:center;
+  padding:.5rem .95rem;
+  border:1px solid var(--border);border-radius:.55rem;
+  background:color-mix(in srgb,var(--muted) 30%,transparent);
+  color:var(--foreground);font-size:.8125rem;font-weight:500;
+  cursor:pointer;
+  transition:color .16s ease,background-color .16s ease,border-color .16s ease;
+}
+.friends-copy:hover{
+  background:color-mix(in srgb,var(--muted) 55%,transparent);
+  border-color:color-mix(in srgb,var(--foreground) 26%,transparent);
+}
+/* 成功后换色而不只是换字：按钮就在按下的地方，颜色变化比文字变化更容易被眼角捕捉。 */
+.friends-copy.is-done{
+  color:#2f7d4f;
+  border-color:color-mix(in srgb,#2f7d4f 30%,transparent);
+  background:color-mix(in srgb,#2f7d4f 8%,transparent);
+}
+.friends-copy.is-fail{
+  color:#c2410c;
+  border-color:color-mix(in srgb,#c2410c 30%,transparent);
+  background:color-mix(in srgb,#c2410c 8%,transparent);
+}
+.friends-hint{font-size:.8125rem;color:var(--muted-foreground)}
+
 /* ── 三个排版容器 ──────────────────────────────────────────────────── */
 /* 容器是增强，不是前提：样式整体失效时，里面的 Markdown 仍会以普通段落与列表呈现，
    内容不会丢。这是这套设计必须满足的条件（见 blog_page_container.go）。 */
@@ -2432,6 +2522,9 @@ html.fns-arrived .shell{animation:fns-arrive-fade .55s cubic-bezier(.22,1,.36,1)
   .page-avatar img{margin:0 auto;width:5.5rem;height:5.5rem}
   .pc-profile-head{text-align:center}
   .pc-links>ul{justify-content:center}
+  /* 友链：手机上单列，申请按钮与说明改成上下排列，避免按钮被挤到说明文字右边。 */
+  .friends-grid{grid-template-columns:minmax(0,1fr)}
+  .friends-apply{flex-direction:column;align-items:flex-start}
 }
 
 /* 打印：这一页最常见的动作就是打出来或存成 PDF。
@@ -2453,8 +2546,13 @@ html.fns-arrived .shell{animation:fns-arrive-fade .55s cubic-bezier(.22,1,.36,1)
   .pc-timeline>ul{border-left-color:#999}
   .pc-timeline>ul>li::before{background:#999}
   .pc-links a{border-color:#999;background:none}
+  /* 友链：纸上的复制按钮没有意义；卡片去掉底色与悬停装饰，只留边框与链接文字；
+     ↗ 也去掉——打印样式已经把正文链接展开成「文字 (地址)」，卡片本身就是地址。 */
+  .friends-copy{display:none}
+  .friend-card{border-color:#999;background:none}
+  .friend-name::after{content:none}
   h1,h2,h3{break-after:avoid;page-break-after:avoid}
-  img,table,pre,.callout,.pc{break-inside:avoid;page-break-inside:avoid}
+  img,table,pre,.callout,.pc,.friend-card{break-inside:avoid;page-break-inside:avoid}
   @page{margin:1.6cm}
 }
 

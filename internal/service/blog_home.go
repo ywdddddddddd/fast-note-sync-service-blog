@@ -253,10 +253,11 @@ var (
 // as an ordinary one, which is visible, instead of creating a page that is reachable only by
 // guessing its URL.
 //
-// `friends` is deliberately absent. A friends page belongs to the blogroll, which is on hold; an
-// alias with no route would take the note out of the article list while giving the reader nowhere
-// to land. Until the blogroll is built, `page: friends` therefore reads as an ordinary note and
-// stays visible as one.
+// `friends` is registered as well. A friends page is an ordinary page note whose frontmatter
+// carries the card list the page template renders; the route is the reader's landing place. A
+// "blogroll" — the automatic discovery/aggregation feature — is still on hold, but it is not a
+// prerequisite for a hand-curated friends page: the note is the only source, and there is no
+// second notion of membership to build.
 //
 // blogPageAliases 是本服务端真正为其渲染路由的页面别名白名单。
 //
@@ -264,11 +265,12 @@ var (
 // 写成 `page: abuot` 这样的错字，结果是这篇笔记仍是普通笔记——这是看得见的；
 // 而造出一条只能靠猜 URL 才到达的页面，是看不见的。
 //
-// `friends` 是有意缺席的。友链页属于博客圈，而博客圈已搁置；一个有别名却没有路由的页面，
-// 会把笔记从文章列表里拿走，却不让读者落在任何地方。在博客圈做出来之前，
-// `page: friends` 因此仍按普通笔记处理，也仍然作为一篇普通笔记可见。
+// `friends` 同样已注册。友链页就是一篇普通页面笔记，卡片列表写在它的 frontmatter 里，
+// 由页面模板渲染；路由给了读者落点。「博客圈」——那种自动发现与聚合的功能——仍在搁置，
+// 但它不是手工维护友链页的前提：数据只来自笔记本身，不存在第二套「成员」定义。
 var blogPageAliases = map[string]string{
-	"about": "关于",
+	"about":   "关于",
+	"friends": "友链",
 }
 
 // BlogPageAliases returns the page aliases in a stable order.

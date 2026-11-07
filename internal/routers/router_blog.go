@@ -765,6 +765,21 @@ func blogPageRouteAliases() []string {
 	return service.BlogPageAliases()
 }
 
+// blogFriendCopyText builds the text behind the friends page's copy button.
+//
+// It is the site's own information, not the visitor's: the reader copies it and sends it to the
+// owner when applying for a link. The address and feed are absolute because the text leaves the
+// browser — a relative path pasted into a chat window points nowhere.
+//
+// blogFriendCopyText 组装友链页复制按钮的文本。
+//
+// 复制的是本站信息而不是访客自己的：读者复制后发给站主申请友链。
+// 地址与订阅源都是绝对地址，因为这段文本会离开浏览器——粘贴到聊天窗口里的相对路径哪里也去不了。
+func blogFriendCopyText(siteTitle, base string) string {
+	base = strings.TrimRight(base, "/")
+	return "站名：" + siteTitle + "\n地址：" + base + "/blog\nRSS：" + base + "/blog/rss.xml"
+}
+
 // serveBlogPage renders a page note at its alias route.
 //
 // A missing page is a 404 with the same wording as a missing article. Saying "this alias has no
@@ -828,32 +843,46 @@ func serveBlogPage(c *gin.Context, appContainer *app.App, shareSvc service.Share
 		}
 	}
 
+	// The friends grid and the copy payload are assembled only for the friends page. The template
+	// already gates the whole block on the alias; doing it here as well keeps every other page's
+	// view free of fields that would always be empty.
+	//
+	// 友链网格与复制内容只为友链页组装。模板已经按别名把整块圈起来了；这里再做一次，
+	// 是为了让其它页面的视图不携带永远为空的字段。
+	friendGroups := blogFriendGroups(page.Friends)
+	friendsCopy := ""
+	if page.Alias == "friends" {
+		friendsCopy = blogFriendCopyText(siteTitle, base)
+	}
+
 	var buf bytes.Buffer
 	if err := blogPageTmpl.Execute(&buf, blogPageView{
-		Title:       pageTitle,
-		SiteName:    siteTitle,
-		ICP:         icp,
-		MPS:         mps,
-		MPSCode:     mpCode,
-		Indexable:   blogIndexable(cfg.Indexable),
-		Canonical:   pageURL,
-		Description: desc,
-		FeedURL:     strings.TrimRight(base, "/") + "/blog/rss.xml",
-		JSONLD:      blogPostJSONLD(siteTitle, pageTitle, pageURL, desc, page.UpdatedAt),
-		CSS:         template.CSS(blogCSS),
-		PageTitle:   pageTitle,
-		PageAlias:   page.Alias,
-		Pages:       pages,
-		HasShelf:    shelfHasBooks(),
-		Avatar:      page.Avatar,
-		UpdatedAt:   page.UpdatedAt,
-		Path:        page.Path,
-		Body:        template.HTML(pageHTML),
-		TOC:         toc,
-		HasMath:     strings.Contains(page.HTML, "math-inline") || strings.Contains(page.HTML, "math-block"),
-		WarpJS:      "", // 已改由 head 的 inkjs 注入；字段留下只为不惊动五个 view 结构体。
-		WaveJS:      template.JS(blogWaveJS),
-		AskEnabled:  blogAskEnabled(appContainer),
+		Title:           pageTitle,
+		SiteName:        siteTitle,
+		ICP:             icp,
+		MPS:             mps,
+		MPSCode:         mpCode,
+		Indexable:       blogIndexable(cfg.Indexable),
+		Canonical:       pageURL,
+		Description:     desc,
+		FeedURL:         strings.TrimRight(base, "/") + "/blog/rss.xml",
+		JSONLD:          blogPostJSONLD(siteTitle, pageTitle, pageURL, desc, page.UpdatedAt),
+		CSS:             template.CSS(blogCSS),
+		PageTitle:       pageTitle,
+		PageAlias:       page.Alias,
+		Pages:           pages,
+		HasShelf:        shelfHasBooks(),
+		Avatar:          page.Avatar,
+		UpdatedAt:       page.UpdatedAt,
+		Path:            page.Path,
+		Body:            template.HTML(pageHTML),
+		TOC:             toc,
+		HasMath:         strings.Contains(page.HTML, "math-inline") || strings.Contains(page.HTML, "math-block"),
+		WarpJS:          "", // 已改由 head 的 inkjs 注入；字段留下只为不惊动五个 view 结构体。
+		WaveJS:          template.JS(blogWaveJS),
+		AskEnabled:      blogAskEnabled(appContainer),
+		FriendGroups:    friendGroups,
+		FriendsCopyText: friendsCopy,
 	}); err != nil {
 		blogFail(c, appContainer, err.Error())
 		return

@@ -968,6 +968,93 @@ var blogPostTmpl = template.Must(template.New("blog-post").Funcs(blogAssetFuncs)
 </html>
 {{define "nav"}}` + blogNavPartial + `{{end}}` + blogNavTree + blogTopNav))
 
+// blogFriendCardView is one card in the friends grid.
+//
+// Initial is precomputed because a Go template cannot take the first character of a string
+// without a helper, and registering a helper would put it in every template's function map for a
+// single page's benefit.
+//
+// blogFriendCardView 是友链网格里的一张卡片。
+//
+// Initial 预先算好，因为 Go 模板无法在不加辅助函数的情况下取字符串的首个字符，
+// 而注册一个辅助函数，会让它仅为一个页面的用途出现在所有模板的函数表里。
+type blogFriendCardView struct {
+	dto.BlogFriendDTO
+	Initial string
+}
+
+// blogFriendGroupView is one section of the friends grid.
+//
+// An empty Title is the ungrouped bucket: the template renders its entries but omits the heading.
+// That is how a note with no `group` at all becomes a single flat grid — same markup, one less
+// element — rather than needing a second rendering path that would drift from the grouped one.
+//
+// blogFriendGroupView 是友链网格里的一个区块。
+//
+// Title 为空表示「未分组」这一桶：模板照常渲染其中的条目，只是不渲染标题。
+// 于是一篇完全没有 `group` 的笔记就是一张平铺网格——同样的标记，少一个元素——
+// 而不需要第二条会与分组路径渐渐走样的渲染分支。
+type blogFriendGroupView struct {
+	Title   string
+	Friends []blogFriendCardView
+}
+
+// blogFriendGroups groups entries by Group, preserving the order in which each group first
+// appears. Ungrouped entries go first and keep their relative order.
+//
+// Group titles are compared after trimming, which parseBlogFriends already did. Two entries with
+// the same title share one section; a title that differs only by surrounding spaces cannot happen
+// here because the parser trims both.
+//
+// blogFriendGroups 按 Group 分组，并保持每个分组首次出现的顺序。未分组条目排在最前，
+// 组内保持原有相对顺序。
+//
+// 分组标题比较的是 parseBlogFriends 已去空白的值。同一标题的两条共用一个区块；
+// 只差首尾空格的标题在这里不会出现，因为解析器已经把两边都修剪过。
+func blogFriendGroups(friends []dto.BlogFriendDTO) []blogFriendGroupView {
+	if len(friends) == 0 {
+		return nil
+	}
+	groups := make([]blogFriendGroupView, 0, 4)
+	index := make(map[string]int, 4)
+	ungrouped := make([]blogFriendCardView, 0, len(friends))
+	for _, f := range friends {
+		card := blogFriendCardView{BlogFriendDTO: f, Initial: blogFriendInitial(f.Name)}
+		if f.Group == "" {
+			ungrouped = append(ungrouped, card)
+			continue
+		}
+		i, ok := index[f.Group]
+		if !ok {
+			groups = append(groups, blogFriendGroupView{Title: f.Group})
+			i = len(groups) - 1
+			index[f.Group] = i
+		}
+		groups[i].Friends = append(groups[i].Friends, card)
+	}
+	if len(ungrouped) == 0 && len(groups) > 0 {
+		return groups
+	}
+	out := make([]blogFriendGroupView, 0, len(groups)+1)
+	out = append(out, blogFriendGroupView{Friends: ungrouped})
+	return append(out, groups...)
+}
+
+// blogFriendInitial returns the fallback letter shown when a friend has no avatar, or whose avatar
+// fails to load. It is the first rune, not byte, so a Chinese name yields its first character
+// rather than a broken fragment. An empty name falls back to a middle dot so the circle is never
+// blank.
+//
+// blogFriendInitial 返回友链没有头像、或头像加载失败时显示的首字母占位。
+// 取的是首个 rune 而不是字节，因此中文名得到的是第一个汉字，而不是一个碎掉的字节。
+// 空名字退化为中点，使圆形色块不会是空白。
+func blogFriendInitial(name string) string {
+	for _, r := range strings.TrimSpace(name) {
+		return strings.ToUpper(string(r))
+	}
+	return "·"
+}
+
 // blogPageView is the data for a page note (about).
 //
 // It deliberately carries no graph, no link previews and no local-neighbourhood card. A page is a
@@ -979,12 +1066,12 @@ var blogPostTmpl = template.Must(template.New("blog-post").Funcs(blogAssetFuncs)
 // 它刻意不携带图谱、链接预览与局部邻域卡片。页面本身是终点，而不是通往其它笔记的中转站，
 // 因此这些在它上面都无事可做。
 type blogPageView struct {
-	Title      string
-	SiteName   string
-	Indexable  bool
-	CSS        template.CSS
-	PageTitle  string
-	PageAlias  string
+	Title     string
+	SiteName  string
+	Indexable bool
+	CSS       template.CSS
+	PageTitle string
+	PageAlias string
 	// Pages are the page-note entry points shown in the top bar, with this page's own alias
 	// already removed by the caller. Same meaning as blogPostView.Pages.
 	//
@@ -999,6 +1086,19 @@ type blogPageView struct {
 	Body       template.HTML
 	TOC        []tocEntry
 	AskEnabled bool
+
+	// FriendGroups is the friends page card list, already grouped. Nil for every other alias, and
+	// for a friends page whose frontmatter produced no valid entries; the template then renders
+	// only the "copy site info" block.
+	//
+	// FriendGroups 是已分组的友链卡片列表。其它别名、以及 frontmatter 没有合法条目的友链页均为 nil；
+	// 此时模板只渲染「复制本站信息」区块。
+	FriendGroups []blogFriendGroupView
+	// FriendsCopyText is the payload of the copy button. It is set only on the friends page, which
+	// is also the only page the template renders that button on.
+	//
+	// FriendsCopyText 是复制按钮的内容。只有友链页会赋值，而模板也只在友链页渲染这个按钮。
+	FriendsCopyText string
 
 	// Canonical and FeedURL are absolute; JSONLD is serialised by the caller.
 	// Canonical 与 FeedURL 是绝对地址；JSONLD 由调用方序列化。
@@ -1101,6 +1201,77 @@ var blogPageTmpl = template.Must(template.New("blog-page").Funcs(blogAssetFuncs)
         <h1 class="pt">{{.PageTitle}}</h1>
         {{if .UpdatedAt}}<div class="page-meta"><span>最后更新 {{.UpdatedAt}}</span></div>{{end}}
         <div class="page-body post-body">{{.Body}}</div>
+        {{if eq .PageAlias "friends"}}
+        <div class="friends">
+          {{range .FriendGroups}}
+          <section class="friends-group">
+            {{if .Title}}<h2 class="friends-group-title">{{.Title}}</h2>{{end}}
+            <div class="friends-grid">
+              {{range .Friends}}
+              <a class="friend-card" href="{{.URL}}" target="_blank" rel="noopener noreferrer nofollow">
+                <span class="friend-avatar" aria-hidden="true"><span class="friend-initial">{{.Initial}}</span>{{if .Avatar}}<img src="{{.Avatar}}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" onerror="this.remove()">{{end}}</span>
+                <span class="friend-main">
+                  <span class="friend-name">{{.Name}}</span>
+                  {{if .Desc}}<span class="friend-desc">{{.Desc}}</span>{{end}}
+                </span>
+              </a>
+              {{end}}
+            </div>
+          </section>
+          {{end}}
+          <div class="friends-apply">
+            <button type="button" class="friends-copy" data-copy="{{.FriendsCopyText}}">复制本站信息</button>
+            <span class="friends-hint">想交换友链？复制本站信息后发给我。</span>
+          </div>
+          <script>
+          /* 「复制本站信息」：优先用 Clipboard API，被拒绝或不可用时退回 execCommand。
+             两种都失败时按钮短暂显示「复制失败」——读者按了按钮，答案必须出现在同一个地方。
+             这段脚本只服务于友链页，所以跟着那个区块一起渲染，而不是进全局脚本。 */
+          (function () {
+            var btn = document.querySelector('.friends-copy');
+            if (!btn) return;
+            var label = btn.textContent;
+            var timer = null;
+            function restore() {
+              btn.textContent = label;
+              btn.classList.remove('is-done');
+            }
+            function flash(text, cls) {
+              btn.textContent = text;
+              btn.classList.add(cls);
+              if (timer) window.clearTimeout(timer);
+              timer = window.setTimeout(restore, 1600);
+            }
+            function fallback(text) {
+              var ta = document.createElement('textarea');
+              ta.value = text;
+              ta.setAttribute('readonly', '');
+              ta.style.position = 'fixed';
+              ta.style.left = '-9999px';
+              document.body.appendChild(ta);
+              ta.select();
+              var ok = false;
+              try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+              document.body.removeChild(ta);
+              if (ok) flash('已复制', 'is-done'); else flash('复制失败', 'is-fail');
+            }
+            btn.addEventListener('click', function () {
+              var text = btn.getAttribute('data-copy') || '';
+              if (!text) return;
+              if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(text).then(function () {
+                  flash('已复制', 'is-done');
+                }, function () {
+                  fallback(text);
+                });
+              } else {
+                fallback(text);
+              }
+            });
+          })();
+          </script>
+        </div>
+        {{end}}
       </article>
     </main>
 

@@ -19,11 +19,11 @@ func TestBlogNotePageOnlyReadsFrontmatter(t *testing.T) {
 			want:    "about",
 		},
 		{
-			// 友链页属于博客圈,而博客圈已搁置。有别名却没有路由,会把笔记从文章列表里
-			// 拿走却不给读者落点;因此在博客圈做出来之前,它仍是一篇普通笔记。
-			name:    "FriendsIsNotAPageWhileTheBlogrollIsOnHold",
+			// 友链页现在是白名单里的正式页面：它有自己的路由，正文照常渲染，
+			// frontmatter 里的 friends 列表由页面模板画成卡片。
+			name:    "FriendsIsAPage",
 			content: "---\npage: friends\n---\n正文",
-			want:    "",
+			want:    "friends",
 		},
 		{
 			name:    "QuotedInProseIsNotADeclaration",
@@ -136,12 +136,12 @@ func TestBlogPageAliasesIsAWhitelist(t *testing.T) {
 	if _, ok := blogPageAliases["about"]; !ok {
 		t.Fatal("about must be registered")
 	}
-	// 只注册 about。友链页属于已搁置的博客圈,提前注册它会让 `page: friends` 的笔记
-	// 从文章列表里消失、却没有页面可去。
-	if len(blogPageAliases) != 1 {
-		t.Fatalf("whitelist has %d entries, want exactly 1 (about only)", len(blogPageAliases))
+	// friends 已注册：友链页有路由、有渲染路径，`page: friends` 的笔记从文章列表隐去之后
+	// 读者有地方可去。白名单仍然是一个封闭集合，未列出的别名依旧按普通笔记处理。
+	if _, ok := blogPageAliases["friends"]; !ok {
+		t.Fatal("friends must be registered now that the friends page exists")
 	}
-	if _, ok := blogPageAliases["friends"]; ok {
-		t.Fatal("friends must not be registered while the blogroll is on hold")
+	if len(blogPageAliases) != 2 {
+		t.Fatalf("whitelist has %d entries, want exactly 2 (about + friends)", len(blogPageAliases))
 	}
 }

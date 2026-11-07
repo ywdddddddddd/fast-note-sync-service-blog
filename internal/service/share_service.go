@@ -38,6 +38,7 @@ import (
 	"github.com/yuin/goldmark/renderer/html"
 	"go.uber.org/zap"
 	"golang.org/x/crypto/bcrypt"
+	"gopkg.in/yaml.v3"
 	"gorm.io/gorm"
 )
 
@@ -1546,6 +1547,131 @@ func (s *shareService) AddBlogVisit() {
 	s.blogReactions.addVisit()
 }
 
+// blogFriendEntry is one `friends:` item as written in a page note's frontmatter.
+//
+// The keys are the ones the page consumes; anything else an author adds to an entry is ignored by
+// the decoder, so the data format can grow without a server change.
+//
+// blogFriendEntry 是页面笔记 frontmatter 里 `friends:` 的一条。
+//
+// 这里声明的键就是页面会用到的；作者在条目里加的其它键由解码器忽略，
+// 因此数据格式可以自行扩展而不必改服务端。
+type blogFriendEntry struct {
+	Name   string `yaml:"name"`
+	URL    string `yaml:"url"`
+	Avatar string `yaml:"avatar"`
+	Desc   string `yaml:"desc"`
+	Group  string `yaml:"group"`
+}
+
+// blogFriendsFrontmatter is the frontmatter shape read for a friends page.
+//
+// Only `friends` is declared. Every other property — tags, timestamps, arbitrary author fields —
+// is ignored rather than rejected, so a friends page keeps the rest of its properties like any
+// other note.
+//
+// blogFriendsFrontmatter 是友链页读取的 frontmatter 形状。
+//
+// 只声明 `friends`。其它属性——标签、时间、作者自定义字段——被忽略而不是报错，
+// 因此友链页可以像任何笔记一样保留自己的其余属性。
+type blogFriendsFrontmatter struct {
+	Friends []blogFriendEntry `yaml:"friends"`
+}
+
+// parseBlogFriends reads and validates the `friends:` list from a note's frontmatter.
+//
+// It is called only for the friends page. Failure is always silent in the sense that matters to a
+// reader: no cards, but the body still renders. A YAML error, a missing key, or a malformed entry
+// must never turn a public page into a 500 — the page is content, and the list is an enhancement.
+//
+// Entry rules, applied per entry:
+//   - name and url are both required; either being empty drops the entry.
+//   - url and avatar accept only http/https. Anything else (javascript:, data:, file:, ...) drops
+//     the whole entry rather than the field: a partially trusted entry is worse than a missing one.
+//   - group is kept in first-appearance order by the template; empty means "ungrouped".
+//
+// parseBlogFriends 读取并校验笔记 frontmatter 里的 `friends:` 列表。
+//
+// 只为友链页调用。失败对读者总是静默的：没有卡片，但正文照常渲染。
+// YAML 写坏、没有这个键或某一条不合法，都绝不能把一个公开页面变成 500——
+// 页面是内容，列表只是增强。
+//
+// 逐条规则：
+//   - name 与 url 都必填，任一为空即丢弃该条。
+//   - url 与 avatar 只接受 http/https。其它 scheme（javascript:、data:、file: 等）整条丢弃，
+//     而不是只丢字段：一条「部分可信」的友链比一条不出现的更糟。
+//   - group 的分组顺序由模板保持首次出现序；空值表示未分组。
+func parseBlogFriends(content string) []dto.BlogFriendDTO {
+	block := frontmatterRegex.FindString(content)
+	if block == "" {
+		return nil
+	}
+	// The regex guarantees a newline after the opening `---` and a closing `---` at the end.
+	// Strip both delimiters and hand the inner YAML to the decoder.
+	//
+	// 正则保证开头的 `---` 之后有换行、结尾有闭合的 `---`。去掉两端的定界符，
+	// 把中间的 YAML 交给解码器。
+	open := strings.Index(block, "\n")
+	close := strings.LastIndex(block, "---")
+	if open < 0 || close <= open {
+		return nil
+	}
+
+	var fm blogFriendsFrontmatter
+	if err := yaml.Unmarshal([]byte(block[open+1:close]), &fm); err != nil {
+		return nil
+	}
+
+	out := make([]dto.BlogFriendDTO, 0, len(fm.Friends))
+	for _, f := range fm.Friends {
+		name := strings.TrimSpace(f.Name)
+		link := strings.TrimSpace(f.URL)
+		if name == "" || link == "" {
+			continue
+		}
+		if !blogTrustedExternalURL(link) {
+			continue
+		}
+		avatar := strings.TrimSpace(f.Avatar)
+		if avatar != "" && !blogTrustedExternalURL(avatar) {
+			continue
+		}
+		out = append(out, dto.BlogFriendDTO{
+			Name:   name,
+			URL:    link,
+			Avatar: avatar,
+			Desc:   strings.TrimSpace(f.Desc),
+			Group:  strings.TrimSpace(f.Group),
+		})
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// blogTrustedExternalURL reports whether raw is an absolute http(s) URL with a host.
+//
+// Scheme checking is the security boundary: `javascript:` and `data:` in an href become executable
+// content in the page. The host check is the usefulness boundary: "https://" alone is a link that
+// goes nowhere, and it would render as a dead card.
+//
+// blogTrustedExternalURL 报告 raw 是否是带主机的绝对 http(s) 地址。
+//
+// scheme 检查是安全边界：href 里的 `javascript:` 与 `data:` 会变成页面上可执行的内容。
+// 主机检查是可用性边界：只有 "https://" 的地址哪里也去不了，渲染出来就是一张死卡。
+func blogTrustedExternalURL(raw string) bool {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return false
+	}
+	switch strings.ToLower(u.Scheme) {
+	case "http", "https":
+		return u.Host != ""
+	}
+	return false
+}
+
 func (s *shareService) RenderBlogPage(ctx context.Context, uid int64, alias string) (*dto.BlogPageDTO, error) {
 	sources, _, err := s.loadBlogSources(ctx, uid)
 	if err != nil {
@@ -1620,6 +1746,14 @@ func (s *shareService) RenderBlogPage(ctx context.Context, uid int64, alias stri
 	}
 	if src.MTime > 0 {
 		out.UpdatedAt = time.UnixMilli(src.MTime).Format("2006-01-02")
+	}
+	if alias == "friends" {
+		// Only the friends page carries cards. Parsing here rather than for every alias keeps the
+		// other pages free of a decoder that could never produce anything.
+		//
+		// 只有友链页带卡片。在这里按别名解析，而不是每个页面都跑一遍，
+		// 使其它页面不必执行一个永远不会有产出的解码器。
+		out.Friends = parseBlogFriends(src.Content)
 	}
 	return out, nil
 }

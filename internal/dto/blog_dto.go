@@ -351,6 +351,24 @@ type BlogPostDTO struct {
 	Cover *BlogCoverDTO `json:"cover,omitempty"`
 }
 
+// BlogFriendDTO is one entry of a friends page, read from the page note's frontmatter.
+//
+// Name and URL are the only required fields; the rest are optional and the template omits what is
+// absent rather than rendering an empty element. Group is the heading the entry is listed under;
+// entries with no group render first, without a heading.
+//
+// BlogFriendDTO 是友链页的一条，来自页面笔记的 frontmatter。
+//
+// 只有 Name 与 URL 必填，其余可选，模板对缺失的字段整块省略而不是渲染空元素。
+// Group 是这条所属的分组标题；没有分组的条目排在最前，且不带标题头。
+type BlogFriendDTO struct {
+	Name   string `json:"name"`
+	URL    string `json:"url"`
+	Avatar string `json:"avatar,omitempty"`
+	Desc   string `json:"desc,omitempty"`
+	Group  string `json:"group,omitempty"`
+}
+
 // BlogPageDTO a rendered page note (about). A page is a note that carries a `page:` marker in its
 // frontmatter; it renders at an alias route and is kept out of the article list, the feed, the
 // graph and the statistics.
@@ -382,6 +400,11 @@ type BlogPageDTO struct {
 	// Duplicates 是声明了同一别名的其它已发布笔记数。大于零意味着作者可能在编辑另一份文件，
 	// 因此设置页会说明这件事。
 	Duplicates int `json:"duplicates"`
+	// Friends is the card list of a friends page, already validated and in note order. Empty for
+	// every other alias, and empty when the frontmatter has no valid entries.
+	// Friends 是友链页的卡片列表，已通过校验并保持笔记里的顺序。其它别名恒为空；
+	// frontmatter 里没有合法条目时也为空。
+	Friends []BlogFriendDTO `json:"friends,omitempty"`
 }
 
 // BlogReactionTallyDTO is one note's reaction counters.
