@@ -41,6 +41,21 @@ type UserShareRepository interface {
 	GetByID(ctx context.Context, uid int64, id int64) (*UserShare, error)
 	GetByPath(ctx context.Context, uid int64, vaultID int64, pathHash string) (*UserShare, error)
 	GetByRes(ctx context.Context, uid int64, resType string, resID int64) (*UserShare, error)
+
+	// GetByResAnyStatus returns the latest share record of a resource regardless of status
+	// (revoked rows included), newest first. Together with ReviveShare it lets re-sharing
+	// reuse the original row so the slug (uid.sid-hmac) survives a cancel → re-share cycle.
+	// GetByResAnyStatus 返回某资源最新一条分享记录（不限状态，含已撤销），按 id 取最新。
+	// 与 ReviveShare 配合实现「再次分享复用原记录」，保证取消→再分享后 slug（uid.sid-hmac）不变。
+	GetByResAnyStatus(ctx context.Context, uid int64, resType string, resID int64) (*UserShare, error)
+
+	// ReviveShare re-activates a share row in place: status back to active, expiry reset to
+	// the new request's value, password cleared (a re-share means "publish publicly"), and
+	// updated_at bumped — a single-column Update does not touch timestamps.
+	// ReviveShare 原地复活一条分享记录：状态改回有效，有效期按新请求重置，清空密码
+	//（再次分享=公开语义），并同步 updated_at——单列 Update 不会触发时间戳更新。
+	ReviveShare(ctx context.Context, uid int64, id int64, expiresAt time.Time) error
+
 	UpdateResources(ctx context.Context, uid int64, id int64, resources map[string][]string) error
 	UpdateStatus(ctx context.Context, uid int64, id int64, status int64) error
 	UpdateStatusByRes(ctx context.Context, uid int64, resType string, resID int64, status int64) error

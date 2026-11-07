@@ -45,6 +45,19 @@ func (m *MockUserShareRepository) GetByRes(ctx context.Context, uid int64, resTy
 	return args.Get(0).(*domain.UserShare), args.Error(1)
 }
 
+func (m *MockUserShareRepository) GetByResAnyStatus(ctx context.Context, uid int64, resType string, resID int64) (*domain.UserShare, error) {
+	args := m.Called(ctx, uid, resType, resID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*domain.UserShare), args.Error(1)
+}
+
+func (m *MockUserShareRepository) ReviveShare(ctx context.Context, uid int64, id int64, expiresAt time.Time) error {
+	args := m.Called(ctx, uid, id, expiresAt)
+	return args.Error(0)
+}
+
 func (m *MockUserShareRepository) UpdateResources(ctx context.Context, uid int64, id int64, resources map[string][]string) error {
 	args := m.Called(ctx, uid, id, resources)
 	return args.Error(0)

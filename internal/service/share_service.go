@@ -8,6 +8,7 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	stdhtml "html"
 	"mime"
@@ -37,6 +38,7 @@ import (
 	"github.com/yuin/goldmark/renderer/html"
 	"go.uber.org/zap"
 	"golang.org/x/crypto/bcrypt"
+	"gorm.io/gorm"
 )
 
 // attachmentRegex regular expression for attachment links
@@ -565,10 +567,70 @@ func (s *shareService) ShareGenerate(ctx context.Context, uid int64, vaultName s
 		UpdatedAt: time.Now(),
 	}
 
-	// Idempotent: revoke any existing active share before creating a new one
-	// 幂等：若该资源已有 active 分享，先撤销，避免重复计数
-	if existing, err := s.repo.GetByRes(ctx, uid, mainType, mainID); err == nil && existing != nil {
-		_ = s.StopShare(ctx, uid, existing.ID)
+	// Reuse before create: if the same resource already has a share record (any status),
+	// reuse that row instead of always revoking and inserting a fresh one.
+	//
+	// The old behaviour bumped the auto-increment SID, and the blog slug is uid.sid-hmac10 —
+	// so every re-share broke every link ever sent out, reset the like/dislike counters, and
+	// made RSS readers re-push the article. Reusing the row keeps the SID, and therefore the
+	// slug, byte-for-byte stable across a cancel → re-share cycle.
+	//
+	// Semantics:
+	//   - active row    → idempotent re-share: expiry refreshed per this request;
+	//   - revoked row   → revive in place: same SID, ViewCount/ShortLink/CreatedAt preserved;
+	//   - no row at all → create as before.
+	// Resources are deliberately NOT rebuilt here: GetSharedNote merges the note's current
+	// attachments into Resources on every render (mergeShareFileResources + UpdateResources),
+	// so a reused share self-heals on first view — the same mechanism that already keeps an
+	// edited note's newly added images working.
+	//
+	// 复用优先：同资源已有分享记录（不限状态）时复用该行，而不是永远撤销重建。
+	//
+	// 旧行为会推进自增 SID，而博客 slug 是 uid.sid-hmac10——每重复分享一次，所有发出去的
+	// 链接就 404 一次，点赞/踩清零，RSS 阅读器还会把旧文当新文重推。复用同一行则 SID 不变，
+	// 取消→再分享前后 slug 逐字符一致。
+	//
+	// 语义：
+	//   - active 记录 → 幂等重入：有效期按本次请求刷新；
+	//   - 已撤销记录 → 原地复活：SID 不变，ViewCount/ShortLink/CreatedAt 保留；
+	//   - 无任何记录 → 照旧新建。
+	// 这里刻意不重建 Resources：GetSharedNote 每次渲染都会把正文当前附件合并进 Resources
+	//（mergeShareFileResources + UpdateResources），复用的分享首次被访问时自愈——与
+	//「分享后编辑笔记加图仍能显示」是同一机制。
+	existing, existingErr := s.repo.GetByResAnyStatus(ctx, uid, mainType, mainID)
+	if existingErr != nil {
+		if !errors.Is(existingErr, gorm.ErrRecordNotFound) {
+			// 真实读错误仅记日志并按"无记录"处理，走新建，与旧行为一致
+			// A real read error is logged and treated as "no record": fall through to create,
+			// same as the old behaviour.
+			s.logger.Warn("ShareGenerate GetByResAnyStatus failed", zap.Error(existingErr))
+		}
+		existing = nil
+	}
+
+	if existing != nil {
+		// 再次分享=公开语义：清空遗留密码，并按本次请求重设有效期（零值=永久）。
+		// Re-share means "publish publicly": drop any legacy password and apply this
+		// request's expiry (zero time = never expires).
+		if err := s.repo.ReviveShare(ctx, uid, existing.ID, expiresAt); err != nil {
+			return nil, err
+		}
+
+		// 4. Generate Token (using underlying SID encryption scheme)
+		// 4. 生成 Token (使用底层 SID 加密方案)
+		token, err := s.tokenManager.ShareGenerate(existing.ID, uid, existing.Resources)
+		if err != nil {
+			return nil, err
+		}
+
+		return &dto.ShareCreateResponse{
+			ID:         mainID,
+			Type:       mainType,
+			Token:      token,
+			IsPassword: false,
+			ExpiresAt:  expiresAt,
+			ShortLink:  existing.ShortLink,
+		}, nil
 	}
 
 	if err := s.repo.Create(ctx, uid, share); err != nil {

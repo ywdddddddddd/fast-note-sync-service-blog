@@ -145,6 +145,39 @@ func (r *userShareRepository) GetByRes(ctx context.Context, uid int64, resType s
 	return r.toDomain(m), nil
 }
 
+// GetByResAnyStatus finds the latest share record of a resource regardless of status.
+// Ordered by id DESC so the newest row wins when legacy duplicates exist.
+// GetByResAnyStatus 查找某资源最新一条分享记录（不限状态）。
+// 按 id 倒序取最新，历史上若存在重复记录时取最近一条。
+func (r *userShareRepository) GetByResAnyStatus(ctx context.Context, uid int64, resType string, resID int64) (*domain.UserShare, error) {
+	us := r.userShare(uid).UserShare
+	m, err := us.WithContext(ctx).Where(us.ResType.Eq(resType), us.ResID.Eq(resID)).Order(us.ID.Desc()).First()
+	if err != nil {
+		return nil, err
+	}
+	return r.toDomain(m), nil
+}
+
+// ReviveShare re-activates a share row in place for reuse-before-create: status back to
+// active, expiry replaced by the new request's value (zero time = never expires), password
+// cleared (a re-share means "publish publicly" — drop any legacy single-page-share password),
+// and updated_at bumped, which a single-column Update would not touch.
+// ReviveShare 原地复活一条分享记录用于复用优先：状态改回有效，有效期按新请求重置
+//（零值=永久），清空密码（再次分享=公开语义，去掉单页分享时代遗留的密码），
+// 并同步 updated_at——单列 Update 不会触发时间戳更新。
+func (r *userShareRepository) ReviveShare(ctx context.Context, uid int64, id int64, expiresAt time.Time) error {
+	return r.dao.ExecuteWrite(ctx, uid, r, func(db *gorm.DB) error {
+		us := r.userShare(uid).UserShare
+		_, err := us.WithContext(ctx).Where(us.ID.Eq(id)).Updates(map[string]interface{}{
+			"status":     domain.UserShareStatusActive,
+			"expires_at": expiresAt,
+			"password":   "",
+			"updated_at": time.Now(),
+		})
+		return err
+	})
+}
+
 func (r *userShareRepository) UpdateResources(ctx context.Context, uid int64, id int64, resources map[string][]string) error {
 	return r.dao.ExecuteWrite(ctx, uid, r, func(db *gorm.DB) error {
 		us := r.userShare(uid).UserShare
