@@ -2386,7 +2386,7 @@ html.fns-arrived .shell{animation:fns-arrive-fade .55s cubic-bezier(.22,1,.36,1)
   padding:.5rem .95rem;
   border:1px solid var(--border);border-radius:.55rem;
   background:color-mix(in srgb,var(--muted) 30%,transparent);
-  color:var(--foreground);font-size:.8125rem;font-weight:500;
+  color:var(--foreground);font-family:inherit;font-size:.8125rem;font-weight:500;
   cursor:pointer;
   transition:color .16s ease,background-color .16s ease,border-color .16s ease;
 }
