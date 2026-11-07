@@ -4775,6 +4775,12 @@ function start(o){
   RUNNING=1;
   OPTS=o||{};
   if(SKIPPED){finish();return}
+  // The page may leave a scaling transform on .shell; a fixed descendant would anchor to it
+  // instead of the viewport. Move the overlay to body before measuring anything.
+  // 页面可能把缩放 transform 留在 .shell 上；fixed 后代因此会锚到它而不是视口。
+  // 在测量任何尺寸之前把遮罩挂到 body。
+  var ov=document.getElementById("warp-flight");
+  if(ov&&ov.parentNode!==document.body)document.body.appendChild(ov);
   var w=world();
   if(!w){finish();return}
   loadAvatar(OPTS.avatar);

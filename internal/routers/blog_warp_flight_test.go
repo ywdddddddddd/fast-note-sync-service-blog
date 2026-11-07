@@ -41,6 +41,11 @@ func TestWarpFlightAssetShape(t *testing.T) {
 		"uAvatar:{value:null},uAvatarMix:{value:0}",
 		"FRAME+dt*N6*2",
 		"warp-flight-stage",
+		// A transformed ancestor would anchor the fixed overlay to itself; the bundle must
+		// re-parent the overlay to body before it measures the stage.
+		//
+		// 带 transform 的祖先会把 fixed 遮罩锚到自身；包体必须在测量舞台之前把遮罩挂到 body。
+		"document.body.appendChild(ov)",
 	} {
 		if !strings.Contains(s, want) {
 			t.Errorf("bundle missing %q", want)

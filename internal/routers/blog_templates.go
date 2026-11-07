@@ -1355,6 +1355,9 @@ var blogPageTmpl = template.Must(template.New("blog-page").Funcs(blogAssetFuncs)
           </script>
         </div>
 
+        <!-- 遮罩运行时由脚本挂到 document.body：页面「穿越抵达」的缩放 transform 留在
+             .shell 上，而 fixed 元素在带 transform 的祖先里会锚到该祖先（只剩文章列宽）。
+             先挂 body 再取消 hidden，量到的才是视口尺寸。 -->
         <div class="warp-flight" id="warp-flight" hidden aria-hidden="true">
           <div class="warp-flight-stage" id="warp-flight-stage"></div>
           <div class="warp-flight-title" id="warp-flight-title"></div>
@@ -1398,6 +1401,10 @@ var blogPageTmpl = template.Must(template.New("blog-page").Funcs(blogAssetFuncs)
             var avatar = card.getAttribute('data-avatar') || '';
             if (still) { go(url); return; }
             current = url;
+            /* .shell 上可能残留「穿越抵达」的缩放 transform。带 transform 的祖先会让
+               position:fixed 锚到祖先而不是视口，遮罩会缩成文章列宽、艺术字被裁掉。
+               先挂到 body，再取消 hidden / 开始测量，遮罩才是整屏。 */
+            if (overlay.parentNode !== document.body) document.body.appendChild(overlay);
             title.textContent = '正在飞往（' + name + '）的星球';
             overlay.hidden = false;
             overlay.classList.add('is-on');

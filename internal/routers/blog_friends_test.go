@@ -329,6 +329,10 @@ func TestFriendsPageApplyFormAndFlight(t *testing.T) {
 	if !strings.Contains(out, "title.textContent = '正在飞往（' + name + '）的星球'") {
 		t.Error("flight title must be injected with textContent, not innerHTML")
 	}
+	// 遮罩必须在取消 hidden 之前挂到 body：带 transform 的祖先会把 fixed 锚到祖先。
+	if !strings.Contains(out, "document.body.appendChild(overlay)") {
+		t.Error("flight overlay must be re-parented to body before it is shown")
+	}
 }
 
 // TestFriendsBlockOnlyOnFriendsPage 别的页面即使带着数据也不渲染友链区块或复制按钮。
