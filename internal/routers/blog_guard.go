@@ -62,6 +62,22 @@ const (
 	blogReactPerMinute = 20
 	blogReactBurst     = 20
 
+	// blogFriendApplyPerHour is how many friend applications one address may submit per hour.
+	//
+	// Three, and the burst is the whole allowance: a person fills this form once, perhaps twice
+	// after a typo. There is no baseline script here to exempt loopback for — unlike ask and
+	// react, nothing local needs to fire a burst — so every address, including this machine,
+	// obeys the same bucket. That also makes the limit observable by hand: curl three times and
+	// the fourth is a 429.
+	//
+	// blogFriendApplyPerHour 是一个地址每小时可以提交的友链申请数。
+	//
+	// 取 3，burst 就是全部额度：人填这张表一次，最多因为写错再填一次。这里没有需要豁免回环的
+	// 基线脚本——与提问、表态不同，本地没有任何东西需要连发——因此包括本机在内，每个地址
+	// 都遵守同一个桶。这也让限制可以被手工观察：curl 三次，第四次就是 429。
+	blogFriendApplyPerHour = 3
+	blogFriendApplyBurst   = 3
+
 	// blogGuardIdleTTL is how long an idle visitor keeps its bucket.
 	//
 	// Without eviction the two maps grow with the number of distinct addresses ever seen, which
@@ -76,6 +92,18 @@ const (
 	// blogGuardSweepEvery throttles the eviction pass so it costs one map walk per minute at most.
 	// blogGuardSweepEvery 限制清理频率，使它的代价最多是每分钟一次全表遍历。
 	blogGuardSweepEvery = time.Minute
+
+	// blogFriendApplyIdleTTL keeps an application bucket for a full refill cycle and then some.
+	//
+	// It must exceed the one-hour refill window: an entry deleted at minute ten would come back
+	// full on the next request, turning "three per hour" into "three per visit". Two hours also
+	// covers a visitor who submits three times, sleeps an hour, and tries again.
+	//
+	// blogFriendApplyIdleTTL 让申请桶存活一个完整回填周期再多一点。
+	//
+	// 它必须超过一小时的窗口：第十分钟就被删掉的记录会在下一次请求时满额复活，
+	// 把「每小时三次」变成「每次访问三次」。两小时也覆盖「提交三次、隔一小时再试」的访客。
+	blogFriendApplyIdleTTL = 2 * time.Hour
 )
 
 // blogGuardEntry is one visitor's rate bucket, plus (in the ask map only) whether that visitor
@@ -100,9 +128,10 @@ type blogGuardEntry struct {
 type blogGuard struct {
 	mu sync.Mutex
 
-	asks   map[string]*blogGuardEntry // ask frequency buckets // 提问频次桶
-	reacts map[string]*blogGuardEntry // reaction frequency buckets // 表态频次桶
-	gens   map[string]*blogGuardEntry // generation locks (one answer per address) // 生成锁（每地址一次回答）
+	asks    map[string]*blogGuardEntry // ask frequency buckets // 提问频次桶
+	reacts  map[string]*blogGuardEntry // reaction frequency buckets // 表态频次桶
+	applies map[string]*blogGuardEntry // friend-application buckets // 友链申请频次桶
+	gens    map[string]*blogGuardEntry // generation locks (one answer per address) // 生成锁（每地址一次回答）
 
 	// votes dedups one reaction per (day, address, slug, kind). The day is stored with each
 	// key and compared on read, so yesterday's keys are dead on arrival and no timer is needed.
@@ -119,11 +148,12 @@ type blogGuard struct {
 // newBlogGuard 返回一个空的守卫。
 func newBlogGuard() *blogGuard {
 	return &blogGuard{
-		asks:   make(map[string]*blogGuardEntry),
-		reacts: make(map[string]*blogGuardEntry),
-		gens:   make(map[string]*blogGuardEntry),
-		votes:  make(map[string]struct{}),
-		now:    time.Now,
+		asks:    make(map[string]*blogGuardEntry),
+		reacts:  make(map[string]*blogGuardEntry),
+		applies: make(map[string]*blogGuardEntry),
+		gens:    make(map[string]*blogGuardEntry),
+		votes:   make(map[string]struct{}),
+		now:     time.Now,
 	}
 }
 
@@ -288,10 +318,24 @@ func isLoopbackAddr(host string) bool {
 // entryLocked returns (creating if needed) the entry for key in m. The caller holds g.mu.
 // entryLocked 返回 m 中 key 的记录（必要时创建）。调用方持有 g.mu。
 func (g *blogGuard) entryLocked(m map[string]*blogGuardEntry, key string, perMinute, burst int, now time.Time) *blogGuardEntry {
+	return g.entryLockedWithLimit(m, key, rate.Limit(float64(perMinute)/60.0), burst, now)
+}
+
+// entryLockedWithLimit is entryLocked for buckets whose rate is not expressed per minute.
+//
+// Friend applications are limited per hour, and passing 3 into the per-minute helper would mean
+// three per minute — an error of a factor of sixty in the direction that only shows up as "the
+// limiter never bites". Keeping the conversion at each call site makes the unit explicit.
+//
+// entryLockedWithLimit 供速率不以「每分钟」表达的桶使用。
+//
+// 友链申请按小时限流；把 3 传给按分钟的那个辅助函数会变成每分钟三次——一个六十倍的错误，
+// 而且只表现为「限流从不生效」。把换算留在调用处，让单位在每一处都写明白。
+func (g *blogGuard) entryLockedWithLimit(m map[string]*blogGuardEntry, key string, limit rate.Limit, burst int, now time.Time) *blogGuardEntry {
 	e, ok := m[key]
 	if !ok {
 		e = &blogGuardEntry{
-			lim: rate.NewLimiter(rate.Limit(float64(perMinute)/60.0), burst),
+			lim: rate.NewLimiter(limit, burst),
 		}
 		m[key] = e
 	}
@@ -314,13 +358,29 @@ func (g *blogGuard) sweepLocked(now time.Time) {
 		return
 	}
 	g.lastSweep = now
-	for _, m := range []map[string]*blogGuardEntry{g.asks, g.reacts, g.gens} {
-		for k, e := range m {
+	// Each map gets the idle window its rate needs. For the per-minute buckets ten minutes is
+	// generous. The application bucket is per hour, and evicting it while refilling would hand
+	// the same address a fresh full allowance — the limiter would silently reset every idle
+	// period, which is the one failure mode a limit must not have.
+	//
+	// 每张表使用其速率所需的空闲窗口。按分钟的三个桶，十分钟足够宽松。申请桶按小时，
+	// 在回填途中清掉它会让同一地址重新拿到满额——限流会随着每次空闲静默重置，
+	// 而这恰是限流最不能有的失效方式。
+	for _, bucket := range []struct {
+		m   map[string]*blogGuardEntry
+		ttl time.Duration
+	}{
+		{g.asks, blogGuardIdleTTL},
+		{g.reacts, blogGuardIdleTTL},
+		{g.gens, blogGuardIdleTTL},
+		{g.applies, blogFriendApplyIdleTTL},
+	} {
+		for k, e := range bucket.m {
 			if e.busy {
 				continue
 			}
-			if now.Sub(e.seen) > blogGuardIdleTTL {
-				delete(m, k)
+			if now.Sub(e.seen) > bucket.ttl {
+				delete(bucket.m, k)
 			}
 		}
 	}
@@ -443,6 +503,24 @@ func (g *blogGuard) allowReact(key, slug, kind string, delta int64) reactDecisio
 	return reactAllowed
 }
 
+// allowFriendApply reports whether this address may submit a friend application now.
+//
+// No loopback exemption, unlike allowAsk and allowReact. Those two exist because diagnostic and
+// baseline scripts run from this machine and fire bursts; nothing local does that for this form.
+// Keeping the rule uniform also means the operator can reproduce the 429 by hand.
+//
+// allowFriendApply 返回该地址此刻是否可以提交友链申请。
+//
+// 与 allowAsk、allowReact 不同，这里不豁免回环。那两处豁免是因为本机上的诊断与基线脚本会连发；
+// 这张表在本地没有任何这样的调用者。规则统一还意味着运维者能亲手复现 429。
+func (g *blogGuard) allowFriendApply(key string) bool {
+	now := g.now()
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.sweepLocked(now)
+	return g.entryLockedWithLimit(g.applies, key, rate.Limit(float64(blogFriendApplyPerHour)/3600.0), blogFriendApplyBurst, now).lim.AllowN(now, 1)
+}
+
 // resetVotesForTest clears accumulated state. Test-only helper.
 // resetVotesForTest 清除累计状态。仅供测试。
 func (g *blogGuard) resetForTest(now func() time.Time) {
@@ -450,6 +528,7 @@ func (g *blogGuard) resetForTest(now func() time.Time) {
 	defer g.mu.Unlock()
 	g.asks = make(map[string]*blogGuardEntry)
 	g.reacts = make(map[string]*blogGuardEntry)
+	g.applies = make(map[string]*blogGuardEntry)
 	g.gens = make(map[string]*blogGuardEntry)
 	g.votes = make(map[string]struct{})
 	g.lastSweep = time.Time{}

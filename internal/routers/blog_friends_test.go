@@ -210,6 +210,8 @@ func TestFriendsPageRendersCardsGroupsAndButton(t *testing.T) {
 		`href="https://zhangsan.example.com"`,
 		`target="_blank"`,
 		`rel="noopener noreferrer nofollow"`,
+		`data-name="张三"`,
+		`data-avatar="https://lisi.example.com/av.png"`,
 		`>张三<`,
 		`>记录生活与技术<`,
 		`class="friends-group-title">技术博客<`,
@@ -217,11 +219,15 @@ func TestFriendsPageRendersCardsGroupsAndButton(t *testing.T) {
 		`src="https://lisi.example.com/av.png"`,
 		`onerror="this.remove()"`,
 		`class="friends-copy"`,
-		"data-copy=\"" + copyText + "\"",
+		`复制本站信息，可添加友链`,
+		`data-copy="` + copyText + `"`,
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("friends page missing %q", want)
 		}
+	}
+	if strings.Contains(out, "想交换友链？复制本站信息后发给我。") {
+		t.Error("old copy hint must be gone")
 	}
 	// email 与 feed 只存不显示：它们不应出现在卡片标记里。
 	if strings.Contains(out, "zhangsan@example.com") {
@@ -278,6 +284,53 @@ func TestFriendsPageWithoutCardsKeepsButton(t *testing.T) {
 	}
 }
 
+// TestFriendsPageApplyFormAndFlight 友链页新增的两块：申请表单与飞行动画遮罩。
+//
+// The form's field names are the wire contract with POST /blog/friends/apply; the overlay's ids
+// are what the inline loader and warp_flight.js agree on. A typo in either would fail silently in
+// the browser, so both are asserted here.
+//
+// 表单的 name 是与 POST /blog/friends/apply 的线上契约；遮罩的 id 是内联加载器与
+// warp_flight.js 之间的约定。任一处写错在浏览器里都是静默失败，因此都在这里断言。
+func TestFriendsPageApplyFormAndFlight(t *testing.T) {
+	out := renderFriendsPage(t, blogPageView{
+		PageAlias: "friends",
+		FriendGroups: blogFriendGroups([]dto.BlogFriendDTO{
+			{Name: "小倪", URL: "https://ni.example.com", Avatar: "https://ni.example.com/a.png"},
+		}),
+		FriendsCopyText: "站名：Notes",
+	})
+	for _, want := range []string{
+		`id="friends-apply"`,
+		`name="name"`,
+		`name="url"`,
+		`name="avatar"`,
+		`name="desc"`,
+		`name="email"`,
+		`name="feed"`,
+		`name="message"`,
+		`class="friends-submit"`,
+		`>提交申请<`,
+		`已收到你的申请，通过后会出现在上面。`,
+		`/blog/friends/apply`,
+		`id="warp-flight"`,
+		`id="warp-flight-stage"`,
+		`id="warp-flight-title"`,
+		`/blog/assets/warp-flight.js?v=`,
+		`prefers-reduced-motion`,
+		`正在飞往（`,
+		`textContent`,
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("friends page missing %q", want)
+		}
+	}
+	// 站名必须经 textContent 注入，不能拼进 HTML 字符串。
+	if !strings.Contains(out, "title.textContent = '正在飞往（' + name + '）的星球'") {
+		t.Error("flight title must be injected with textContent, not innerHTML")
+	}
+}
+
 // TestFriendsBlockOnlyOnFriendsPage 别的页面即使带着数据也不渲染友链区块或复制按钮。
 func TestFriendsBlockOnlyOnFriendsPage(t *testing.T) {
 	out := renderFriendsPage(t, blogPageView{
@@ -287,11 +340,10 @@ func TestFriendsBlockOnlyOnFriendsPage(t *testing.T) {
 		}),
 		FriendsCopyText: "站名：Notes\n地址：https://x.example.com/blog\nRSS：https://x.example.com/blog/rss.xml",
 	})
-	if strings.Contains(out, `class="friends-copy"`) {
-		t.Error("about page must not render the friends copy button")
-	}
-	if strings.Contains(out, `class="friend-card"`) {
-		t.Error("about page must not render friend cards")
+	for _, forbidden := range []string{`class="friends-copy"`, `class="friend-card"`, `id="friends-apply"`, `id="warp-flight"`} {
+		if strings.Contains(out, forbidden) {
+			t.Errorf("about page must not render %s", forbidden)
+		}
 	}
 }
 

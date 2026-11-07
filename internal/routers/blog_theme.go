@@ -2407,6 +2407,85 @@ html.fns-arrived .shell{animation:fns-arrive-fade .55s cubic-bezier(.22,1,.36,1)
 }
 .friends-hint{font-size:.8125rem;color:var(--muted-foreground)}
 
+/* 申请表单。与上方「已经在这里的人」用一条分隔线分开：上面是结果，下面是入口。
+   控件沿用站内暗色变量，焦点态只加一层柔和外发光，不改变布局。 */
+.friends-form-wrap{margin:1.5rem 0 0;padding-top:1.2rem;border-top:1px solid var(--border)}
+.friends-form-title{
+  margin:0 0 .9rem;
+  font-size:.9375rem;font-weight:600;line-height:1.4;letter-spacing:.01em;
+  color:var(--foreground);
+}
+.friends-form-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.8rem .9rem}
+.friends-field{display:flex;flex-direction:column;gap:.35rem;min-width:0}
+.friends-field-wide{grid-column:1/-1}
+.friends-field-label{font-size:.8125rem;line-height:1.4;color:var(--muted-foreground)}
+.friends-field-label em{font-style:normal;color:#c2410c}
+.friends-field input,.friends-field textarea{
+  width:100%;box-sizing:border-box;
+  padding:.5rem .65rem;
+  border:1px solid var(--border);border-radius:.55rem;
+  background:color-mix(in srgb,var(--muted) 22%,transparent);
+  color:var(--foreground);
+  font-family:inherit;font-size:.875rem;line-height:1.5;
+  transition:border-color .16s ease,box-shadow .16s ease,background-color .16s ease;
+}
+.friends-field textarea{resize:vertical;min-height:5.2rem}
+.friends-field input::placeholder,.friends-field textarea::placeholder{color:color-mix(in srgb,var(--muted-foreground) 70%,transparent)}
+.friends-field input:focus,.friends-field textarea:focus{
+  outline:none;
+  border-color:color-mix(in srgb,var(--foreground) 30%,transparent);
+  background:color-mix(in srgb,var(--muted) 32%,transparent);
+  box-shadow:0 0 0 3px color-mix(in srgb,var(--foreground) 8%,transparent);
+}
+.friends-form-foot{display:flex;flex-wrap:wrap;align-items:center;gap:.75rem;margin-top:.9rem}
+.friends-submit{
+  display:inline-flex;align-items:center;
+  padding:.5rem .95rem;
+  border:1px solid var(--border);border-radius:.55rem;
+  background:color-mix(in srgb,var(--muted) 30%,transparent);
+  color:var(--foreground);font-family:inherit;font-size:.8125rem;font-weight:500;
+  cursor:pointer;
+  transition:color .16s ease,background-color .16s ease,border-color .16s ease,opacity .16s ease;
+}
+.friends-submit:hover{
+  background:color-mix(in srgb,var(--muted) 55%,transparent);
+  border-color:color-mix(in srgb,var(--foreground) 26%,transparent);
+}
+.friends-submit:disabled{opacity:.55;cursor:default}
+.friends-form-msg{font-size:.8125rem;line-height:1.5;color:var(--muted-foreground)}
+.friends-form-msg.is-error{color:#c2410c}
+.friends-form-done{
+  margin:0;padding:.65rem .75rem;
+  border:1px solid color-mix(in srgb,#2f7d4f 30%,transparent);border-radius:.55rem;
+  background:color-mix(in srgb,#2f7d4f 8%,transparent);
+  color:#2f7d4f;font-size:.875rem;line-height:1.6;
+}
+
+/* ── 飞行动画遮罩 ──────────────────────────────────────────────────── */
+/* 全屏黑底与样例页面同色（#02030a）。遮罩本身可点击，点击即跳过；
+   艺术字不接收指针事件，避免它挡住「点击画面」这一整块命中区域。 */
+.warp-flight{
+  position:fixed;inset:0;z-index:9999;
+  background:#02030a;opacity:0;transition:opacity .25s ease;
+  cursor:pointer;overflow:hidden;
+}
+.warp-flight[hidden]{display:none}
+.warp-flight.is-on{opacity:1}
+.warp-flight-stage{position:absolute;inset:0}
+.warp-flight-stage canvas{display:block;width:100%;height:100%}
+.warp-flight-title{
+  position:absolute;left:50%;bottom:11vh;transform:translateX(-50%);
+  width:min(92vw,52rem);text-align:center;
+  font-family:"Consolas","SFMono-Regular",monospace;
+  font-size:clamp(.875rem,2.4vw,1.25rem);
+  letter-spacing:.18em;line-height:1.6;
+  color:#7fdcff;
+  text-shadow:0 0 18px rgba(127,220,255,.55),0 0 42px rgba(64,150,220,.35);
+  pointer-events:none;user-select:none;
+}
+html.warp-flight-lock,body.warp-flight-lock{overflow:hidden}
+
+
 /* ── 三个排版容器 ──────────────────────────────────────────────────── */
 /* 容器是增强，不是前提：样式整体失效时，里面的 Markdown 仍会以普通段落与列表呈现，
    内容不会丢。这是这套设计必须满足的条件（见 blog_page_container.go）。 */
@@ -2525,6 +2604,7 @@ html.fns-arrived .shell{animation:fns-arrive-fade .55s cubic-bezier(.22,1,.36,1)
   /* 友链：手机上单列，申请按钮与说明改成上下排列，避免按钮被挤到说明文字右边。 */
   .friends-grid{grid-template-columns:minmax(0,1fr)}
   .friends-apply{flex-direction:column;align-items:flex-start}
+  .friends-form-grid{grid-template-columns:minmax(0,1fr)}
 }
 
 /* 打印：这一页最常见的动作就是打出来或存成 PDF。
@@ -2549,6 +2629,8 @@ html.fns-arrived .shell{animation:fns-arrive-fade .55s cubic-bezier(.22,1,.36,1)
   /* 友链：纸上的复制按钮没有意义；卡片去掉底色与悬停装饰，只留边框与链接文字；
      ↗ 也去掉——打印样式已经把正文链接展开成「文字 (地址)」，卡片本身就是地址。 */
   .friends-copy{display:none}
+  /* 纸上的申请表单没有意义：它不是内容，也没法填。动画遮罩同理。 */
+  .friends-form-wrap,.warp-flight{display:none}
   .friend-card{border-color:#999;background:none}
   .friend-name::after{content:none}
   h1,h2,h3{break-after:avoid;page-break-after:avoid}

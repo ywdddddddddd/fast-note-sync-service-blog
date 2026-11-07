@@ -117,6 +117,24 @@ type BlogConfig struct {
 	// MPSCode is the numeric code used by the official query page (the digits in the MPS number).
 	// MPSCode 是官方查询页使用的数字编码（即 MPS 号里的那串数字）。
 	MPSCode string `yaml:"mps-code"`
+
+	// BarkKey is the Bark device key that receives friend-application pushes.
+	//
+	// It is empty by default and must never be written into the repository: a device key is a
+	// credential that lets its holder push notifications to one phone. The deployment fills it
+	// into config.yaml; an empty value means applications are still stored, just not announced.
+	//
+	// BarkKey 是接收友链申请推送的 Bark 设备 key。
+	//
+	// 默认空，且绝不能写进仓库：设备 key 是一份能把通知推到某台手机上的凭据。部署时把它填进
+	// config.yaml；留空表示申请照常入库，只是不通知。
+	BarkKey string `yaml:"bark-key" default:""`
+
+	// BarkServer is the Bark API origin. The default is the official service; a self-hosted
+	// instance is a matter of pointing this at its origin, with no code change.
+	//
+	// BarkServer 是 Bark API 的源站。默认官方服务；自建实例只需把这里指向它的源站，无需改代码。
+	BarkServer string `yaml:"bark-server" default:"https://api.day.app"`
 }
 
 // DislikeBurst reports whether the dislike burst is enabled, defaulting to on.

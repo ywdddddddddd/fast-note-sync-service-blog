@@ -396,6 +396,28 @@ type BlogSiteInfoDTO struct {
 	Avatar string `json:"avatar,omitempty"`
 }
 
+// BlogFriendApplyDTO is the JSON body of POST /blog/friends/apply.
+//
+// It carries the same six fields as the copy card plus a free-text message: an applicant pastes
+// the card they were given and adds a note, so the shape deliberately matches what the friends
+// page already shows. Validation happens in the service layer (see ValidateBlogFriendApply), not
+// here — the DTO is only the wire shape.
+//
+// BlogFriendApplyDTO 是 POST /blog/friends/apply 的 JSON 请求体。
+//
+// 它携带与复制卡相同的六个字段，外加一段自由留言：申请人粘贴拿到的那张卡再补一句话，
+// 因此字段形状刻意与友链页已经展示的内容一致。校验在服务层（见 ValidateBlogFriendApply），
+// 不在这里——DTO 只是线上形状。
+type BlogFriendApplyDTO struct {
+	Name    string `json:"name"`
+	URL     string `json:"url"`
+	Avatar  string `json:"avatar"`
+	Desc    string `json:"desc"`
+	Email   string `json:"email"`
+	Feed    string `json:"feed"`
+	Message string `json:"message"`
+}
+
 // BlogPageDTO a rendered page note (about). A page is a note that carries a `page:` marker in its
 // frontmatter; it renders at an alias route and is kept out of the article list, the feed, the
 // graph and the statistics.

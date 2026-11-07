@@ -25,6 +25,7 @@ type Services struct {
 	CloudflareService  service.CloudflareService
 	SyncLogService     service.SyncLogService
 	OIDCService        service.OIDCService
+	FriendApplyService service.FriendApplyService
 }
 
 // initServices initializes all services
@@ -98,6 +99,12 @@ func initServices(cfg *AppConfig, infra *Infra, repos *Repositories, logger *zap
 	s.NoteHistoryService = service.NewNoteHistoryService(repos.NoteHistoryRepo, repos.NoteRepo, repos.UserRepo, s.VaultService, s.FolderService, s.NoteService, s.BackupService, s.GitSyncService, logger, &svcConfig.App)
 	s.ConflictService = service.NewConflictService(repos.NoteRepo, s.VaultService, logger)
 	s.ShareService = service.NewShareService(repos.ShareRepo, infra.TokenManager, repos.NoteRepo, repos.NoteLinkRepo, repos.FileRepo, repos.VaultRepo, repos.NoteFTSRepo, logger, svcConfig)
+	// Friend applications use the blog section directly rather than a copy in ServiceConfig:
+	// the only values they need are the Bark key and server, both of which live there.
+	//
+	// 友链申请直接使用 blog 配置段，而不是在 ServiceConfig 里再抄一份：
+	// 它只需要 Bark key 与服务器地址，两者都在那里。
+	s.FriendApplyService = service.NewFriendApplyService(repos.FriendApplyRepo, logger, &cfg.Blog)
 	s.NoteLinkService = service.NewNoteLinkService(repos.NoteLinkRepo, repos.NoteRepo, s.VaultService)
 	s.CloudflareService = service.NewCloudflareService(logger)
 

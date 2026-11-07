@@ -151,6 +151,17 @@ func registerBlogRoutes(r *gin.Engine, appContainer *app.App) {
 		c.JSON(http.StatusOK, tally)
 	})
 
+	// Friend applications: the one public write that reaches the database rather than a counter.
+	// Registered before "/blog/:slug" like every other literal endpoint.
+	//
+	// 友链申请：唯一一个会写数据库而不是改计数器的公开写接口。
+	// 与其它字面端点一样，注册在 "/blog/:slug" 之前。
+	registerBlogFriendApplyRoutes(blog, appContainer, ident)
+
+	// The friends page animation bundle and the avatar proxy behind its planet texture.
+	// 友链页动画包，以及它星球贴图背后的头像代理。
+	registerBlogFlightRoutes(blog, appContainer)
+
 	// Lottie assets for the three-state theme button. Registered before "/blog/:slug" for the same
 	// literal-segment reason as the feed: "lottie.js" is a file, not a note.
 	//
@@ -234,7 +245,7 @@ func registerBlogRoutes(r *gin.Engine, appContainer *app.App) {
 			return
 		}
 		siteTitle := blogSiteTitle(cfg.Title)
-	icp, mps, mpCode := blogFiling(cfg)
+		icp, mps, mpCode := blogFiling(cfg)
 		uid := blogUID(cfg.UID)
 		base := blogBaseURL(c, appContainer)
 
@@ -415,7 +426,7 @@ func registerBlogRoutes(r *gin.Engine, appContainer *app.App) {
 			return
 		}
 		siteTitle := blogSiteTitle(cfg.Title)
-	icp, mps, mpCode := blogFiling(cfg)
+		icp, mps, mpCode := blogFiling(cfg)
 		uid := blogUID(cfg.UID)
 		// baseURL is needed again, but for a different reason than before: canonical / og:url /
 		// JSON-LD / the feed link must all be absolute. The article page still does not assemble

@@ -1208,7 +1208,7 @@ var blogPageTmpl = template.Must(template.New("blog-page").Funcs(blogAssetFuncs)
             {{if .Title}}<h2 class="friends-group-title">{{.Title}}</h2>{{end}}
             <div class="friends-grid">
               {{range .Friends}}
-              <a class="friend-card" href="{{.URL}}" target="_blank" rel="noopener noreferrer nofollow">
+              <a class="friend-card" href="{{.URL}}" target="_blank" rel="noopener noreferrer nofollow" data-name="{{.Name}}" data-avatar="{{.Avatar}}">
                 <span class="friend-avatar" aria-hidden="true"><span class="friend-initial">{{.Initial}}</span>{{if .Avatar}}<img src="{{.Avatar}}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" onerror="this.remove()">{{end}}</span>
                 <span class="friend-main">
                   <span class="friend-name">{{.Name}}</span>
@@ -1221,7 +1221,7 @@ var blogPageTmpl = template.Must(template.New("blog-page").Funcs(blogAssetFuncs)
           {{end}}
           <div class="friends-apply">
             <button type="button" class="friends-copy" data-copy="{{.FriendsCopyText}}">复制本站信息</button>
-            <span class="friends-hint">想交换友链？复制本站信息后发给我。</span>
+            <span class="friends-hint">复制本站信息，可添加友链</span>
           </div>
           <script>
           /* 「复制本站信息」：优先用 Clipboard API，被拒绝或不可用时退回 execCommand。
@@ -1270,7 +1270,165 @@ var blogPageTmpl = template.Must(template.New("blog-page").Funcs(blogAssetFuncs)
             });
           })();
           </script>
+
+          <div class="friends-form-wrap">
+            <form class="friends-form" id="friends-apply" novalidate>
+              <h2 class="friends-form-title">申请友链</h2>
+              <div class="friends-form-grid">
+                <label class="friends-field"><span class="friends-field-label">站名 <em>*</em></span><input type="text" name="name" maxlength="60" required autocomplete="organization"></label>
+                <label class="friends-field"><span class="friends-field-label">链接 <em>*</em></span><input type="url" name="url" maxlength="300" required inputmode="url" autocomplete="url" placeholder="https://"></label>
+                <label class="friends-field"><span class="friends-field-label">头像</span><input type="url" name="avatar" maxlength="300" inputmode="url" placeholder="https://"></label>
+                <label class="friends-field"><span class="friends-field-label">描述</span><input type="text" name="desc" maxlength="120"></label>
+                <label class="friends-field"><span class="friends-field-label">邮箱</span><input type="email" name="email" maxlength="120" autocomplete="email"></label>
+                <label class="friends-field"><span class="friends-field-label">订阅</span><input type="url" name="feed" maxlength="300" inputmode="url" placeholder="https://"></label>
+                <label class="friends-field friends-field-wide"><span class="friends-field-label">留言</span><textarea name="message" rows="3" maxlength="300"></textarea></label>
+              </div>
+              <div class="friends-form-foot">
+                <button type="submit" class="friends-submit">提交申请</button>
+                <span class="friends-form-msg" id="friends-apply-msg" role="status" aria-live="polite"></span>
+              </div>
+            </form>
+            <p class="friends-form-done" id="friends-apply-done" hidden>已收到你的申请，通过后会出现在上面。</p>
+          </div>
+
+          <script>
+          /* 友链申请：提交 JSON，成功就地把表单换成一句话；错误用服务端返回的中文消息。
+             只服务于友链页，因此跟着区块一起渲染，与复制按钮同一风格。 */
+          (function () {
+            var form = document.getElementById('friends-apply');
+            if (!form) return;
+            var done = document.getElementById('friends-apply-done');
+            var msg = document.getElementById('friends-apply-msg');
+            var btn = form.querySelector('.friends-submit');
+            var label = btn ? btn.textContent : '';
+            var FIELDS = ['name', 'url', 'avatar', 'desc', 'email', 'feed', 'message'];
+
+            function setMsg(text, bad) {
+              if (!msg) return;
+              msg.textContent = text || '';
+              msg.classList.toggle('is-error', !!bad);
+            }
+
+            function payload() {
+              var out = {};
+              Array.prototype.forEach.call(FIELDS, function (key) {
+                var el = form.elements[key];
+                out[key] = el && el.value ? el.value.trim() : '';
+              });
+              return out;
+            }
+
+            function busy(on) {
+              if (!btn) return;
+              btn.disabled = !!on;
+              btn.textContent = on ? '提交中…' : label;
+            }
+
+            form.addEventListener('submit', function (ev) {
+              ev.preventDefault();
+              setMsg('');
+              busy(true);
+              fetch('/blog/friends/apply', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload())
+              }).then(function (res) {
+                return res.text().then(function (text) {
+                  var data = null;
+                  try { data = text ? JSON.parse(text) : null; } catch (e) { data = null; }
+                  return { ok: res.ok, data: data };
+                });
+              }).then(function (res) {
+                busy(false);
+                if (res.ok) {
+                  form.hidden = true;
+                  if (done) done.hidden = false;
+                  return;
+                }
+                setMsg((res.data && res.data.error) || '提交失败，请稍后再试', true);
+              }, function () {
+                busy(false);
+                setMsg('网络异常，请稍后再试', true);
+              });
+            });
+          })();
+          </script>
         </div>
+
+        <div class="warp-flight" id="warp-flight" hidden aria-hidden="true">
+          <div class="warp-flight-stage" id="warp-flight-stage"></div>
+          <div class="warp-flight-title" id="warp-flight-title"></div>
+        </div>
+        <script>
+        /* 点击友链卡片 → 播放「星际穿越」→ 白闪后同标签页跳转。
+           页面只负责遮罩、艺术字与加载器；动画本体在 /blog/assets/warp-flight.js。
+           任何一步失败都直接跳转：过渡是锦上添花，不能成为去不了对方站点的原因。
+           reduced-motion 直接跳转，不下载 3.2 MB 的动画包。 */
+        (function () {
+          var still = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+          var overlay = document.getElementById('warp-flight');
+          var stage = document.getElementById('warp-flight-stage');
+          var title = document.getElementById('warp-flight-title');
+          var cards = document.querySelectorAll('.friend-card');
+          if (!overlay || !stage || !title || !cards.length) return;
+
+          var loading = false, failed = false, current = null;
+
+          function go(url) { if (url) window.location.href = url; }
+
+          function lock(on) { document.body.classList.toggle('warp-flight-lock', !!on); }
+
+          function ensureFlight(cb) {
+            if (window.__WFLIGHT) { cb(true); return; }
+            if (failed) { cb(false); return; }
+            if (loading) return;
+            loading = true;
+            var s = document.createElement('script');
+            s.src = '/blog/assets/warp-flight.js?v={{assetVer}}';
+            s.async = true;
+            s.onload = function () { loading = false; cb(!!window.__WFLIGHT); };
+            s.onerror = function () { failed = true; loading = false; cb(false); };
+            document.head.appendChild(s);
+          }
+
+          function fly(card) {
+            var url = card.getAttribute('href') || '';
+            if (!url) return;
+            var name = card.getAttribute('data-name') || '';
+            var avatar = card.getAttribute('data-avatar') || '';
+            if (still) { go(url); return; }
+            current = url;
+            title.textContent = '正在飞往（' + name + '）的星球';
+            overlay.hidden = false;
+            overlay.classList.add('is-on');
+            lock(true);
+            ensureFlight(function (ok) {
+              if (!ok) { go(url); return; }
+              try {
+                window.__WFLIGHT.start({ name: name, url: url, avatar: avatar });
+              } catch (e) {
+                go(url);
+              }
+            });
+          }
+
+          Array.prototype.forEach.call(cards, function (card) {
+            card.addEventListener('click', function (ev) {
+              if (ev.defaultPrevented || ev.button !== 0 || ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.altKey) return;
+              if (!card.getAttribute('href')) return;
+              ev.preventDefault();
+              fly(card);
+            });
+          });
+
+          /* 点击画面随时跳过；skip 在 start 之前调用也安全——
+             动画脚本会看到 SKIPPED，并在 init 完成时直接触发完成回调。 */
+          overlay.addEventListener('click', function () {
+            if (window.__WFLIGHT && window.__WFLIGHT.skip) { window.__WFLIGHT.skip(); }
+            else { go(current); }
+          });
+        })();
+        </script>
         {{end}}
       </article>
     </main>

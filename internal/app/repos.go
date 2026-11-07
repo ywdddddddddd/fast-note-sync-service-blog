@@ -24,6 +24,7 @@ type Repositories struct {
 	AuthTokenRepo    domain.AuthTokenRepository
 	AuthTokenLogRepo domain.AuthTokenLogRepository
 	OIDCIdentityRepo domain.OIDCIdentityRepository
+	FriendApplyRepo  domain.FriendApplyRepository
 }
 
 // initRepositories initializes all repositories
@@ -46,5 +47,6 @@ func initRepositories(d *dao.Dao) *Repositories {
 		AuthTokenRepo:    dao.NewAuthTokenRepository(d),
 		AuthTokenLogRepo: dao.NewAuthTokenLogRepository(d),
 		OIDCIdentityRepo: dao.NewOIDCIdentityRepository(d),
+		FriendApplyRepo:  dao.NewFriendApplyRepository(d),
 	}
 }
