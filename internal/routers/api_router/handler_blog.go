@@ -74,6 +74,10 @@ func (h *BlogHandler) snapshot(c *gin.Context) *dto.BlogConfigDTO {
 		MaxGraphNodes:   cfg.MaxGraphNodes,
 		ShowGraph:       cfg.ShowGraph != nil && *cfg.ShowGraph,
 		LocalGraphDepth: clampBlogDepth(cfg.LocalGraphDepth),
+
+		FeedMode:       blogFeedModeOrDefault(cfg.FeedMode),
+		FeedRecentDays: clampBlogFeedDays(cfg.FeedRecentDays),
+		FeedMaxItems:   clampBlogFeedMaxItems(cfg.FeedMaxItems),
 	}
 }
 
@@ -92,6 +96,11 @@ const (
 	blogMaxGraphNodes = 400
 	blogMinLocalDepth = 1
 	blogMaxLocalDepth = 3
+
+	blogMinFeedDays  = 1
+	blogMaxFeedDays  = 365
+	blogMinFeedItems = 1
+	blogMaxFeedItems = 50
 )
 
 // blogGraphScopeOrDefault normalises the scope, defaulting to the private option.
@@ -122,6 +131,49 @@ func clampBlogDepth(d int) int {
 		return blogMaxLocalDepth
 	}
 	return d
+}
+
+// blogFeedModeOrDefault normalises the feed mode, defaulting to the narrower option.
+//
+// An unset or unrecognised value resolves to "recent" — the mode that keeps a first subscribe
+// light. Same reasoning as blogGraphScopeOrDefault: a hand-edited config must not be able to
+// widen what leaves the server by accident.
+//
+// blogFeedModeOrDefault 规范化订阅源模式，默认取更收敛的选项。
+//
+// 未设置或无法识别的值解析为 "recent"——让首次订阅保持轻量的那个模式。理由同
+// blogGraphScopeOrDefault：手工编辑的配置不应能意外放宽服务端的输出。
+func blogFeedModeOrDefault(mode string) string {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "all":
+		return "all"
+	default:
+		return "recent"
+	}
+}
+
+// clampBlogFeedDays keeps the recent window inside 1..365 days.
+// clampBlogFeedDays 把时间窗限制在 1..365 天。
+func clampBlogFeedDays(d int) int {
+	if d < blogMinFeedDays {
+		return blogMinFeedDays
+	}
+	if d > blogMaxFeedDays {
+		return blogMaxFeedDays
+	}
+	return d
+}
+
+// clampBlogFeedMaxItems keeps the per-feed entry cap inside 1..50.
+// clampBlogFeedMaxItems 把每份源的条数上限限制在 1..50。
+func clampBlogFeedMaxItems(n int) int {
+	if n < blogMinFeedItems {
+		return blogMinFeedItems
+	}
+	if n > blogMaxFeedItems {
+		return blogMaxFeedItems
+	}
+	return n
 }
 
 // GetConfig returns the current blog configuration
@@ -206,6 +258,39 @@ func (h *BlogHandler) UpdateConfig(c *gin.Context) {
 			return
 		}
 		cfg.LocalGraphDepth = d
+	}
+
+	// Feed fields follow the same validate-then-assign pattern. The mode defaults narrow on an
+	// unknown value elsewhere (snapshot), but here an explicit bad value is rejected so the
+	// panel gets an honest error instead of a silent switch to "recent".
+	//
+	// 订阅源字段沿用同样的先校验后赋值。未知模式在 snapshot 处会兜底收敛，但这里对显式的
+	// 非法值直接报错，让面板拿到诚实的错误提示，而不是被静默切成 "recent"。
+	if params.FeedMode != nil {
+		mode := strings.ToLower(strings.TrimSpace(*params.FeedMode))
+		if mode != "recent" && mode != "all" {
+			response.ToResponse(code.ErrorInvalidParams.WithDetails(`feedMode must be "recent" or "all"`))
+			return
+		}
+		cfg.FeedMode = mode
+	}
+	if params.FeedRecentDays != nil {
+		d := *params.FeedRecentDays
+		if d < blogMinFeedDays || d > blogMaxFeedDays {
+			response.ToResponse(code.ErrorInvalidParams.WithDetails(
+				fmt.Sprintf("feedRecentDays must be between %d and %d", blogMinFeedDays, blogMaxFeedDays)))
+			return
+		}
+		cfg.FeedRecentDays = d
+	}
+	if params.FeedMaxItems != nil {
+		n := *params.FeedMaxItems
+		if n < blogMinFeedItems || n > blogMaxFeedItems {
+			response.ToResponse(code.ErrorInvalidParams.WithDetails(
+				fmt.Sprintf("feedMaxItems must be between %d and %d", blogMinFeedItems, blogMaxFeedItems)))
+			return
+		}
+		cfg.FeedMaxItems = n
 	}
 
 	// Persist so the setting survives a restart.

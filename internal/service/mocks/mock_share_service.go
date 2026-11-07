@@ -97,8 +97,8 @@ func (m *MockShareService) GetBlogAccessLog(ctx context.Context, days, limit int
 
 // GetBlogFeed returns the newest published articles with rendered bodies.
 // GetBlogFeed 返回最新的已发布文章及渲染好的正文。
-func (m *MockShareService) GetBlogFeed(ctx context.Context, uid int64, baseURL string, limit int) ([]*service.BlogFeedEntry, error) {
-	args := m.Called(ctx, uid, baseURL, limit)
+func (m *MockShareService) GetBlogFeed(ctx context.Context, uid int64, baseURL string, opts service.BlogFeedOptions) ([]*service.BlogFeedEntry, error) {
+	args := m.Called(ctx, uid, baseURL, opts)
 	if v := args.Get(0); v != nil {
 		return v.([]*service.BlogFeedEntry), args.Error(1)
 	}

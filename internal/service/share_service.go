@@ -159,9 +159,11 @@ type ShareService interface {
 	GetBlogAccessLog(ctx context.Context, days, limit int) (*BlogAccessLogPage, error)
 
 	// GetBlogFeed returns the newest published articles with their full rendered bodies, ready to
-	// be encoded as an RSS document.
+	// be encoded as an RSS document. The options pick the section, the recency window and the
+	// entry cap — see BlogFeedOptions.
 	// GetBlogFeed 返回最新的已发布文章及其渲染好的完整正文，可直接编码为 RSS 文档。
-	GetBlogFeed(ctx context.Context, uid int64, baseURL string, limit int) ([]*BlogFeedEntry, error)
+	// 选项决定版块、时间窗与条数上限——见 BlogFeedOptions。
+	GetBlogFeed(ctx context.Context, uid int64, baseURL string, opts BlogFeedOptions) ([]*BlogFeedEntry, error)
 
 	// GetBlogReactions returns the like/dislike tallies and the run-total visit count.
 	// GetBlogReactions 返回赞/踩计数与累计访问次数。

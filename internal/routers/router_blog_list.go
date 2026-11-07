@@ -96,7 +96,10 @@ func serveBlogList(c *gin.Context, appContainer *app.App, shareSvc service.Share
 			Indexable:   blogIndexable(cfg.Indexable),
 			Canonical:   canonical,
 			Description: desc,
-			FeedURL:     strings.TrimRight(base, "/") + "/blog/rss.xml",
+			// 栏目页自动发现自己的源：栏目源收录的正是本页列出的文章，在这里订阅即订阅这个栏目。
+			// A section page autodiscovers its own feed: the section feed carries exactly the
+			// articles this page lists, so subscribing here subscribes to the section.
+			FeedURL:     blogFeedURL(base, section),
 			CSS:         template.CSS(blogCSS),
 			Pages:       nil,
 			HasShelf:    shelfHasBooks(),

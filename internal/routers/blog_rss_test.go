@@ -27,7 +27,7 @@ func TestBuildBlogFeedIsWellFormed(t *testing.T) {
 		},
 	}
 
-	body, err := buildBlogFeed(entries, "问道", "https://yaowendao.asia")
+	body, err := buildBlogFeed(entries, "问道", "https://yaowendao.asia", "https://yaowendao.asia/blog/rss.xml")
 	if err != nil {
 		t.Fatalf("buildBlogFeed: %v", err)
 	}
@@ -75,7 +75,7 @@ func TestBuildBlogFeedDeclaresContentNamespace(t *testing.T) {
 	body, err := buildBlogFeed([]*service.BlogFeedEntry{{
 		Title: "t", Link: "https://x/blog/1", GUID: "https://x/blog/1",
 		ContentHTML: "<p>x</p>",
-	}}, "问道", "https://x")
+	}}, "问道", "https://x", "https://x/blog/rss.xml")
 	if err != nil {
 		t.Fatalf("buildBlogFeed: %v", err)
 	}
@@ -100,7 +100,7 @@ func TestBuildBlogFeedSurvivesCDATATerminator(t *testing.T) {
 	body, err := buildBlogFeed([]*service.BlogFeedEntry{{
 		Title: "t", Link: "https://x/blog/1", GUID: "https://x/blog/1",
 		ContentHTML: "<p>a]]>b</p>",
-	}}, "问道", "https://x")
+	}}, "问道", "https://x", "https://x/blog/rss.xml")
 	if err != nil {
 		t.Fatalf("buildBlogFeed: %v", err)
 	}
@@ -144,7 +144,7 @@ func TestBuildBlogFeedKeepsGUIDStable(t *testing.T) {
 		Title: "t",
 		Link:  "https://x/blog/1.2-abcd?from=rss",
 		GUID:  "https://x/blog/1.2-abcd",
-	}}, "问道", "https://x")
+	}}, "问道", "https://x", "https://x/blog/rss.xml")
 
 	s := string(body)
 	if !strings.Contains(s, `<link>https://x/blog/1.2-abcd?from=rss</link>`) {
@@ -158,21 +158,26 @@ func TestBuildBlogFeedKeepsGUIDStable(t *testing.T) {
 	}
 }
 
-// lastBuildDate must describe when the document was generated, not the newest item's date.
+// lastBuildDate must repeat the newest item's pubDate, not the build moment. The feed's
+// conditional-GET story rests on "same content means same bytes and same stamps": a build-time
+// stamp would drift on every rebuild and an If-Modified-Since reader would re-download identical
+// documents forever.
 //
-// lastBuildDate 必须描述文档生成的时间，而不是最新条目的日期。
-func TestBuildBlogFeedLastBuildDateIsNow(t *testing.T) {
+// lastBuildDate 必须重复最新条目的 pubDate，而不是文档生成的时刻。订阅源的条件请求体系
+// 建立在「内容相同则字节与戳都相同」之上：构建时刻的戳会随每次重建漂移，
+// 使 If-Modified-Since 阅读器永远在重复下载一模一样的文档。
+func TestBuildBlogFeedLastBuildDateIsNewestItem(t *testing.T) {
 	body, _ := buildBlogFeed([]*service.BlogFeedEntry{{
 		Title: "t", Link: "https://x/blog/1", GUID: "https://x/blog/1",
 		Published: "2020-01-01",
-	}}, "问道", "https://x")
+	}}, "问道", "https://x", "https://x/blog/rss.xml")
 
 	s := string(body)
 	// Extract the element rather than searching the whole document: the item's pubDate also
 	// contains "Wed, 01 Jan 2020", so a bare Contains() reports success no matter what
-	// lastBuildDate holds — which is exactly how this test passed while the bug was present.
-	// 要取元素内容而不是全文搜索：条目的 pubDate 里同样含 "Wed, 01 Jan 2020"，因此裸用
-	// Contains() 无论 lastBuildDate 是什么都会通过——这个 bug 存在时测试正是这样通过了的。
+	// lastBuildDate holds.
+	// 要取元素内容而不是全文搜索：条目的 pubDate 里同样含 "Wed, 01 Jan 2020"，
+	// 裸用 Contains() 无论 lastBuildDate 是什么都会通过。
 	const open, close = "<lastBuildDate>", "</lastBuildDate>"
 	i := strings.Index(s, open)
 	j := strings.Index(s, close)
@@ -180,29 +185,53 @@ func TestBuildBlogFeedLastBuildDateIsNow(t *testing.T) {
 		t.Fatalf("缺少 lastBuildDate\n%s", s)
 	}
 	got := s[i+len(open) : j]
-	if got == "Wed, 01 Jan 2020 00:00:00 +0000" {
-		t.Error("lastBuildDate 仍在复用最新条目的日期")
-	}
-	if !strings.Contains(got, "+0000") {
-		t.Errorf("lastBuildDate 不是 RFC1123Z 格式: %q", got)
+	if got != "Wed, 01 Jan 2020 00:00:00 +0000" {
+		t.Errorf("lastBuildDate = %q, want 最新条目的 pubDate", got)
 	}
 }
 
-// The cap is what keeps a full-text feed from becoming a megabyte per poll.
-// 上限是全文订阅源不会变成每次轮询一兆字节的原因。
-func TestBuildBlogFeedCapsItems(t *testing.T) {
-	entries := make([]*service.BlogFeedEntry, 0, blogFeedMaxItems+10)
-	for i := 0; i < blogFeedMaxItems+10; i++ {
+// A rebuild must not change the document when nothing changed: lastBuildDate moving with the
+// build clock (the old behaviour) would break exactly that.
+//
+// 内容不变时重建不得改变文档：旧行为里 lastBuildDate 随构建时钟漂移，破坏的正是这一点。
+func TestBuildBlogFeedBytesAreStable(t *testing.T) {
+	entries := []*service.BlogFeedEntry{{
+		Title: "t", Link: "https://x/blog/1", GUID: "https://x/blog/1",
+		Published: "2020-01-01",
+		Summary:   "摘要",
+	}}
+	a, err := buildBlogFeed(entries, "问道", "https://x", "https://x/blog/rss.xml")
+	if err != nil {
+		t.Fatalf("first build: %v", err)
+	}
+	b, err := buildBlogFeed(entries, "问道", "https://x", "https://x/blog/rss.xml")
+	if err != nil {
+		t.Fatalf("second build: %v", err)
+	}
+	if string(a) != string(b) {
+		t.Error("相同输入产生了不同的文档字节——ETag/304 的稳定性会被打破")
+	}
+}
+
+// buildBlogFeed encodes every entry it receives; the entry cap is GetBlogFeed's job, applied
+// against the configured BlogFeedOptions.MaxItems. This test pins the division of labour: the
+// encoder must not silently re-implement a cap the caller already applied.
+//
+// buildBlogFeed 把收到的条目全部编码；条数上限是 GetBlogFeed 的职责，按配置的
+// BlogFeedOptions.MaxItems 执行。本测试钉住分工：编码器不得再静默实现一遍调用方已完成的截断。
+func TestBuildBlogFeedEncodesEveryEntry(t *testing.T) {
+	entries := make([]*service.BlogFeedEntry, 0, 25)
+	for i := 0; i < 25; i++ {
 		entries = append(entries, &service.BlogFeedEntry{
 			Title: "t", Link: "https://x/blog/1", GUID: "https://x/blog/1",
 		})
 	}
-	body, err := buildBlogFeed(entries, "问道", "https://x")
+	body, err := buildBlogFeed(entries, "问道", "https://x", "https://x/blog/rss.xml")
 	if err != nil {
 		t.Fatalf("buildBlogFeed: %v", err)
 	}
-	if got := strings.Count(string(body), "<item>"); got != blogFeedMaxItems {
-		t.Errorf("item 数 = %d, want %d", got, blogFeedMaxItems)
+	if got := strings.Count(string(body), "<item>"); got != 25 {
+		t.Errorf("item 数 = %d, want 25（截断是 GetBlogFeed 的职责）", got)
 	}
 }
 
@@ -214,7 +243,7 @@ func TestBuildBlogFeedPublishesExcerptWhenBodyMissing(t *testing.T) {
 	body, err := buildBlogFeed([]*service.BlogFeedEntry{{
 		Title: "只有摘要", Link: "https://x/blog/1", GUID: "https://x/blog/1",
 		Summary: "这是摘要",
-	}}, "问道", "https://x")
+	}}, "问道", "https://x", "https://x/blog/rss.xml")
 	if err != nil {
 		t.Fatalf("buildBlogFeed: %v", err)
 	}
@@ -237,7 +266,7 @@ func TestBuildBlogFeedCarriesCover(t *testing.T) {
 		Title: "有封面", Link: "https://x/blog/1", GUID: "https://x/blog/1",
 		CoverURL:  "https://x/api/share/file?id=7&share_token=t",
 		CoverMIME: "image/png",
-	}}, "问道", "https://x")
+	}}, "问道", "https://x", "https://x/blog/rss.xml")
 	if err != nil {
 		t.Fatalf("buildBlogFeed: %v", err)
 	}
@@ -295,7 +324,7 @@ func TestBuildBlogFeedCarriesCover(t *testing.T) {
 func TestBuildBlogFeedOmitsCoverWhenAbsent(t *testing.T) {
 	body, err := buildBlogFeed([]*service.BlogFeedEntry{{
 		Title: "无图", Link: "https://x/blog/1", GUID: "https://x/blog/1",
-	}}, "问道", "https://x")
+	}}, "问道", "https://x", "https://x/blog/rss.xml")
 	if err != nil {
 		t.Fatalf("buildBlogFeed: %v", err)
 	}
@@ -317,7 +346,7 @@ func TestBuildBlogFeedMarksVideoCover(t *testing.T) {
 		Title: "视频封面", Link: "https://x/blog/1", GUID: "https://x/blog/1",
 		CoverURL:  "https://x/api/share/file?id=8&share_token=t",
 		CoverMIME: "video/mp4",
-	}}, "问道", "https://x")
+	}}, "问道", "https://x", "https://x/blog/rss.xml")
 	if err != nil {
 		t.Fatalf("buildBlogFeed: %v", err)
 	}

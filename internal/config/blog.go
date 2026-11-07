@@ -61,6 +61,33 @@ type BlogConfig struct {
 	// 用指针而不是布尔值，使「未设置」与「显式关闭」可区分，默认值也能在手工编辑删掉该键时存活。
 	DislikeBurstEnabled *bool `yaml:"dislike-burst" default:"true"`
 
+	// FeedMode decides which articles enter /blog/rss.xml and the per-section feeds:
+	//   "recent" (default) — only articles created within FeedRecentDays
+	//   "all"              — every published article, newest first
+	// The window matters for friendly-link syndication: a new subscriber should see a small
+	// burst, not the whole archive. With FeedMaxItems this is the standard stateless way to
+	// keep a first fetch light; RSS itself has no notion of "who is new".
+	//
+	// FeedMode 决定哪些文章进入 /blog/rss.xml 与各栏目订阅源：
+	//   "recent"（默认）—— 只收最近 FeedRecentDays 天内创建的文章
+	//   "all"           —— 全部已发布文章，按新到旧
+	// 时间窗对友链场景很关键：新订阅者看到的应该是一小批，而不是整个归档。
+	// 它与 FeedMaxItems 一起构成「首次拉取保持轻量」的标准无状态做法——RSS 协议本身
+	// 没有谁是新订阅者的概念。
+	FeedMode string `yaml:"feed-mode" default:"recent"`
+
+	// FeedRecentDays is the "recent" window in days (clamped to 1..365 on read/update).
+	// FeedRecentDays 是 recent 模式的时间窗（天），读取与更新时夹取在 1..365。
+	FeedRecentDays int `yaml:"feed-recent-days" default:"30"`
+
+	// FeedMaxItems caps how many entries any feed carries (clamped to 1..50).
+	// Five (the default) keeps a first subscribe to ~5 items; conditional GET (ETag/304) keeps
+	// the unchanged polls between updates at zero bytes.
+	//
+	// FeedMaxItems 限制每份订阅源的条数（读取与更新时夹取在 1..50）。
+	// 默认 5 让首次订阅最多看到 5 条；条件请求（ETag/304）让两次更新之间的轮询零流量。
+	FeedMaxItems int `yaml:"feed-max-items" default:"5"`
+
 	// ICP is the site's ICP filing number, rendered in the footer as a link to beian.miit.gov.cn.
 	//
 	// Empty means "render nothing" — which is the right default for an open-source project:

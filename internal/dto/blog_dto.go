@@ -632,6 +632,16 @@ type BlogConfigDTO struct {
 	MaxGraphNodes   int    `json:"maxGraphNodes"`   // Node budget for the global graph // 全站图谱节点上限
 	ShowGraph       bool   `json:"showGraph"`       // Render graphs at all // 是否渲染图谱
 	LocalGraphDepth int    `json:"localGraphDepth"` // Default article-graph depth, 1..3 // 文章图谱默认深度
+
+	// Feed settings for /blog/rss.xml and the per-section feeds. Same story as the graph
+	// block: config.yaml-only values are invisible to the settings page, and the feed length
+	// and window are exactly what a friendly-link partner experiences on first subscribe.
+	//
+	// 订阅源设置，作用于 /blog/rss.xml 与各栏目源。与图谱区块同样的理由：只存在于
+	// config.yaml 的值对设置页不可见，而条数与时间窗恰恰是友链伙伴首次订阅时体验到的东西。
+	FeedMode       string `json:"feedMode"`       // recent | all // 按时间窗 / 全部
+	FeedRecentDays int    `json:"feedRecentDays"` // recent window in days // 时间窗（天）
+	FeedMaxItems   int    `json:"feedMaxItems"`   // Entry cap per feed // 每份源的条数上限
 }
 
 // BlogConfigRequest partial update of the blog settings (nil fields are left unchanged)
@@ -651,6 +661,10 @@ type BlogConfigRequest struct {
 	MaxGraphNodes   *int    `json:"maxGraphNodes"`
 	ShowGraph       *bool   `json:"showGraph"`
 	LocalGraphDepth *int    `json:"localGraphDepth"`
+
+	FeedMode       *string `json:"feedMode"`       // recent | all // 按时间窗 / 全部
+	FeedRecentDays *int    `json:"feedRecentDays"` // recent window in days // 时间窗（天）
+	FeedMaxItems   *int    `json:"feedMaxItems"`   // Entry cap per feed // 每份源的条数上限
 }
 
 // BlogPostItem one published post with an absolute URL

@@ -172,7 +172,19 @@ func registerBlogRoutes(r *gin.Engine, appContainer *app.App) {
 	// RSS feed. Registered before any "/blog/:slug" style route so the literal path wins.
 	// RSS 订阅源。在任何 "/blog/:slug" 形式的路由之前注册，确保字面路径优先。
 	blog.GET("/blog/rss.xml", func(c *gin.Context) {
-		serveBlogFeed(c, appContainer)
+		serveBlogFeed(c, appContainer, "")
+	})
+
+	// Per-section feed. Every top-level section gets one automatically — the address is
+	// derived from the same taxonomy as /blog/c/<section>, so a folder appearing in the vault
+	// makes its feed exist with no configuration. The static "rss.xml" segment wins over the
+	// ":seg" parameter that serves pages and page numbers at the same depth.
+	//
+	// 分栏目订阅源。每个顶层栏目自动拥有一份——地址与 /blog/c/<section> 同源同构，
+	// 仓库里多出一个文件夹，它的源就自动存在，无需任何配置。静态段 "rss.xml" 与
+	// 同深度的 ":seg" 参数（页面/页码）共存，静态段优先。
+	blog.GET("/blog/c/:section/rss.xml", func(c *gin.Context) {
+		serveBlogFeed(c, appContainer, c.Param("section"))
 	})
 
 	// Graph fragment, loaded on demand by the article page's graph controls.
@@ -878,6 +890,10 @@ func blogEnabled(c *gin.Context, appContainer *app.App) (*blogRuntimeConfig, boo
 		ICP:             raw.ICP,
 		MPS:             raw.MPS,
 		MPSCode:         raw.MPSCode,
+
+		FeedMode:       raw.FeedMode,
+		FeedRecentDays: raw.FeedRecentDays,
+		FeedMaxItems:   raw.FeedMaxItems,
 	}, true
 }
 
@@ -895,6 +911,12 @@ type blogRuntimeConfig struct {
 	// LocalGraphDepth 是文章内图谱的起始深度。深度是「查看偏好」而不是每篇文章的事实，
 	// 因此它与其它开关放在一起。
 	LocalGraphDepth int
+
+	// Feed settings for the RSS document (mode / window / entry cap), clamped at use.
+	// RSS 文档的订阅源设置（模式 / 时间窗 / 条数上限），使用处再夹取。
+	FeedMode       string
+	FeedRecentDays int
+	FeedMaxItems   int
 
 	// Filing numbers for the footer. Empty means "render nothing", so an open-source
 	// deployment without them simply has no filing line. See config.BlogConfig.ICP.

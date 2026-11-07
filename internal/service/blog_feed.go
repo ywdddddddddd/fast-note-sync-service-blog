@@ -4,6 +4,7 @@ import (
 	"context"
 	"regexp"
 	"strings"
+	"time"
 )
 
 // Full-text feed assembly.
@@ -203,6 +204,31 @@ func blogPlainTextParagraphs(content string, limit int) string {
 	return b.String()
 }
 
+// BlogFeedOptions selects which articles a feed carries and how many.
+//
+// The feed and the /blog/c/<section> list pages must agree on what "in a section" means, so the
+// section filter runs through blogEntrySection — the same function the section tree is built
+// from — rather than a locally invented prefix check.
+//
+// BlogFeedOptions 决定一份订阅源收录哪些文章、收多少。
+//
+// 订阅源必须与 /blog/c/<section> 列表页对「属于某版块」的判断完全一致，因此版块过滤
+// 走 blogEntrySection——栏目树切分用的就是它——而不是本地另写一个前缀判断。
+type BlogFeedOptions struct {
+	// Section restricts the feed to one top-level section; empty means every article.
+	// Section 把源限制在单个顶层版块；空串表示全部文章。
+	Section string
+	// Mode is "recent" (only articles created within RecentDays) or "all".
+	// Mode 取 "recent"（只收最近 RecentDays 天创建的文章）或 "all"。
+	Mode string
+	// RecentDays is the recent window in days.
+	// RecentDays 是 recent 模式的时间窗（天）。
+	RecentDays int
+	// MaxItems caps the number of entries.
+	// MaxItems 限制条目数。
+	MaxItems int
+}
+
 // GetBlogFeed returns the newest published articles with their full rendered bodies.
 //
 // It shares loadBlogSources with the home page rather than issuing its own query, so the feed can
@@ -220,13 +246,41 @@ func blogPlainTextParagraphs(content string, limit int) string {
 //
 // 正文渲染失败的笔记仍然发布，只是只有摘要。丢弃该条目等于隐藏一篇站点本身能打开的文章，
 // 而因为一篇畸形笔记让整个订阅源失败，会把其余每一篇都一起拖下水。
-func (s *shareService) GetBlogFeed(ctx context.Context, uid int64, baseURL string, limit int) ([]*BlogFeedEntry, error) {
+func (s *shareService) GetBlogFeed(ctx context.Context, uid int64, baseURL string, opts BlogFeedOptions) ([]*BlogFeedEntry, error) {
 	all, _, err := s.loadBlogSources(ctx, uid)
 	if err != nil {
 		return nil, err
 	}
 	sources := articlesOnly(all)
 
+	// Unknown sections are a navigation error, not an empty feed: /blog/c/<section> answers 404
+	// for a section that does not exist, and a feed address built on the same taxonomy must not
+	// pretend to exist. Validity is checked against the unfiltered article list, so a section
+	// whose articles all fall outside the recent window still resolves — it just yields an
+	// empty feed.
+	//
+	// 不存在的版块是导航错误，不是空源：/blog/c/<section> 对不存在的版块回答 404，
+	// 建在同一套栏目体系上的订阅地址也不能假装存在。存在性按未过滤的文章全集判断，
+	// 因此一个文章都落在时间窗外的版块仍然能解析——只是得到一份空源。
+	if opts.Section != "" {
+		known := false
+		for _, src := range sources {
+			if blogEntrySection(src.Path) == opts.Section {
+				known = true
+				break
+			}
+		}
+		if !known {
+			return nil, ErrBlogSectionNotFound
+		}
+		sources = blogSourcesInSection(sources, opts.Section)
+	}
+
+	if strings.EqualFold(strings.TrimSpace(opts.Mode), "recent") {
+		sources = blogSourcesWithinDays(sources, opts.RecentDays)
+	}
+
+	limit := opts.MaxItems
 	if limit <= 0 || limit > len(sources) {
 		limit = len(sources)
 	}
@@ -255,6 +309,52 @@ func (s *shareService) GetBlogFeed(ctx context.Context, uid int64, baseURL strin
 		out = append(out, entry)
 	}
 	return out, nil
+}
+
+// blogSourcesInSection keeps the notes whose blog section equals section.
+// The section names this produces are exactly the ones the /blog/c/<section> pages accept,
+// because both read them from blogEntrySection.
+//
+// blogSourcesInSection 保留版块名等于 section 的笔记。
+// 由此产生的版块名与 /blog/c/<section> 页面接受的完全一致，因为两者都读自 blogEntrySection。
+func blogSourcesInSection(sources []*blogHomeSource, section string) []*blogHomeSource {
+	out := make([]*blogHomeSource, 0, len(sources))
+	for _, src := range sources {
+		if blogEntrySection(src.Path) == section {
+			out = append(out, src)
+		}
+	}
+	return out
+}
+
+// blogSourcesWithinDays keeps articles whose feed date falls inside the last days window.
+//
+// CreatedAt is a date-only string (that is what the home page renders), so the comparison is
+// date-granular: an article created on the boundary day still counts as inside the window. An
+// unparseable date is treated as outside — recent mode exists to bound the output, and silently
+// admitting entries of unknown age would defeat it.
+//
+// blogSourcesWithinDays 保留发布日期落在最近 days 天内的文章。
+//
+// CreatedAt 是只有日期的字符串（首页渲染的就是它），因此比较按天粒度：边界当天创建的
+// 文章仍算窗口内。无法解析的日期按窗口外处理——recent 模式的意义就是控制输出规模，
+// 静默放行年龄不明的条目会让这个意义落空。
+func blogSourcesWithinDays(sources []*blogHomeSource, days int) []*blogHomeSource {
+	if days <= 0 {
+		return sources
+	}
+	cutoff := time.Now().AddDate(0, 0, -days)
+	out := make([]*blogHomeSource, 0, len(sources))
+	for _, src := range sources {
+		t, err := time.ParseInLocation("2006-01-02", src.CreatedAt, time.Local)
+		if err != nil {
+			continue
+		}
+		if !t.Before(cutoff) {
+			out = append(out, src)
+		}
+	}
+	return out
 }
 
 // blogFeedFallbackCoverMIME is the declared type when the cover is an in-body image.

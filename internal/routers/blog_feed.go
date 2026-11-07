@@ -1,10 +1,14 @@
 package routers
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"encoding/xml"
+	"errors"
 	"html/template"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -27,20 +31,14 @@ import (
 // "<" 的笔记不会破坏文档。html/template 会在 XML 文档里输出 HTML 实体（&amp;），
 // 部分阅读器会把它们原样显示出来。
 
-// blogFeedMaxItems caps the feed length.
+// The feed length used to be a constant (15); it is now BlogFeedOptions.MaxItems, fed from
+// blog.feed-mode / feed-recent-days / feed-max-items in the config and editable from the blog
+// settings panel. The entry cap plus the recency window are what keep a first subscribe light
+// for friendly-link partners; conditional GET keeps the polls between updates at zero bytes.
 //
-// It came down from 50 when the feed went full-text: twelve of these notes average roughly
-// 5,700 characters, so a full-body item costs about 25 KB and 50 of them made every poll a
-// megabyte. Fifteen is also the honest number for this format — a subscriber drains the backlog
-// on day one and sees one or two new items a day afterwards, so the extra 35 slots were paying
-// bandwidth on every request to cover a window nobody scrolls back through.
-//
-// blogFeedMaxItems 限制订阅源条数。
-//
-// 全文订阅上线时它从 50 降到 15：本仓库这些笔记平均约 5700 字，因此一条全文项约 25 KB，
-// 50 条会让每次轮询都变成一兆字节。15 对这个格式也是诚实的数字——订阅者第一天拉完历史，
-// 之后每天只见一两篇新的，多出来的 35 个位置是在为一段没人回翻的窗口反复支付带宽。
-const blogFeedMaxItems = 15
+// 订阅源条数曾是一个常量（15）；现在由 BlogFeedOptions.MaxItems 决定，取自配置的
+// blog.feed-mode / feed-recent-days / feed-max-items，并可在博客设置面板修改。
+// 条数上限加上时间窗让友链伙伴的首次订阅保持轻量；条件请求让更新之间的轮询零流量。
 
 type rssFeed struct {
 	XMLName xml.Name   `xml:"rss"`
@@ -152,29 +150,37 @@ const rfc1123z = "Mon, 02 Jan 2006 15:04:05 -0700"
 // Entries whose Published value failed to parse are still published, just without a pubDate:
 // dropping a note from the feed because its timestamp was odd is worse than omitting one field.
 //
-// lastBuildDate is the moment the document was built, not the newest item's date. The RSS
-// specification defines it as when the content was last generated, and readers that conditionally
-// refetch on it would stop noticing new items if it only ever repeated the latest publish date.
+// lastBuildDate repeats the newest item's pubDate rather than the moment the bytes were built.
+// A build-time stamp changes on every rebuild while the content stays identical, and the feed's
+// whole conditional-GET story — stable ETag, stable Last-Modified — rests on "same content means
+// same bytes and same stamps". Readers that refetch on lastBuildDate still notice new items: a
+// new item carries a new pubDate, so the stamp moves with it. The feedURL argument is the
+// document's own address (main feed or per-section feed); it feeds the atom:self link.
 //
-// buildBlogFeed 为一组已渲染完成的条目渲染订阅源文档。
-//
-// Published 解析失败的条目仍然发布，只是不带 pubDate：因为时间戳格式异常就把笔记从订阅源里
-// 丢掉，比少一个字段更糟。
-//
-// lastBuildDate 是文档构建的时刻，不是最新条目的日期。RSS 规范把它定义为内容最后生成的
-// 时间，而会据此做条件重取的阅读器，在它只是重复最新发布日的情况下将不再察觉新条目。
-func buildBlogFeed(entries []*service.BlogFeedEntry, siteTitle, baseURL string) ([]byte, error) {
+// lastBuildDate 重复最新条目的 pubDate，而不是字节构建的时刻。构建时刻的戳会在内容完全不变
+// 的情况下随每次重建漂移，而这份订阅源的条件请求体系——稳定的 ETag 与稳定的 Last-Modified
+// ——正建立在「内容相同则字节与戳都相同」之上。依据 lastBuildDate 做条件重取的阅读器依然
+// 能察觉新条目：新条目带着新的 pubDate，戳随它移动。feedURL 参数是文档自身的地址
+// （主源或栏目源），用于 atom:self 链接。
+
+// buildFeedLastBuild formats the newest item's date for lastBuildDate; a feed with no parsable
+// dates omits the element (the xml tag is omitempty).
+// buildFeedLastBuild 把最新条目日期格式化为 lastBuildDate；没有可解析日期的源省略该元素
+// （xml 标记是 omitempty）。
+func buildFeedLastBuild(newestPub time.Time) string {
+	if newestPub.IsZero() {
+		return ""
+	}
+	return newestPub.UTC().Format(rfc1123z)
+}
+
+func buildBlogFeed(entries []*service.BlogFeedEntry, siteTitle, baseURL, feedURL string) ([]byte, error) {
 	base := strings.TrimRight(baseURL, "/")
 	home := base + "/blog"
-	feedURL := home + "/rss.xml"
 
-	limit := len(entries)
-	if limit > blogFeedMaxItems {
-		limit = blogFeedMaxItems
-	}
-
-	items := make([]rssItem, 0, limit)
-	for _, e := range entries[:limit] {
+	newestPub := time.Time{}
+	items := make([]rssItem, 0, len(entries))
+	for _, e := range entries {
 		if e == nil {
 			continue
 		}
@@ -188,6 +194,9 @@ func buildBlogFeed(entries []*service.BlogFeedEntry, siteTitle, baseURL string) 
 		if e.Published != "" {
 			if t, err := time.Parse("2006-01-02", e.Published); err == nil {
 				item.PubDate = t.Format(rfc1123z)
+				if t.After(newestPub) {
+					newestPub = t
+				}
 			}
 		}
 		if e.ContentHTML != "" {
@@ -219,7 +228,7 @@ func buildBlogFeed(entries []*service.BlogFeedEntry, siteTitle, baseURL string) 
 		Link:          home,
 		Description:   siteTitle + " — 笔记订阅",
 		Language:      "zh-CN",
-		LastBuildDate: time.Now().UTC().Format(rfc1123z),
+		LastBuildDate: buildFeedLastBuild(newestPub),
 		AtomLink:      rssAtom{Href: feedURL, Rel: "self", Type: "application/rss+xml"},
 		Items:         items,
 	}
@@ -316,54 +325,103 @@ func cdataSafe(s string) string {
 // 本就预期的延迟之内。
 const blogFeedCacheTTL = 10 * time.Minute
 
-var blogFeedCache struct {
-	mu      sync.Mutex
-	key     string
+var blogFeedCacheMu sync.Mutex
+var blogFeedCaches = map[string]*blogFeedCacheEntry{}
+
+// blogFeedCacheEntry is one cached feed document plus the metadata conditional GET needs.
+//
+// builtAt is the moment the content last changed, not the moment the bytes were rebuilt: a
+// rebuild that reproduces an identical document keeps the previous timestamp, so
+// If-Modified-Since readers keep getting 304 across cache expiries. The ETag is a content hash
+// and is stable for the same reason.
+//
+// blogFeedCacheEntry 是一份缓存的订阅源文档外加条件请求所需的元数据。
+//
+// builtAt 是内容最后一次变化的时刻，而不是字节重建的时刻：重建出完全相同的文档时保留原
+// 时间戳，使 If-Modified-Since 阅读器在缓存过期后依然拿到 304。ETag 是内容哈希，出于同样
+// 的原因保持稳定。
+type blogFeedCacheEntry struct {
 	body    []byte
 	builtAt time.Time
+	etag    string
 }
+
+// blogFeedCacheMaxEntries bounds the cache: one entry per feed shape (main feed plus one per
+// section) is a handful in practice, and the bound only stops a pathological URL set from
+// growing the map forever.
+//
+// blogFeedCacheMaxEntries 限制缓存条数：每个「源的形状」一条（主源 + 每个栏目一条），
+// 实际就是几条；这个上限只是防止病态的 URL 集合把 map 无限撑大。
+const blogFeedCacheMaxEntries = 16
 
 // cachedFeedBody returns a previously built document when it is still fresh.
 //
-// A stale entry is kept rather than cleared: if rendering fails, serving a 30-second-old document
-// is strictly better than serving an error page to every subscriber at once.
+// A stale entry is kept rather than cleared: if rendering fails, serving a ten-minute-old
+// document is strictly better than serving an error page to every subscriber at once.
 //
 // cachedFeedBody 在文档仍然新鲜时返回上次构建的结果。
 //
-// 过期条目保留而不是清除：如果渲染失败，提供一份 30 秒前的文档严格优于同时向每位订阅者
+// 过期条目保留而不是清除：如果渲染失败，提供一份十分钟前的文档严格优于同时向每位订阅者
 // 提供一个错误页。
-func cachedFeedBody(key string) ([]byte, bool) {
-	blogFeedCache.mu.Lock()
-	defer blogFeedCache.mu.Unlock()
-	if blogFeedCache.body == nil || blogFeedCache.key != key {
-		return nil, false
+func cachedFeedBody(key string) *blogFeedCacheEntry {
+	blogFeedCacheMu.Lock()
+	defer blogFeedCacheMu.Unlock()
+	e, ok := blogFeedCaches[key]
+	if !ok {
+		return nil
 	}
-	if time.Since(blogFeedCache.builtAt) > blogFeedCacheTTL {
-		return nil, false
+	if time.Since(e.builtAt) > blogFeedCacheTTL {
+		return nil
 	}
-	return blogFeedCache.body, true
+	return e
 }
 
-func storeFeedBody(key string, body []byte) {
-	blogFeedCache.mu.Lock()
-	defer blogFeedCache.mu.Unlock()
-	blogFeedCache.key = key
-	blogFeedCache.body = body
-	blogFeedCache.builtAt = time.Now()
+// storeFeedBody records a freshly built document. When the bytes are identical to the previous
+// build, the old builtAt is kept so conditional readers see an unchanged Last-Modified.
+//
+// storeFeedBody 记录一份新构建的文档。当字节与上次构建完全相同时保留原 builtAt，
+// 使条件请求的读者看到的 Last-Modified 保持不变。
+func storeFeedBody(key string, body []byte) *blogFeedCacheEntry {
+	sum := sha256.Sum256(body)
+	etag := `"` + hex.EncodeToString(sum[:8]) + `"`
+	blogFeedCacheMu.Lock()
+	defer blogFeedCacheMu.Unlock()
+	builtAt := time.Now()
+	if old := blogFeedCaches[key]; old != nil && old.etag == etag {
+		builtAt = old.builtAt
+	}
+	e := &blogFeedCacheEntry{body: body, builtAt: builtAt, etag: etag}
+	blogFeedCaches[key] = e
+	if len(blogFeedCaches) > blogFeedCacheMaxEntries {
+		blogFeedCacheEvictLocked()
+	}
+	return e
 }
 
 // staleFeedBody returns whatever was cached, ignoring freshness.
 // staleFeedBody 返回缓存中的内容，忽略新鲜度。
-func staleFeedBody(key string) []byte {
-	blogFeedCache.mu.Lock()
-	defer blogFeedCache.mu.Unlock()
-	if blogFeedCache.key != key {
-		return nil
-	}
-	return blogFeedCache.body
+func staleFeedBody(key string) *blogFeedCacheEntry {
+	blogFeedCacheMu.Lock()
+	defer blogFeedCacheMu.Unlock()
+	return blogFeedCaches[key]
 }
 
-func serveBlogFeed(c *gin.Context, appContainer *app.App) {
+// blogFeedCacheEvictLocked drops the oldest entry; the caller holds the mutex.
+// blogFeedCacheEvictLocked 淘汰最旧的一条；调用方持有互斥锁。
+func blogFeedCacheEvictLocked() {
+	oldestKey := ""
+	var oldest time.Time
+	for k, e := range blogFeedCaches {
+		if oldest.IsZero() || e.builtAt.Before(oldest) {
+			oldestKey, oldest = k, e.builtAt
+		}
+	}
+	if oldestKey != "" {
+		delete(blogFeedCaches, oldestKey)
+	}
+}
+
+func serveBlogFeed(c *gin.Context, appContainer *app.App, section string) {
 	cfg, ok := blogEnabled(c, appContainer)
 	if !ok {
 		return
@@ -387,15 +445,17 @@ func serveBlogFeed(c *gin.Context, appContainer *app.App) {
 	siteTitle := blogSiteTitle(cfg.Title)
 	base := blogBaseURL(c, appContainer)
 
-	// The cache key covers everything the document depends on, so switching the site title or
-	// the public address invalidates it instead of serving a document that describes a different
-	// site.
-	// 缓存键覆盖文档依赖的一切，因此改站点标题或对外地址会让它失效，
-	// 而不是继续提供一份描述着另一个站点的文档。
-	cacheKey := strconv.FormatInt(uid, 10) + "|" + base + "|" + siteTitle
+	mode, days, max := blogFeedSettings(cfg)
 
-	if body, hit := cachedFeedBody(cacheKey); hit {
-		writeFeedDocument(c, body)
+	// The cache key covers everything the document depends on — site identity plus the feed
+	// shape (section / mode / window / cap) — so changing any of them invalidates the entry
+	// instead of serving a document that describes a different feed.
+	// 缓存键覆盖文档依赖的一切——站点身份加上源的形状（版块 / 模式 / 时间窗 / 条数）——
+	// 改动其中任何一项都会让缓存失效，而不是继续提供一份描述着另一个源的文档。
+	cacheKey := strconv.FormatInt(uid, 10) + "|" + base + "|" + siteTitle + "|" + section + "|" + mode + "|" + strconv.Itoa(days) + "|" + strconv.Itoa(max)
+
+	if e := cachedFeedBody(cacheKey); e != nil {
+		writeFeedDocument(c, e)
 		return
 	}
 
@@ -407,17 +467,34 @@ func serveBlogFeed(c *gin.Context, appContainer *app.App) {
 	// 用 GetBlogFeed 而不是 GetBlogHome：订阅源需要渲染好的正文，而 GetBlogHome 的条目结构里
 	// 只有摘要。它在底层共用同一份来源清单，因此订阅源与站点依然不可能在「什么算已发布」上
 	// 产生分歧，同时图谱布局、热力图与标签云完全不会进入这条路径。
-	entries, err := shareSvc.GetBlogFeed(c.Request.Context(), uid, base, blogFeedMaxItems)
+	entries, err := shareSvc.GetBlogFeed(c.Request.Context(), uid, base, service.BlogFeedOptions{
+		Section:    section,
+		Mode:       mode,
+		RecentDays: days,
+		MaxItems:   max,
+	})
 	if err != nil {
-		if body := staleFeedBody(cacheKey); body != nil {
-			writeFeedDocument(c, body)
+		// An unknown section is a navigation error and gets the same 404 page the /blog/c/
+		// list renders, not an XML document with zero items pretending to be a feed.
+		// 不存在的版块是导航错误，回答与 /blog/c/ 列表相同的 404 页，
+		// 而不是一份零条目、假装自己是订阅源的 XML。
+		if errors.Is(err, service.ErrBlogSectionNotFound) {
+			blogErrorPage(c, appContainer, http.StatusNotFound, "版块",
+				"没有这个版块",
+				"订阅地址跟随版块地址，而这个版块不存在。",
+				[]string{"版块名来自仓库里的一级文件夹，检查地址里的栏目名是否正确。"},
+			)
+			return
+		}
+		if e := staleFeedBody(cacheKey); e != nil {
+			writeFeedDocument(c, e)
 			return
 		}
 		blogFail(c, appContainer, err.Error())
 		return
 	}
 
-	body, err := buildBlogFeed(entries, siteTitle, base)
+	body, err := buildBlogFeed(entries, siteTitle, base, blogFeedURL(base, section))
 	if err != nil {
 		// Render into memory first, then write: an encoding failure must not leave a truncated
 		// document that readers cache as "the feed is broken".
@@ -430,15 +507,97 @@ func serveBlogFeed(c *gin.Context, appContainer *app.App) {
 		return
 	}
 
-	storeFeedBody(cacheKey, body)
-	writeFeedDocument(c, body)
+	e := storeFeedBody(cacheKey, body)
+	writeFeedDocument(c, e)
 }
 
-func writeFeedDocument(c *gin.Context, body []byte) {
+// blogFeedURL is a feed's own address: the main feed lives at /blog/rss.xml, a section feed
+// beside its list page at /blog/c/<section>/rss.xml.
+// blogFeedURL 给出一份源自己的地址：主源在 /blog/rss.xml，栏目源在栏目列表页旁边。
+func blogFeedURL(base, section string) string {
+	if section == "" {
+		return strings.TrimRight(base, "/") + "/blog/rss.xml"
+	}
+	return strings.TrimRight(base, "/") + "/blog/c/" + url.PathEscape(section) + "/rss.xml"
+}
+
+// blogFeedSettings reads the feed knobs from config, clamped to legal ranges. The config file
+// is hand-editable, so an out-of-range value must not reach the feed builder.
+// blogFeedSettings 从配置读取订阅源旋钮并夹到合法范围。配置文件可手工编辑，越界值不得进入构建器。
+func blogFeedSettings(cfg *blogRuntimeConfig) (mode string, days, max int) {
+	mode = "recent"
+	days, max = 30, 5
+	if cfg != nil {
+		if strings.EqualFold(strings.TrimSpace(cfg.FeedMode), "all") {
+			mode = "all"
+		}
+		days, max = cfg.FeedRecentDays, cfg.FeedMaxItems
+	}
+	if days < 1 {
+		days = 1
+	}
+	if days > 365 {
+		days = 365
+	}
+	if max < 1 {
+		max = 1
+	}
+	if max > 50 {
+		max = 50
+	}
+	return
+}
+
+// writeFeedDocument serves a cached feed entry with conditional-GET support.
+//
+// The ETag is a content hash and Last-Modified the content's last-change time (see
+// blogFeedCacheEntry), so a reader re-polling an unchanged feed gets a body-less 304 — the
+// entire answer of a poll between updates. Readers sending neither header get the document,
+// exactly as before.
+//
+// writeFeedDocument 带条件请求支持地输出一份缓存的订阅源。
+//
+// ETag 是内容哈希，Last-Modified 是内容最后变化的时刻（见 blogFeedCacheEntry），因此阅读器
+// 在两次更新之间重新轮询时得到一个没有主体的 304——这正是更新间隔内一次轮询的全部答案。
+// 不带这两个头的阅读器照旧拿到完整文档。
+func writeFeedDocument(c *gin.Context, e *blogFeedCacheEntry) {
+	c.Header("ETag", e.etag)
+	c.Header("Last-Modified", e.builtAt.UTC().Format(http.TimeFormat))
+	if ifNoneMatchSatisfied(c.GetHeader("If-None-Match"), e.etag) {
+		c.AbortWithStatus(http.StatusNotModified)
+		return
+	}
+	if ims := c.GetHeader("If-Modified-Since"); ims != "" {
+		if t, err := http.ParseTime(ims); err == nil && !e.builtAt.Truncate(time.Second).After(t) {
+			c.AbortWithStatus(http.StatusNotModified)
+			return
+		}
+	}
 	c.Header("Content-Type", "application/rss+xml; charset=utf-8")
 	c.Header("Cache-Control", "no-cache")
 	c.Status(http.StatusOK)
-	_, _ = c.Writer.Write(body)
+	_, _ = c.Writer.Write(e.body)
+}
+
+// ifNoneMatchSatisfied compares an If-None-Match header against the current ETag with weak
+// comparison, so both the W/ prefix and comma-separated lists from various readers match.
+// ifNoneMatchSatisfied 用弱比较把 If-None-Match 头与当前 ETag 对比，
+// 各家阅读器的 W/ 前缀与逗号分隔列表都能命中。
+func ifNoneMatchSatisfied(header, etag string) bool {
+	header = strings.TrimSpace(header)
+	if header == "" {
+		return false
+	}
+	if header == "*" {
+		return true
+	}
+	bare := strings.TrimPrefix(etag, "W/")
+	for _, part := range strings.Split(header, ",") {
+		if strings.TrimPrefix(strings.TrimSpace(part), "W/") == bare {
+			return true
+		}
+	}
+	return false
 }
 
 // ── JSON-LD (schema.org) ────────────────────────────────────────────────
