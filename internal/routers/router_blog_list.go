@@ -128,7 +128,7 @@ func serveBlogList(c *gin.Context, appContainer *app.App, shareSvc service.Share
 	}
 
 	c.Header("Content-Type", "text/html; charset=utf-8")
-	c.Header("Cache-Control", "no-cache")
+	c.Header("Cache-Control", "public, max-age=60, s-maxage=120")
 	c.Status(http.StatusOK)
 	_, _ = c.Writer.Write(buf.Bytes())
 }
@@ -217,7 +217,7 @@ func serveBlogArchives(c *gin.Context, appContainer *app.App, shareSvc service.S
 	}
 
 	c.Header("Content-Type", "text/html; charset=utf-8")
-	c.Header("Cache-Control", "no-cache")
+	c.Header("Cache-Control", "public, max-age=60, s-maxage=120")
 	c.Status(http.StatusOK)
 	_, _ = c.Writer.Write(buf.Bytes())
 }

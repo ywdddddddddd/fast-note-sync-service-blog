@@ -349,7 +349,7 @@ func registerBlogRoutes(r *gin.Engine, appContainer *app.App) {
 		}
 
 		c.Header("Content-Type", "text/html; charset=utf-8")
-		c.Header("Cache-Control", "no-cache")
+		c.Header("Cache-Control", "public, max-age=60, s-maxage=120")
 		c.Status(http.StatusOK)
 		_, _ = c.Writer.Write(buf.Bytes())
 	})
@@ -649,7 +649,7 @@ func registerBlogRoutes(r *gin.Engine, appContainer *app.App) {
 		}
 
 		c.Header("Content-Type", "text/html; charset=utf-8")
-		c.Header("Cache-Control", "no-cache")
+		c.Header("Cache-Control", "public, max-age=60, s-maxage=120")
 		c.Status(http.StatusOK)
 		_, _ = c.Writer.Write(pbuf.Bytes())
 	})
@@ -1005,7 +1005,7 @@ func serveBlogPage(c *gin.Context, appContainer *app.App, shareSvc service.Share
 	}
 
 	c.Header("Content-Type", "text/html; charset=utf-8")
-	c.Header("Cache-Control", "no-cache")
+	c.Header("Cache-Control", "public, max-age=60, s-maxage=120")
 	c.Status(http.StatusOK)
 	_, _ = c.Writer.Write(buf.Bytes())
 }

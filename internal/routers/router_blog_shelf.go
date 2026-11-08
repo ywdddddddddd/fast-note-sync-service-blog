@@ -308,7 +308,7 @@ func blogOn(appContainer *app.App) bool {
 // 以及与其它博客页面相同的响应头。
 func writeBlogHTML(c *gin.Context, body []byte) {
 	c.Header("Content-Type", "text/html; charset=utf-8")
-	c.Header("Cache-Control", "no-cache")
+	c.Header("Cache-Control", "public, max-age=60, s-maxage=120")
 	c.Status(http.StatusOK)
 	_, _ = c.Writer.Write(body)
 }
