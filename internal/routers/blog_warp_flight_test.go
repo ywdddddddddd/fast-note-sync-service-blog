@@ -39,7 +39,31 @@ func TestWarpFlightAssetShape(t *testing.T) {
 	for _, want := range []string{
 		"window.__WFLIGHT={start:start,skip:skip}",
 		"uAvatar:{value:null},uAvatarMix:{value:0}",
-		"FRAME+dt*N6*2",
+		// 五秒先快后慢：帧号由墙钟进度经 easeOut 映射，u=1 才落在收尾帧。
+		//
+		// Five seconds, fast then slow: the frame index is the wall-clock progress mapped
+		// through easeOut, and only u=1 lands on the final frame.
+		"var FLIGHT_SECONDS=5;",
+		"var e=1-(1-u)*(1-u)",
+		"FRAME=Math.min(DA-1,(DA-1)*e)",
+		"if(u>=1)",
+		// 头像贴图清晰度：mipmap / 三线性 / 各向异性 / sRGB，以及设备像素比。
+		//
+		// Avatar texture sharpness: mipmaps, trilinear filtering, anisotropy, sRGB,
+		// and a device-pixel-ratio-aware renderer.
+		"tex.generateMipmaps=true",
+		"tex.minFilter=1008",
+		"tex.magFilter=1006",
+		"tex.colorSpace=kA",
+		"tex.anisotropy=WORLD.renderer.capabilities.getMaxAnisotropy()",
+		"setPixelRatio(Math.min(window.devicePixelRatio||1,2))",
+		// 头像激活时星球组每帧转向相机；SphereGeometry 的 UV 中心在本地 +X。
+		//
+		// While an avatar is active the planet group turns to the camera every frame;
+		// SphereGeometry's UV centre is local +X.
+		"faceAvatarCamera",
+		"P.group.lookAt(this.camera.position)",
+		"P.group.rotateY(-Math.PI/2)",
 		"warp-flight-stage",
 		// A transformed ancestor would anchor the fixed overlay to itself; the bundle must
 		// re-parent the overlay to body before it measures the stage.
@@ -58,6 +82,9 @@ func TestWarpFlightAssetShape(t *testing.T) {
 		`getElementById("frames")`,
 		"__WARP",
 		"加载飞行器",
+		// 旧的匀速时间推进必须已被 easeOut 覆盖。
+		// The old constant-speed time step must be gone.
+		"FRAME+dt*N6*2",
 	} {
 		if strings.Contains(s, forbidden) {
 			t.Errorf("bundle still contains removed HUD/debug marker %q", forbidden)

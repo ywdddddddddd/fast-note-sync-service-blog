@@ -4583,14 +4583,16 @@ void main(){
         base += vec3(0.55, 0.86, 0.62) * crack * 0.55 * (0.4 + 0.6*lambert);
         base += vec3(0.10, 0.42, 0.48) * pow(1.0 - max(0.0, dot(n, V)), 2.6) * 0.9;
 
-        // \u5927\u6C14\u8FB9\u7F18\u5149\uFF08\u80CC\u5149\u4FA7\uFF09
+        // 大气边缘光（背光侧）
         float rim = pow(1.0 - max(0.0, dot(n, V)), 3.0);
-        base += uAtmo * rim * 1.75 * (0.40 + 0.60*lambert);
 
-        // Avatar texture (loaded through the same-origin proxy). uAvatarMix stays 0
-        // until the image actually arrives, so a failed load leaves the procedural planet.
+        // 头像贴图（经同源代理加载）。uAvatarMix=1 且像素不透明时表面完全取头像采样，
+        // 只保留平行光/晨昏衰减与下面的大气边缘光，不再混入程序化噪声；
+        // 加载失败时 uAvatarMix 恒为 0，程序化星球原样保留。
         vec4 av = texture2D(uAvatar, vUv);
-        base = mix(base, av.rgb * (0.35 + 0.65 * lambert), uAvatarMix * av.a);
+        float avk = clamp(uAvatarMix * av.a, 0.0, 1.0);
+        base = mix(base, av.rgb * (0.35 + 0.65 * lambert), avk);
+        base += uAtmo * rim * 1.75 * (0.40 + 0.60*lambert);
 
         gl_FragColor = vec4(base * uGlow, 1.0);
       }`}),e=new oA(new tM(A,96,64),M),t=new fA({uniforms:{uColor:{value:new kf(5952767)},uPow:{value:3.1},uInt:{value:.85}},transparent:!0,side:YA,depthWrite:!1,blending:wA,vertexShader:`
@@ -4702,8 +4704,17 @@ void main(){
           // \u5747\u5300\u8870\u51CF\uFF0C\u907F\u514D\u4EFB\u4F55\u6761\u5E26\u611F
           c *= 0.82;
           gl_FragColor = vec4(c * uOpacity, 1.0);
-        }`,side:YA,depthWrite:!1,depthTest:!1}));return e.renderOrder=-100,z.add(e),{group:z,shell:e}}var Ce=class{constructor(f){this.container=f,this.renderer=new ce({antialias:!1,alpha:!1,powerPreference:"high-performance",preserveDrawingBuffer:!0}),this.renderer.outputColorSpace=r6,this.renderer.setPixelRatio(1),this.renderer.autoClear=!0,this.renderer.setClearColor(66056,1),this.scene=new eM,this.camera=new ZA(35,16/9,.02,4e3),this.director=new Je(this.camera),this.container.appendChild(this.renderer.domElement);let A=new URLSearchParams(location.search);this._q=A,this._hide=new Set((A.get("hide")||"").split(",").filter(Boolean)),this._raw=A.get("raw")==="1"}async init(){let f=r=>{window.__INIT_STAGE=r};f("start");let A=this.scene;f("backdrop"),this.backdrop=nr(),A.add(this.backdrop.group),f("planet"),this.planet=er(s6.radius),this.planet.group.position.copy(s6.center),A.add(this.planet.group),this.planet.group.position.copy(s6.center),f("stars"),this.stars=or({count:5600,depth:300,radius:95}),A.add(this.stars.group),f("ship"),this.ship=new ue,this.ship.load(),A.add(this.ship.root),f("lights");let M=new iz(14084351,.92);M.position.set(-11,2.2,-2),A.add(M);let e=new iz(5220607,.62);e.position.set(6,-3,-9),A.add(e),A.add(new de(1714754,.55)),A.environment=this.buildEnvMap(),f("post");let t=this.container.clientWidth||1920,o=this.container.clientHeight||1080,n=this._q.get("rt"),i=n==="float"?_A:n==="byte"?$A:p6;this.post=new Be(this.renderer,t,o,{type:i}),this.resize(t,o),f("compile"),this.renderer.compile(A,this.camera),f("done"),this.inited=!0}buildEnvMap(){let M=document.createElement("canvas");M.width=512,M.height=256;let e=M.getContext("2d"),t=e.createLinearGradient(0,0,0,256);t.addColorStop(0,"#01030a"),t.addColorStop(.4,"#04121f"),t.addColorStop(.56,"#0b2b40"),t.addColorStop(.74,"#061420"),t.addColorStop(1,"#010206"),e.fillStyle=t,e.fillRect(0,0,512,256);let o=(s,a,l,h)=>{let g=e.createRadialGradient(s,a,0,s,a,l);g.addColorStop(0,h),g.addColorStop(1,"rgba(0,0,0,0)"),e.fillStyle=g,e.beginPath(),e.arc(s,a,l,0,Math.PI*2),e.fill()};e.globalCompositeOperation="lighter",o(512*.3,256*.28,256*.3,"rgba(185,222,255,0.9)"),o(512*.76,256*.62,256*.26,"rgba(60,130,215,0.55)"),o(512*.52,256*.86,256*.18,"rgba(255,150,70,0.22)");let n=new y6(M);n.mapping=Mz,n.colorSpace=kA;let i=new NM(this.renderer);i.compileEquirectangularShader();let r=i.fromEquirectangular(n);return n.dispose(),i.dispose(),r.texture}resize(f,A){this.renderer.setSize(f,A,!1),this.camera.aspect=f/A,this.camera.updateProjectionMatrix(),this.post&&this.post.setSize(Math.floor(f*this.renderer.getPixelRatio()),Math.floor(A*this.renderer.getPixelRatio())),this.vw=f,this.vh=A;let M=this.renderer.getPixelRatio();this.ship&&this.ship.ready&&this.ship.setPixelRatio(M),this.stars&&(this.stars.uniforms.uPixelRatio.value=M)}renderFrame(f,A=1/60){let M=Of(f,0,DA-1),e=M/N6,t=K6(M),o=this.director.update(M,1/N6),n=this.director._shipPos,i=this.director._shipQuat;this.ship.root.position.copy(n),this.ship.root.quaternion.copy(i),this.ship.root.scale.setScalar(1);let r=t.id===1?Of(M/71):Of((M-72)/71),s=Mr(M),a=fr(M),l=Ar(M),h=t.id===1?Lf(.7,.84,r):Lf(.86,1.34,Math.pow(a,1.5))*Lf(1,.34,rA(0,.26,l)),g=t.id===1?Lf(.3,.46,r):Lf(.34,.92,Math.pow(a,1.5))*Lf(1,.1,rA(0,.28,l)),Q={holo:0,throttle:h,dissolve:0,glitch:0,windows:0,burst:0,nose:0,flameK:t.id===1?1:Lf(.2,.06,rA(0,.3,l)),fillK:t.id===1?1:.18};this.ship.setState(Q),this.ship.update(e),this.stars.update(e,this.camera.position,1/N6,{warp:g,opacity:t.id===1?.78:.9,lineOpacity:t.id===1?Lf(.45,.62,r):Lf(.55,.95,Math.pow(s,.6))}),this.planet.planetMat.uniforms.uTime.value=e;let U=this.camera.position.distanceTo(this.planet.group.position),c=Of(1-(U-s6.radius)/60,0,1);if(this.planet.planetMat.uniforms.uGlow.value=1+c*.12,this.planet.ringMat.opacity=.045+c*.035,this._hide&&this._hide.size){let J=this._hide;J.has("planet")&&(this.planet.group.visible=!1),J.has("ring")&&(this.planet.ring.visible=!1),J.has("stars")&&(this.stars.group.visible=!1),J.has("starline")&&(this.stars.lines.visible=!1),J.has("starpoint")&&(this.stars.points.visible=!1),J.has("backdrop")&&(this.backdrop.group.visible=!1),J.has("ship")&&(this.ship.root.visible=!1),J.has("flame")&&this.ship.flame&&(this.ship.flame.group.visible=!1),J.has("points")&&(this.ship.points.visible=!1),J.has("fills")&&this.ship.fills&&this.ship.fills.forEach(k=>k.obj.visible=!1)}let m=rA(102,138,M),p=1-rA(138,143,M)*.96,B=t.id===1?Lf(1.26,1.32,r):Lf(1.16,1.3,Math.pow(a,1.2))*Lf(1,.8,rA(0,.35,l));if(this._raw){let J=this.renderer;return J.setRenderTarget(null),J.setClearColor(1127253,1),J.clear(),J.render(this.scene,this.camera),{shot:t,time:e}}return this.post.render(this.scene,this.camera,{time:e,bloomInt:t.id===1?.34:Lf(.3,.48,Math.pow(a,1.3))*Lf(1,.85,l),bloomThreshold:.96,rgb:t.id===1?.55:Lf(.7,2.6,Math.pow(a,1.4))*Lf(1,.3,rA(0,.25,l)),radial:t.id===1?0:Lf(.01,.13,Math.pow(a,1.6))*Lf(1,.1,rA(0,.3,l)),motionBlur:0,glitch:0,scanline:t.id===1?.03:.1,vignette:.92,exposure:B,flash:m,tint:new kf(t.id===1?.94:.92,.98,t.id===1?1.06:1.12),levelIn:t.id===1?1:p,centerX:o.center.x,centerY:o.center.y,contrast:1.06}),{shot:t,time:e}}};
-var WORLD=null,STAGE=null,OPTS=null,RUNNING=0,SKIPPED=0,DONE=0,FRAME=0,LAST=0,AVATAR_MIX=0,AVATAR_TARGET=0,AVATAR_TEX=null,DONE_TIMER=0;
+        }`,side:YA,depthWrite:!1,depthTest:!1}));return e.renderOrder=-100,z.add(e),{group:z,shell:e}}var Ce=class{constructor(f){this.container=f,this.renderer=new ce({antialias:!1,alpha:!1,powerPreference:"high-performance",preserveDrawingBuffer:!0}),this.renderer.outputColorSpace=r6,this.renderer.setPixelRatio(Math.min(window.devicePixelRatio||1,2)),this.renderer.autoClear=!0,this.renderer.setClearColor(66056,1),this.scene=new eM,this.camera=new ZA(35,16/9,.02,4e3),this.director=new Je(this.camera),this.container.appendChild(this.renderer.domElement);let A=new URLSearchParams(location.search);this._q=A,this._hide=new Set((A.get("hide")||"").split(",").filter(Boolean)),this._raw=A.get("raw")==="1"}async init(){let f=r=>{window.__INIT_STAGE=r};f("start");let A=this.scene;f("backdrop"),this.backdrop=nr(),A.add(this.backdrop.group),f("planet"),this.planet=er(s6.radius),this.planet.group.position.copy(s6.center),A.add(this.planet.group),this.planet.group.position.copy(s6.center),f("stars"),this.stars=or({count:5600,depth:300,radius:95}),A.add(this.stars.group),f("ship"),this.ship=new ue,this.ship.load(),A.add(this.ship.root),f("lights");let M=new iz(14084351,.92);M.position.set(-11,2.2,-2),A.add(M);let e=new iz(5220607,.62);e.position.set(6,-3,-9),A.add(e),A.add(new de(1714754,.55)),A.environment=this.buildEnvMap(),f("post");let t=this.container.clientWidth||1920,o=this.container.clientHeight||1080,n=this._q.get("rt"),i=n==="float"?_A:n==="byte"?$A:p6;this.post=new Be(this.renderer,t,o,{type:i}),this.resize(t,o),f("compile"),this.renderer.compile(A,this.camera),f("done"),this.inited=!0}buildEnvMap(){let M=document.createElement("canvas");M.width=512,M.height=256;let e=M.getContext("2d"),t=e.createLinearGradient(0,0,0,256);t.addColorStop(0,"#01030a"),t.addColorStop(.4,"#04121f"),t.addColorStop(.56,"#0b2b40"),t.addColorStop(.74,"#061420"),t.addColorStop(1,"#010206"),e.fillStyle=t,e.fillRect(0,0,512,256);let o=(s,a,l,h)=>{let g=e.createRadialGradient(s,a,0,s,a,l);g.addColorStop(0,h),g.addColorStop(1,"rgba(0,0,0,0)"),e.fillStyle=g,e.beginPath(),e.arc(s,a,l,0,Math.PI*2),e.fill()};e.globalCompositeOperation="lighter",o(512*.3,256*.28,256*.3,"rgba(185,222,255,0.9)"),o(512*.76,256*.62,256*.26,"rgba(60,130,215,0.55)"),o(512*.52,256*.86,256*.18,"rgba(255,150,70,0.22)");let n=new y6(M);n.mapping=Mz,n.colorSpace=kA;let i=new NM(this.renderer);i.compileEquirectangularShader();let r=i.fromEquirectangular(n);return n.dispose(),i.dispose(),r.texture}resize(f,A){this.renderer.setSize(f,A,!1),this.camera.aspect=f/A,this.camera.updateProjectionMatrix(),this.post&&this.post.setSize(Math.floor(f*this.renderer.getPixelRatio()),Math.floor(A*this.renderer.getPixelRatio())),this.vw=f,this.vh=A;let M=this.renderer.getPixelRatio();this.ship&&this.ship.ready&&this.ship.setPixelRatio(M),this.stars&&(this.stars.uniforms.uPixelRatio.value=M)}faceAvatarCamera(){
+  // 头像激活期间冻结星球自转：星球组的朝向完全由相机相对星球中心的方位决定。
+  // SphereGeometry 的 UV 中心 (0.5,0.5) 落在本地 +X 轴上；lookAt 让本地 +Z 朝向相机，
+  // 再绕本地 Y 轴 -90°，把 +X 转到 +Z——头像贴图中心因此始终正对视角。
+  let P=this.planet;
+  if(!P||!P.planetMat.uniforms.uAvatar.value)return;
+  P.group.lookAt(this.camera.position);
+  P.group.rotateY(-Math.PI/2);
+}renderFrame(f,A=1/60){let M=Of(f,0,DA-1),e=M/N6,t=K6(M),o=this.director.update(M,1/N6),n=this.director._shipPos,i=this.director._shipQuat;this.faceAvatarCamera();this.ship.root.position.copy(n),this.ship.root.quaternion.copy(i),this.ship.root.scale.setScalar(1);let r=t.id===1?Of(M/71):Of((M-72)/71),s=Mr(M),a=fr(M),l=Ar(M),h=t.id===1?Lf(.7,.84,r):Lf(.86,1.34,Math.pow(a,1.5))*Lf(1,.34,rA(0,.26,l)),g=t.id===1?Lf(.3,.46,r):Lf(.34,.92,Math.pow(a,1.5))*Lf(1,.1,rA(0,.28,l)),Q={holo:0,throttle:h,dissolve:0,glitch:0,windows:0,burst:0,nose:0,flameK:t.id===1?1:Lf(.2,.06,rA(0,.3,l)),fillK:t.id===1?1:.18};this.ship.setState(Q),this.ship.update(e),this.stars.update(e,this.camera.position,1/N6,{warp:g,opacity:t.id===1?.78:.9,lineOpacity:t.id===1?Lf(.45,.62,r):Lf(.55,.95,Math.pow(s,.6))}),this.planet.planetMat.uniforms.uTime.value=e;let U=this.camera.position.distanceTo(this.planet.group.position),c=Of(1-(U-s6.radius)/60,0,1);if(this.planet.planetMat.uniforms.uGlow.value=1+c*.12,this.planet.ringMat.opacity=.045+c*.035,this._hide&&this._hide.size){let J=this._hide;J.has("planet")&&(this.planet.group.visible=!1),J.has("ring")&&(this.planet.ring.visible=!1),J.has("stars")&&(this.stars.group.visible=!1),J.has("starline")&&(this.stars.lines.visible=!1),J.has("starpoint")&&(this.stars.points.visible=!1),J.has("backdrop")&&(this.backdrop.group.visible=!1),J.has("ship")&&(this.ship.root.visible=!1),J.has("flame")&&this.ship.flame&&(this.ship.flame.group.visible=!1),J.has("points")&&(this.ship.points.visible=!1),J.has("fills")&&this.ship.fills&&this.ship.fills.forEach(k=>k.obj.visible=!1)}let m=rA(102,138,M),p=1-rA(138,143,M)*.96,B=t.id===1?Lf(1.26,1.32,r):Lf(1.16,1.3,Math.pow(a,1.2))*Lf(1,.8,rA(0,.35,l));if(this._raw){let J=this.renderer;return J.setRenderTarget(null),J.setClearColor(1127253,1),J.clear(),J.render(this.scene,this.camera),{shot:t,time:e}}return this.post.render(this.scene,this.camera,{time:e,bloomInt:t.id===1?.34:Lf(.3,.48,Math.pow(a,1.3))*Lf(1,.85,l),bloomThreshold:.96,rgb:t.id===1?.55:Lf(.7,2.6,Math.pow(a,1.4))*Lf(1,.3,rA(0,.25,l)),radial:t.id===1?0:Lf(.01,.13,Math.pow(a,1.6))*Lf(1,.1,rA(0,.3,l)),motionBlur:0,glitch:0,scanline:t.id===1?.03:.1,vignette:.92,exposure:B,flash:m,tint:new kf(t.id===1?.94:.92,.98,t.id===1?1.06:1.12),levelIn:t.id===1?1:p,centerX:o.center.x,centerY:o.center.y,contrast:1.06}),{shot:t,time:e}}};
+var FLIGHT_SECONDS=5;
+var WORLD=null,STAGE=null,OPTS=null,RUNNING=0,SKIPPED=0,DONE=0,FRAME=0,T0=0,LAST=0,AVATAR_MIX=0,AVATAR_TARGET=0,AVATAR_TEX=null,DONE_TIMER=0;
 
 function stageEl(){return document.getElementById("warp-flight-stage")}
 function world(){if(WORLD)return WORLD;STAGE=stageEl();if(!STAGE)return null;WORLD=new Ce(STAGE);return WORLD}
@@ -4742,6 +4753,12 @@ function loadAvatar(u){
       cx.drawImage(img,0,0,cv.width,cv.height);
       var tex=new y6(cv);
       tex.colorSpace=kA;
+      // 贴图清晰度：显式开启 mipmap + 三线性过滤 + 各向异性，避免球面斜视处糊成一片。
+      // CanvasTexture 的默认值恰好如此，但写出来才能在包体被重新裁剪时不悄悄丢设置。
+      tex.generateMipmaps=true;
+      tex.minFilter=1008; // LinearMipmapLinearFilter
+      tex.magFilter=1006; // LinearFilter
+      if(WORLD&&WORLD.renderer)tex.anisotropy=WORLD.renderer.capabilities.getMaxAnisotropy();
       AVATAR_TEX=tex;
       applyAvatar();
     }catch(e){}
@@ -4755,14 +4772,19 @@ function tick(now){
   try{
     if(!LAST)LAST=now;
     var dt=Math.min(.1,(now-LAST)/1000);LAST=now;
-    FRAME=Math.min(DA-1,FRAME+dt*N6*2);
+    if(!T0)T0=now;
+    // 5 秒先快后慢：u 是墙钟进度，easeOut 让开头星流飞驰、临近星球减速滑入。
+    // 最后一帧 DA-1=143 正好在 u=1 到达，收尾不会在黑帧上停顿。
+    var u=Math.min(1,(now-T0)/1000/FLIGHT_SECONDS);
+    var e=1-(1-u)*(1-u);
+    FRAME=Math.min(DA-1,(DA-1)*e);
     if(AVATAR_TARGET>AVATAR_MIX){
       AVATAR_MIX=Math.min(AVATAR_TARGET,AVATAR_MIX+dt/0.65);
       if(WORLD&&WORLD.planet)WORLD.planet.planetMat.uniforms.uAvatarMix.value=AVATAR_MIX;
     }
     WORLD.renderFrame(FRAME);
-    if(FRAME>=DA-1){
-      // 最后一帧就是白闪峰值（levelIn 0.04）；等一帧让白色真正画出来再跳转。
+    if(u>=1){
+      // 最后一帧就是白闪完成帧（levelIn 0.04）；等一帧让画面真正画出来再跳转。
       if(!DONE_TIMER)DONE_TIMER=window.setTimeout(finish,80);
       return;
     }
@@ -4788,6 +4810,7 @@ function start(o){
     try{
       resize();
       applyAvatar();
+      T0=0;
       LAST=0;
       window.requestAnimationFrame(tick);
     }catch(e){finish()}
