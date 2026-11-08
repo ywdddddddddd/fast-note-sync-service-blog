@@ -30,6 +30,19 @@ import (
 
 const blogQuizFileName = "blog-quiz.json"
 
+// blogQuizMSMax is the longest elapsed time one attempt may report: thirty minutes.
+//
+// The browser measures with Date.now(), so an honest attempt is seconds to a few minutes.
+// Anything longer is a stale tab, a clock jump, or a forged payload; clamping keeps the
+// leaderboard's speed tie-break meaningful. Negative values are discarded outright, because a
+// negative time would sort ahead of every honest attempt.
+//
+// blogQuizMSMax 是单次作答允许上报的最长耗时：三十分钟。
+//
+// 浏览器用 Date.now() 计时，诚实作答是几秒到几分钟。更长的值是搁置的标签页、时钟跳变或伪造
+// 载荷；夹到上限让榜单的速度并列规则仍然有意义。负值直接丢弃——负数会排到所有诚实作答之前。
+const blogQuizMSMax int64 = 30 * 60 * 1000
+
 // blogQuizBest is one reader's best attempt on one note.
 //
 // blogQuizBest 是一个读者在一篇笔记上的最好成绩。
@@ -413,12 +426,14 @@ func (s *shareService) BlogQuizPick(ctx context.Context, slug string) (*dto.Blog
 // BlogQuizSubmit re-judges an attempt server-side and records the outcome.
 //
 // The browser is trusted for nothing but its own selections: correct/total/rate are all
-// recomputed here from the cached session. A reader who edits the page's JavaScript can
-// change what their screen says; they cannot change what is stored.
+// recomputed here from the cached session, every selection is checked against the options the
+// server published, and the client's Total is ignored entirely. A reader who edits the page's
+// JavaScript can change what their screen says; they cannot change what is stored.
 //
 // BlogQuizSubmit 在服务端重新判一次作答并记录结果。
 //
-// 除了读者选了什么，浏览器不被信任任何东西：正确数、总数、正确率全部在这里按缓存的题目重算。
+// 除了读者选了什么，浏览器不被信任任何东西：正确数、总数、正确率全部在这里按缓存的题目重算，
+// 每个选择都要对照服务端下发的选项校验，而客户端的 Total 完全不被读取。
 // 改了页面 JS 的读者能改变自己屏幕上显示的东西，改变不了存下来的东西。
 func (s *shareService) BlogQuizSubmit(ctx context.Context, in *dto.BlogQuizSubmitDTO) (*dto.BlogQuizResultDTO, error) {
 	post, err := s.RenderBlogBySlug(ctx, in.Slug)
@@ -431,20 +446,24 @@ func (s *shareService) BlogQuizSubmit(ctx context.Context, in *dto.BlogQuizSubmi
 		sess = buildQuizSession(in.Slug, post.Path, plain)
 	}
 
-	correct := 0
-	wrongIDs := make([]string, 0, 4)
-	for _, q := range sess.objective {
-		picked, ok := in.Selections[q.ID]
-		if ok && quizAnswerMatches(q.Kind, q.Answer, picked) {
-			correct++
-			continue
-		}
-		wrongIDs = append(wrongIDs, q.ID)
-	}
-	total := len(sess.objective)
+	// in.Total exists only so the wire shape stays compatible. The denominator is the server's
+	// own question count: a payload that claims total=1 cannot turn one correct guess into
+	// 100%, and one that omits half the questions cannot shrink the denominator to match.
+	//
+	// in.Total 只为保持传输结构兼容而存在。分母是服务端自己的题数：声称 total=1 的载荷
+	// 不能把一次蒙对变成 100%，漏掉一半题目的载荷也不能把分母缩到与自己一致。
+	correct, wrongIDs, total := quizJudgeAttempt(sess.objective, in.Selections)
 	if total == 0 {
 		return &dto.BlogQuizResultDTO{}, nil
 	}
+
+	// The elapsed time is a client measurement and is treated as such: negatives become
+	// "unknown" and anything past thirty minutes is clamped to the ceiling. It is stored and
+	// used only as a tie-break, never as evidence that an answer was correct.
+	//
+	// 耗时是客户端测量值，也按客户端测量值对待：负数变成「未知」，超过三十分钟的夹到上限。
+	// 它只被存储并用作并列时的次序，从不用来证明答案正确。
+	ms := quizNormalizeMS(in.MS)
 
 	hash := quizEmailHash(in.Email)
 	masked := quizMaskEmail(in.Email)
@@ -473,9 +492,9 @@ func (s *shareService) BlogQuizSubmit(ctx context.Context, in *dto.BlogQuizSubmi
 			}
 			prev := byNote[hash]
 			rate := float64(correct) / float64(total)
-			better := prev == nil || rate > prev.Rate || (rate == prev.Rate && in.MS > 0 && (prev.MS == 0 || in.MS < prev.MS))
+			better := prev == nil || rate > prev.Rate || (rate == prev.Rate && ms > 0 && (prev.MS <= 0 || ms < prev.MS))
 			if better {
-				byNote[hash] = &blogQuizBest{Rate: rate, Correct: correct, Total: total, MS: in.MS, At: now}
+				byNote[hash] = &blogQuizBest{Rate: rate, Correct: correct, Total: total, MS: ms, At: now}
 			}
 
 			tot := st.Totals[hash]
@@ -595,6 +614,114 @@ func (s *shareService) quizQuestionByIDLocked(notePath, id string) (dto.BlogQuiz
 }
 
 // ── Judging ───────────────────────────────────────────────────────────────────────────────
+
+// quizJudgeAttempt scores a submission against the server's own question set.
+//
+// Selections is a lookup table, never a source of questions: the loop walks the session's
+// objective pool, so an id the server does not know is unreachable and an id it knows but the
+// client omitted counts as wrong. Total is len(objective) — nothing the client can shrink.
+//
+// Each selection is also checked against the options the server published; letters past the
+// end of the option list (or past H, the last letter the page renders) are not something the
+// rendered page could have produced, so they are marked wrong rather than silently matched.
+//
+// quizJudgeAttempt 用服务端自己的题集给一次提交判分。
+//
+// Selections 只是一张查找表，绝不是题目来源：循环遍历会话里的客观题池，因此服务端不认识的 id
+// 无法触达，而服务端认识、客户端却漏掉的 id 计为答错。总数是 len(objective)——客户端缩不小它。
+//
+// 每个选择还要对照服务端下发的选项校验；超出选项表末尾（或超出页面最后渲染的 H）的字母，
+// 不是渲染页面能产生的东西，因此判错而不是静默比对。
+func quizJudgeAttempt(objective []dto.BlogQuizQuestionDTO, selections map[string]string) (correct int, wrongIDs []string, total int) {
+	total = len(objective)
+	wrongIDs = make([]string, 0, 4)
+	for _, q := range objective {
+		picked, ok := selections[q.ID]
+		if ok && quizSelectionValid(q, picked) && quizAnswerMatches(q.Kind, q.Answer, picked) {
+			correct++
+			continue
+		}
+		wrongIDs = append(wrongIDs, q.ID)
+	}
+	return correct, wrongIDs, total
+}
+
+// quizSelectionValid reports whether picked only names options this question actually has.
+//
+// Blank questions carry typed text and are judged by similarity, so they always pass here.
+// Subjective questions never reach this function (they are self-assessed). For objective
+// questions the ceiling is the shorter of the option count and eight — the page renders A–H
+// only, and quizLetters reads no letter past H.
+//
+// quizSelectionValid 判断 picked 是否只引用了这道题真正拥有的选项。
+//
+// 填空题携带手打文本、按相似度判分，因此这里一律放行。主观题不会走到这里（它们是自评的）。
+// 客观题的上限取选项数与 8 的较小者——页面只渲染 A–H，而 quizLetters 也只读得到 H。
+func quizSelectionValid(q dto.BlogQuizQuestionDTO, picked string) bool {
+	if q.Kind == quizKindBlank || q.Kind == quizKindSubj {
+		return true
+	}
+	limit := len(q.Options)
+	if limit > 8 {
+		limit = 8
+	}
+	if limit == 0 {
+		return false
+	}
+	letters := quizLetters(picked)
+	if letters == "" {
+		return false
+	}
+	for i := 0; i < len(letters); i++ {
+		if int(letters[i]-'A') >= limit {
+			return false
+		}
+	}
+	return true
+}
+
+// quizNormalizeMS turns a client-reported elapsed time into the value the leaderboard may use.
+//
+// Zero means "unknown" rather than "instant": the browser's timer can be missing, and a zero
+// must never win a speed tie-break (see quizFaster). Negative values are not credible and
+// become zero; values beyond the thirty-minute ceiling are clamped rather than discarded, so an
+// honest reader who left the page open overnight still keeps a recorded score.
+//
+// quizNormalizeMS 把客户端上报的耗时变成榜单可用的值。
+//
+// 零表示「未知」而不是「瞬间完成」：浏览器计时可能缺失，而零绝不能赢下速度并列（见 quizFaster）。
+// 负值不可信，归零；超过三十分钟上限的值夹到上限而不是丢弃，使把页面开了一夜的诚实读者
+// 仍然保有一次已记录的成绩。
+func quizNormalizeMS(ms int64) int64 {
+	switch {
+	case ms <= 0:
+		return 0
+	case ms > blogQuizMSMax:
+		return blogQuizMSMax
+	default:
+		return ms
+	}
+}
+
+// quizFaster reports whether a should be listed ahead of b when rates tie.
+//
+// Zero means "no credible time": it is what a discarded or never-recorded measurement becomes,
+// and it must sort *behind* every positive time. The previous comparison was a bare `<`, so a
+// forged ms=0 (or a legacy negative) won every tie-break on the board.
+//
+// quizFaster 判断正确率并列时 a 是否应排在 b 之前。
+//
+// 零表示「没有可信用时」：被丢弃或从未记录的测量值都会变成它，而它必须排在所有正数用时之后。
+// 旧的比较是裸的 `<`，于是一个伪造的 ms=0（或历史遗留的负数）能赢下榜单上的每一次并列。
+func quizFaster(a, b int64) bool {
+	if a <= 0 {
+		return false
+	}
+	if b <= 0 {
+		return true
+	}
+	return a < b
+}
 
 // quizAnswerMatches compares a submitted selection with the stored answer.
 //
@@ -775,7 +902,16 @@ func (s *shareService) quizBoardLocked(notePath, selfHash string, limit int) []d
 		if a.Rate != b.Rate {
 			return a.Rate > b.Rate
 		}
-		if a.MS != b.MS {
+		// A recorded time always outranks an unknown one; two unknown times fall through to
+		// the hash so the order is stable instead of depending on map iteration.
+		//
+		// 有记录的用时永远排在未知用时之前；两个未知用时落到哈希比较，
+		// 使顺序稳定，而不是取决于 map 遍历顺序。
+		aTimed, bTimed := a.MS > 0, b.MS > 0
+		if aTimed != bTimed {
+			return aTimed
+		}
+		if aTimed && a.MS != b.MS {
 			return a.MS < b.MS
 		}
 		return items[i].hash < items[j].hash
@@ -809,7 +945,7 @@ func (s *shareService) quizMeLocked(notePath, hash string) *dto.BlogQuizRankDTO 
 		if h == hash {
 			continue
 		}
-		if b.Rate > best.Rate || (b.Rate == best.Rate && b.MS < best.MS) {
+		if b.Rate > best.Rate || (b.Rate == best.Rate && quizFaster(b.MS, best.MS)) {
 			rank++
 		}
 	}
