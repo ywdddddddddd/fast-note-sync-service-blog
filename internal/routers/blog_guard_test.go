@@ -1,12 +1,14 @@
 package routers
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/haierkeys/fast-note-sync-service/internal/service"
 )
 
 // newGuardTestContext builds a gin context with a chosen TCP peer and headers.
@@ -166,18 +168,16 @@ func TestClientIdentity(t *testing.T) {
 
 // TestBlogGuardAskBucket verifies the frequency rule and the loopback exemption.
 //
-// The numbers are the decided ones: 6 per minute with a burst of 2. A burst of 2 means the
-// third rapid request is refused rather than the seventh — the bucket refills at one token per
-// ten seconds, so six questions in a minute works out to two immediate and then one per ten
-// seconds. In practice the per-address generation lock already serialises one visitor (an
-// answer takes 10–30 s), so this bucket only ever bites a script.
+// The numbers are the decided ones: 3 per minute with a burst of 3. The burst is the whole
+// opening allowance, so the fourth rapid request is refused; the bucket then refills at one
+// token per twenty seconds. In practice the per-address generation lock already serialises one
+// visitor (an answer takes 10–60 s), so this bucket only ever bites a script.
 //
 // TestBlogGuardAskBucket 验证频次规则与回环豁免。
 //
-// 数值是已定的：6 次/分、burst 2。burst 2 意味着被拒的是第三个快速请求而不是第七个——桶以
-// 每十秒一个令牌回填，所以「一分钟六个」实际表现为先放两个、之后每十秒一个。
-// 实践中按地址的生成锁已经把同一位访客串行化了（一个回答要 10–30 秒），
-// 因此这个桶真正咬到的只有脚本。
+// 数值是已定的：3 次/分、burst 3。burst 就是全部开场额度，因此第四个快速请求被拒；
+// 桶随后以每二十秒一个令牌回填。实践中按地址的生成锁已经把同一位访客串行化了
+// （一个回答要 10–60 秒），因此这个桶真正咬到的只有脚本。
 func TestBlogGuardAskBucket(t *testing.T) {
 	g := newBlogGuard()
 	now := time.Unix(1_700_000_000, 0)
@@ -193,14 +193,20 @@ func TestBlogGuardAskBucket(t *testing.T) {
 		t.Fatalf("burst 用尽后的下一次请求应被拒")
 	}
 
-	// Ten seconds buys exactly one more token at 6/minute.
-	// 在 6 次/分下，十秒恰好换回一个令牌。
-	now = now.Add(10 * time.Second)
+	// Twenty seconds buys exactly one more token at 3/minute.
+	// 在 3 次/分下，二十秒恰好换回一个令牌。
+	now = now.Add(20 * time.Second)
 	if !g.allowAsk(ip) {
-		t.Fatalf("十秒后应回填一个令牌")
+		t.Fatalf("二十秒后应回填一个令牌")
 	}
 	if g.allowAsk(ip) {
 		t.Fatalf("回填的令牌已被用掉，紧接着的请求应被拒")
+	}
+
+	// A different address has its own bucket; the old single-slot design did not.
+	// 另一个地址有自己的桶；旧的单槽设计没有这一点。
+	if !g.allowAsk("198.51.100.8") {
+		t.Fatalf("另一地址不应受此地址的频次影响")
 	}
 
 	// Loopback is exempt so the retrieval baseline script (7 questions, sub-second) still runs.
@@ -212,53 +218,134 @@ func TestBlogGuardAskBucket(t *testing.T) {
 	}
 }
 
-// TestBlogGuardGenerationLock verifies one in-flight generation per address.
+// TestBlogGuardAskSlotMatrix pins the three dimensions of the generation gate and the words
+// each refusal produces.
 //
-// The lock must be exclusive while held, must be reacquirable the instant it is released (the
-// browser's next question arrives immediately after `done`), and must not be shared between
-// addresses.
+// The matrix is the contract: frequency (too often), per-address concurrency (your own answer is
+// still streaming), global capacity (the blog is busy). Before this gate replaced the single
+// global slot, the second and third cases were indistinguishable — both said "your previous
+// question is still being answered" even when a stranger held the only slot.
 //
-// TestBlogGuardGenerationLock 验证每地址同时只有一次生成。
+// TestBlogGuardAskSlotMatrix 钉住生成闸的三个维度以及每种拒绝产生的文案。
 //
-// 锁在持有时必须互斥，在释放的瞬间必须可再取（浏览器的下一个问题紧随 done 事件到达），
-// 且不得在不同地址之间共享。
-func TestBlogGuardGenerationLock(t *testing.T) {
+// 这张矩阵就是契约：频次（太频繁）、按地址并发（你自己的回答还在输出）、全站容量（博客正忙）。
+// 在这个闸取代全局单槽之前，第二与第三种情形无法区分——即使名额被陌生人占着，
+// 也会说「您上一个问题还在回答」。
+func TestBlogGuardAskSlotMatrix(t *testing.T) {
 	g := newBlogGuard()
 	g.resetForTest(func() time.Time { return time.Unix(1_700_000_000, 0) })
 
-	const ip = "198.51.100.20"
-	release := g.tryLockGeneration(ip)
-	if release == nil {
-		t.Fatal("首次生成应拿到锁")
+	const ipA, ipB, ipC = "198.51.100.20", "198.51.100.21", "198.51.100.22"
+
+	// 1. The first address takes the first slot.
+	// 1. 第一个地址拿到第一个名额。
+	releaseA, slot := g.tryLockGeneration(ipA)
+	if slot != askSlotGranted {
+		t.Fatalf("首次生成应放行，实际 %v", slot)
 	}
-	if second := g.tryLockGeneration(ip); second != nil {
-		t.Fatal("同一地址的第二次生成应被拒")
+	// 2. The same address is told that its own answer is still streaming.
+	// 2. 同一地址被告知自己的回答还在输出。
+	if _, slot := g.tryLockGeneration(ipA); slot != askSlotBusySelf {
+		t.Fatalf("同地址第二次生成应判为 askSlotBusySelf，实际 %v", slot)
 	}
-	if other := g.tryLockGeneration("198.51.100.21"); other == nil {
-		t.Fatal("另一地址的生成不应受此锁影响")
-	} else {
-		other()
+	// 3. A second address takes the second global slot.
+	// 3. 第二个地址拿到第二个全站名额。
+	releaseB, slot := g.tryLockGeneration(ipB)
+	if slot != askSlotGranted {
+		t.Fatalf("第二地址应放行，实际 %v", slot)
+	}
+	// 4. A third address is refused by capacity, not by its own concurrency.
+	// 4. 第三个地址被容量拒绝，而不是被自己的并发拒绝。
+	if _, slot := g.tryLockGeneration(ipC); slot != askSlotBusyGlobal {
+		t.Fatalf("名额已满时应判为 askSlotBusyGlobal，实际 %v", slot)
 	}
 
+	// 5. Release is idempotent: a double release must not hand out a second global slot.
+	// 5. 释放是幂等的：重复释放不得多还一个全站名额。
+	releaseA()
+	releaseA()
+	releaseC, slot := g.tryLockGeneration(ipC)
+	if slot != askSlotGranted {
+		t.Fatalf("释放一个名额后应能再取，实际 %v", slot)
+	}
+	// Only ipB and ipC should be held now; if the double release had leaked a slot, loopback
+	// would incorrectly be granted one below.
+	// 现在应只持有 ipB 与 ipC；若重复释放多还了名额，下面的回环会被错误放行。
+
+	// 6. Loopback is exempt from the per-address rule but not from global capacity.
+	// 6. 回环豁免按地址规则，但不豁免全站容量。
+	if _, slot := g.tryLockGeneration("127.0.0.1"); slot != askSlotBusyGlobal {
+		t.Fatalf("全站满时回环也应判为 askSlotBusyGlobal，实际 %v", slot)
+	}
+	releaseB()
+	releaseLoop1, slot := g.tryLockGeneration("127.0.0.1")
+	if slot != askSlotGranted {
+		t.Fatalf("有空余名额时回环应放行，实际 %v", slot)
+	}
+	if _, slot := g.tryLockGeneration("127.0.0.1"); slot != askSlotBusyGlobal {
+		t.Fatalf("回环也不能突破全站容量，实际 %v", slot)
+	}
+	releaseC()
+	releaseLoop2, slot := g.tryLockGeneration("127.0.0.1")
+	if slot != askSlotGranted {
+		t.Fatalf("第二个回环请求在有空位时应放行（豁免按地址并发），实际 %v", slot)
+	}
+	releaseLoop1()
+	releaseLoop2()
+
+	// 7. The three refusal messages are distinct and say different things.
+	// 7. 三条拒绝文案互不相同，说的也是不同的事。
+	msgs := []string{blogAskMsgTooFrequent, blogAskMsgBusySelf, blogAskMsgBusyGlobal}
+	seen := make(map[string]struct{}, len(msgs))
+	for _, m := range msgs {
+		if m == "" {
+			t.Fatal("拒绝文案不能为空")
+		}
+		if _, dup := seen[m]; dup {
+			t.Fatalf("拒绝文案重复：%q", m)
+		}
+		seen[m] = struct{}{}
+	}
+
+	// 8. Everything released: the original address can start again.
+	// 8. 全部释放后，原地址可以重新开始。
+	releaseAgain, slot := g.tryLockGeneration(ipA)
+	if slot != askSlotGranted {
+		t.Fatalf("全部释放后应能重新取到名额，实际 %v", slot)
+	}
+	releaseAgain()
+}
+
+// TestBlogGuardAskSlotReleaseOnDeadline proves a request that hit the wall-clock budget gives
+// its slot back, which is what makes the old "one hung connection locks the feature" defect
+// impossible.
+//
+// TestBlogGuardAskSlotReleaseOnDeadline 验证撞上墙钟预算的请求会归还名额，
+// 正是这一点让旧的「一条挂起连接锁死功能」缺陷不可能再出现。
+func TestBlogGuardAskSlotReleaseOnDeadline(t *testing.T) {
+	g := newBlogGuard()
+	g.resetForTest(func() time.Time { return time.Unix(1_700_000_000, 0) })
+	g.askTimeout = 20 * time.Millisecond
+
+	const ip = "198.51.100.30"
+	release, slot := g.tryLockGeneration(ip)
+	if slot != askSlotGranted {
+		t.Fatalf("首次生成应放行，实际 %v", slot)
+	}
+
+	started := time.Now()
+	runAskStream(context.Background(), g.askBudget(), func(ctx context.Context) error {
+		<-ctx.Done()
+		return ctx.Err()
+	}, func(service.AskEvent) error { return nil })
+	if elapsed := time.Since(started); elapsed > time.Second {
+		t.Fatalf("注入的 20ms 预算却等了 %v，说明超时路径没有生效", elapsed)
+	}
 	release()
-	if again := g.tryLockGeneration(ip); again == nil {
-		t.Fatal("释放后应能再次拿到锁")
-	} else {
-		again()
-	}
 
-	// Loopback is exempt: the baseline script fires seven questions in parallel.
-	// 回环地址豁免：基线脚本会并行发七个问题。
-	first := g.tryLockGeneration("127.0.0.1")
-	if first == nil {
-		t.Fatal("回环地址应豁免生成锁")
+	if _, slot := g.tryLockGeneration(ip); slot != askSlotGranted {
+		t.Fatalf("超时请求归还名额后应能再次生成，实际 %v", slot)
 	}
-	if second := g.tryLockGeneration("127.0.0.1"); second == nil {
-		t.Fatal("回环地址应可并发")
-	} else {
-		second()
-	}
-	first()
 }
 
 // TestBlogGuardReactRules verifies frequency, dedup, the kind dimension and retraction.
@@ -347,9 +434,9 @@ func TestBlogGuardSweepKeepsBusyEntries(t *testing.T) {
 	g.resetForTest(func() time.Time { return now })
 
 	const busyIP, idleIP = "198.51.100.40", "198.51.100.41"
-	release := g.tryLockGeneration(busyIP)
-	if release == nil {
-		t.Fatal("应拿到生成锁")
+	release, slot := g.tryLockGeneration(busyIP)
+	if slot != askSlotGranted {
+		t.Fatalf("应拿到生成锁，实际 %v", slot)
 	}
 	if !g.allowAsk(idleIP) {
 		t.Fatal("应能记录空闲地址")

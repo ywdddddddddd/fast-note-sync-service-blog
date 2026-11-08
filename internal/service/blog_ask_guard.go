@@ -11,28 +11,31 @@ import "errors"
 // nearly free locally: it holds one upstream connection and no CPU.
 //
 // So the two phases need different limits. Retrieval gets a small global gate; generation gets
-// a per-visitor lock (enforced in the router, where the client identity lives) and no global
-// cap at all.
+// a per-visitor lock plus a small global capacity limit, both enforced in the router where the
+// client identity and the process-wide view live.
 //
 // The reason the gate must be *narrow* is worth stating plainly, because the obvious
-// implementation is the wrong one: a single global semaphore wrapping the whole request would
-// be held for the entire 10–30-second generation, and a blog with a gate of 1 would then answer
-// one visitor while serving "503 busy" to everyone else for half a minute. That is strictly
-// worse than the queueing it was meant to fix. The gate below therefore covers the retrieval
-// call and nothing else — see askRetrieveGuarded, whose `defer` closes over exactly that call.
+// implementation is the wrong one: one global semaphore wrapping the whole request would be
+// held for the entire 10–60-second generation, and a blog with a gate of 1 would then answer
+// one visitor while serving "busy" to everyone else for up to a minute. That is strictly worse
+// than the queueing it was meant to fix. (The router's generation cap is a different
+// instrument: it is wider than one and every slot has a deadline, so a stuck request cannot
+// own it forever.) The gate below therefore covers the retrieval call and nothing else — see
+// askRetrieveGuarded, whose `defer` closes over exactly that call.
 //
 // 博客问答的检索并发闸。
 //
 // 一次提问有两个资源性质相反的阶段。检索——嵌入问题、探测 Bleve、算向量、调交叉编码器——
 // 耗时 2–3 秒，且是纯烧钱：每次提问都记一次嵌入往返和一次重排往返，钱在没人读答案时也照样花掉。
-// 生成耗时 10–30 秒，而本地几乎不花什么：它占一条上游连接，不占 CPU。
+// 生成耗时 10–60 秒，而本地几乎不花什么：它占一条上游连接，不占 CPU。
 //
-// 因此两个阶段需要不同的限制。检索拿一个小的全局闸；生成拿一把按访客的锁（在路由层执行，
-// 因为客户端身份在那里），且不要全局上限。
+// 因此两个阶段需要不同的限制。检索拿一个小的全局闸；生成拿一把按访客的锁，再加一个小的
+// 全站容量上限，两者都在路由层执行——客户端身份与进程级视野都在那里。
 //
 // 闸必须「窄」的理由值得直说，因为显而易见的实现恰好是错的那个：用一个全局信号量包住整个请求，
-// 它会在长达 10–30 秒的生成期间一直被持有，于是一个闸容量为 1 的博客会给一位访客作答，
-// 同时向其他所有人回半分钟的「503 繁忙」。那比它想修的排队问题严格来说更糟。
+// 它会在长达 10–60 秒的生成期间一直被持有，于是一个闸容量为 1 的博客会给一位访客作答，
+// 同时向其他所有人回最多一分钟的「繁忙」。那比它想修的排队问题严格来说更糟。（路由层的生成
+// 上限是另一件工具：它比 1 宽，且每个名额都有截止时间，因此卡住的请求无法永远占有它。）
 // 因此下面的闸只覆盖检索调用，别无其他——见 askRetrieveGuarded，它的 defer 作用域正好是那一次调用。
 
 // askRetrievalConcurrency is how many retrieval pipelines may run at once.

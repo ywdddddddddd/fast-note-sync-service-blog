@@ -1,7 +1,10 @@
 package routers
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -146,30 +149,45 @@ func registerBlogAskRoutes(r *gin.Engine, appContainer *app.App) {
 		// down even when the service is idle, and a visitor with one answer in flight should be
 		// told that specifically rather than being counted as a flood.
 		//
+		// The concurrency gate has two dimensions now. The per-address one says "wait for your
+		// own answer"; the global one says "the blog is busy" and is the capacity limit that
+		// replaced the old single slot. A hung request can no longer hold either forever: the
+		// handler always returns, and runAskStream below bounds how long it can stay.
+		//
 		// 两道滥用闸，从便宜的开始，两者都以真实客户端地址为键，而不是以客户端能改写的头为键
 		// （见 clientIdentityResolver）。
 		//
 		// 先频次、后并发：一个在猛刷端点的访客，即使服务空闲也该被告知放慢；
 		// 而一个已有回答在途的访客应该被告知这一具体事实，而不是被当成洪水。
+		//
+		// 并发闸现在有两个维度。按地址的那条说的是「等自己的回答结束」；全站的这条说的是
+		// 「博客正忙」，它是取代旧单槽的容量上限。挂起的请求再也占不住任何一条：处理器总会返回，
+		// 而下面的 runAskStream 限定它能挂多久。
 		clientKey := ident.identity(c)
 		if !blogGuardInstance.allowAsk(clientKey) {
 			c.JSON(http.StatusTooManyRequests, gin.H{
-				"code": 429, "message": "提问太频繁，请稍等一会儿再问"})
+				"code": 429, "message": blogAskMsgTooFrequent})
 			return
 		}
-		releaseGen := blogGuardInstance.tryLockGeneration(clientKey)
-		if releaseGen == nil {
+		releaseGen, slot := blogGuardInstance.tryLockGeneration(clientKey)
+		switch slot {
+		case askSlotBusySelf:
 			c.JSON(http.StatusTooManyRequests, gin.H{
-				"code": 429, "message": "您上一个问题还在回答，请等它结束"})
+				"code": 429, "message": blogAskMsgBusySelf})
+			return
+		case askSlotBusyGlobal:
+			c.JSON(http.StatusTooManyRequests, gin.H{
+				"code": 429, "message": blogAskMsgBusyGlobal})
 			return
 		}
 		// Released when the handler returns, which is exactly when the answer finishes
 		// streaming — shareSvc.Ask below is synchronous and returns only after the last SSE
-		// frame. Holding it any longer would be impossible; holding it shorter would let the
-		// same visitor open two paid generations at once.
+		// frame or after the deadline interrupts it. Holding it any longer would be impossible;
+		// holding it shorter would let the same visitor open two paid generations at once.
 		//
 		// 在处理器返回时释放，而那正是回答流式输出结束的时刻——下面的 shareSvc.Ask 是同步的，
-		// 直到最后一帧 SSE 才返回。持有更久做不到；持有更短则会让同一位访客同时开两个付费生成。
+		// 直到最后一帧 SSE 或截止时间打断它才返回。持有更久做不到；持有更短则会让同一位访客
+		// 同时开两个付费生成。
 		defer releaseGen()
 
 		var req struct {
@@ -211,8 +229,16 @@ func registerBlogAskRoutes(r *gin.Engine, appContainer *app.App) {
 
 		flusher, canFlush := c.Writer.(http.Flusher)
 		w := c.Writer
+		// ResponseController reaches the underlying connection through gin's Unwrap, so each
+		// SSE write carries its own deadline. Without it, a client that stops reading can block
+		// Write while holding a global slot, and the context deadline below cannot unblock it.
+		//
+		// ResponseController 经 gin 的 Unwrap 抵达底层连接，因此每次 SSE 写都有自己的截止时间。
+		// 没有它，停止读取的客户端会在占着全站名额时阻塞 Write，而下面的上下文截止无法解开它。
+		rc := http.NewResponseController(w)
 
 		writeEvent := func(ev service.AskEvent) error {
+			_ = rc.SetWriteDeadline(time.Now().Add(blogAskWriteTimeout))
 			payload, err := json.Marshal(ev)
 			if err != nil {
 				return err
@@ -232,11 +258,76 @@ func registerBlogAskRoutes(r *gin.Engine, appContainer *app.App) {
 			return nil
 		}
 
-		err := shareSvc.Ask(c.Request.Context(), opts, writeEvent)
-		if err != nil && c.Request.Context().Err() == nil {
-			_ = writeEvent(service.AskEvent{Type: "error", Message: err.Error()})
-		}
+		// The answer runs under the handler's wall-clock budget. The route-level timeout still
+		// governs a single upstream call; this deadline caps the whole exchange, including
+		// retrieval, failover between routes, and any upstream that ignores its own timeout.
+		//
+		// 回答在处理器的墙钟预算下运行。线路级超时仍管单次上游调用；这个截止时间约束整场交互，
+		// 包括检索、线路间故障转移，以及任何无视自身超时的上游。
+		runAskStream(c.Request.Context(), blogGuardInstance.askBudget(),
+			func(ctx context.Context) error {
+				return shareSvc.Ask(ctx, opts, writeEvent)
+			}, writeEvent)
 	})
+}
+
+// runAskStream runs one answer under a wall-clock budget and renders the deadline as a final
+// SSE frame.
+//
+// The status code is already committed by the time the first stage event is written, so a
+// timeout cannot become a 504. What it can be is a last `error` event followed by the handler
+// returning, which ends the response; the browser's reader then completes and its cleanup path
+// runs exactly as it does after a normal `done`.
+//
+// A deadline is not an ordinary error: the pipeline may have already streamed half an answer,
+// so the closing message must say the answer was cut short rather than print a transport error.
+// The deadline is therefore checked before the returned error, because the service often turns
+// a context cancellation into its own `error` frame and still returns nil; the timeout sentence
+// must be the last thing the reader sees either way. A parent cancellation is different again —
+// that means the reader closed the tab, and there is nobody left to read anything.
+//
+// The budget is passed in rather than read from the constant so tests can inject milliseconds
+// and exercise the deadline path without sleeping for a minute.
+//
+// runAskStream 在墙钟预算下运行一次回答，并把截止时间渲染成最后一帧 SSE。
+//
+// 第一帧 stage 写出时状态码就已经提交，因此超时不可能变成 504。它能做的是发最后一帧
+// `error` 然后让处理器返回，从而结束响应；浏览器的流读取器随后正常完成，清理路径与收到
+// `done` 后完全一样。
+//
+// 截止不是普通错误：管线可能已经输出了一半答案，所以收尾文案必须说「回答被中断」，
+// 而不是打印一个传输错误。父上下文被取消又是另一回事——那意味着读者关掉了标签页，
+// 已经没有人会读任何东西。
+//
+// 预算以参数传入而不是直接读常量，使测试能注入毫秒级时长、走一遍截止路径，而不必真等一分钟。
+func runAskStream(parent context.Context, timeout time.Duration, ask func(context.Context) error,
+	writeEvent func(service.AskEvent) error) {
+
+	if timeout <= 0 {
+		timeout = blogAskTimeout
+	}
+	ctx, cancel := context.WithTimeout(parent, timeout)
+	defer cancel()
+
+	err := ask(ctx)
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		secs := int(timeout.Round(time.Second) / time.Second)
+		if secs < 1 {
+			secs = 1
+		}
+		_ = writeEvent(service.AskEvent{
+			Type:    "error",
+			Message: fmt.Sprintf("这个问题想了超过 %d 秒，已自动中断，请稍后再问一次", secs),
+		})
+		return
+	}
+	if err == nil {
+		return
+	}
+	if parent.Err() != nil {
+		return
+	}
+	_ = writeEvent(service.AskEvent{Type: "error", Message: err.Error()})
 }
 
 // blogAskEnabled reports whether the Q&A entry is switched on.

@@ -14,40 +14,92 @@ import (
 //
 // Both endpoints are unauthenticated by design — a reader who can read the page may ask about it
 // and react to it — so they are the only places where an anonymous visitor can make this server
-// spend money or disk. The rules here are deliberately coarse (per-visitor buckets, one
-// generation at a time, one vote per day per kind) rather than clever: at this traffic level the
-// goal is to stop a script, not to model human behaviour.
+// spend money or disk. The rules here are deliberately coarse (per-visitor buckets, one answer at
+// a time per address, a small global generation budget, one vote per day per kind) rather than
+// clever: at this traffic level the goal is to stop a script, not to model human behaviour.
 //
 // The retrieval cap is NOT here. It lives in the service layer, where it can be scoped to the
-// 2–3-second retrieval call instead of the whole 10–30-second request; see
+// 2–3-second retrieval call instead of the whole 10–60-second request; see
 // service/blog_ask_guard.go for why that distinction matters.
 //
 // 针对博客暴露的两个公开写接口的滥用控制：/api/blog/ask 与 /blog/react。
 //
 // 两者刻意不鉴权——能读到页面的读者就可以就它提问、对它表态——因此它们是匿名访客唯一
-// 能让这台服务器花钱或写盘的地方。这里的规则刻意粗放（按访客的令牌桶、同一时刻一次生成、
-// 每种表态每天一次）而不是精巧：在这个流量级别，目标是挡住脚本，不是模拟人的行为。
+// 能让这台服务器花钱或写盘的地方。这里的规则刻意粗放（按访客的令牌桶、每地址同时一次回答、
+// 一个小的全站生成名额、每种表态每天一次）而不是精巧：在这个流量级别，目标是挡住脚本，
+// 不是模拟人的行为。
 //
 // 检索名额不在这里。它在服务层，因为只有在那里才能把闸的作用域限定在 2–3 秒的检索调用上，
-// 而不是整个 10–30 秒的请求；这一区分的理由见 service/blog_ask_guard.go。
+// 而不是整个 10–60 秒的请求；这一区分的理由见 service/blog_ask_guard.go。
 
 const (
 	// blogAskPerMinute is how many questions one visitor may start per minute.
 	//
-	// Six is well above what a reader does (the observed pattern is one question, read the
-	// answer, ask a follow-up) and well below what a script needs to be useful: an attacker
-	// aiming to burn the upstream quota gets six paid retrieval cycles per minute per address
-	// instead of unlimited ones, which makes the attack either slow or expensive in proxies.
+	// Three. The endpoint re-reads and re-ranks the published corpus (about 144 notes on this
+	// blog) and then buys a model completion for every question, whether or not anyone reads the
+	// answer. The observed reader pattern is one question, read the answer, ask a follow-up; the
+	// old value of six was already generous, and three still leaves room for two follow-ups
+	// without letting a script use the blog as a free retrieval service.
 	//
 	// blogAskPerMinute 是一位访客每分钟可以发起的提问数。
 	//
-	// 6 远高于读者的实际行为（实测模式是问一个、读答案、再追问），又远低于脚本要产生效果所需：
-	// 想烧掉上游额度的攻击者，每个地址每分钟只能拿到 6 次付费检索，而不是无限次，
-	// 这让攻击要么很慢，要么在代理上很贵。
-	blogAskPerMinute = 6
-	// blogAskBurst lets a reader fire a couple of quick follow-ups without a refill wait.
-	// blogAskBurst 允许读者连发两个追问而无需等待回填。
-	blogAskBurst = 2
+	// 取 3。该端点每次都要重读并重排已发布语料（本站约 144 篇），然后为每个问题购买一次模型补全，
+	// 无论有没有人读答案。实测读者行为是问一个、读答案、再追问；旧值 6 本就宽松，3 仍够两次追问，
+	// 又不至于让脚本把博客当成免费的检索服务。
+	blogAskPerMinute = 3
+	// blogAskBurst is the bucket's opening allowance. Equal to the per-minute rate, so a reader
+	// can fire three questions back to back and then one every twenty seconds.
+	// blogAskBurst 是令牌桶的初始额度。与每分钟速率相同：读者可以连发三个问题，
+	// 之后每二十秒一个。
+	blogAskBurst = 3
+
+	// blogAskGlobalConcurrency is how many answers may stream at once across all visitors.
+	//
+	// Two, on the same small ECS as the retrieval gate. The old design had a single global
+	// generation slot, which one hung SSE connection could hold forever — the defect this
+	// replaces. The rule here is a *capacity* limit, not a lock: every slot is released when the
+	// request ends, and the deadline below guarantees that every request does end. Two is
+	// deliberately small because each generation holds an upstream connection and this box is a
+	// small pipe; being wrong on the low side costs a short wait, being wrong on the high side
+	// overloads the upstream for everyone.
+	//
+	// blogAskGlobalConcurrency 是全站同一时刻允许流式输出的回答数。
+	//
+	// 取 2，与检索闸同一台小 ECS。旧设计只有一个全站生成槽，一条挂起的 SSE 连接就能永久占住它——
+	// 这正是本次要替换的缺陷。这里的规则是**容量**限制，不是锁：每个名额在请求结束时归还，
+	// 而下面的截止时间保证每个请求都会结束。取 2 是因为每次生成占一条上游连接、这台机器是小水管；
+	// 取小了只是让读者多等一会儿，取大了会让上游对所有人过载。
+	blogAskGlobalConcurrency = 2
+
+	// blogAskTimeout is the wall-clock budget for one answer, after which the server stops the
+	// upstream call and closes the stream with a final `error` event.
+	//
+	// Sixty seconds is a product decision, not an upstream one: a reader who has watched an
+	// answer for a minute is not going to keep reading it, and an abandoned stream still holds a
+	// global slot. The route-level Timeout (default five minutes) remains the tolerance for a
+	// slow upstream; this deadline is the shorter, user-facing bound.
+	//
+	// blogAskTimeout 是单次回答的墙钟预算：到点后服务端中止上游调用，并发一条 `error` 事件收尾。
+	//
+	// 60 秒是产品决定，不是上游限制：读者盯着一分钟答案后不会再继续读下去，而被放弃的流仍占着
+	// 一个全站名额。线路级 Timeout（默认五分钟）仍是对慢上游的容忍度；这个截止时间是更短、
+	// 面向读者的界限。
+	blogAskTimeout = 60 * time.Second
+
+	// blogAskWriteTimeout bounds a single SSE write.
+	//
+	// A context deadline cannot interrupt a blocked Write: a client that opens the stream and
+	// stops reading fills the TCP window, and the handler would then sit inside Write with a
+	// global slot held — the same "one connection locks the feature" defect in a different
+	// disguise. Ten seconds is far longer than any real write needs and short enough that a
+	// stalled reader is disconnected well inside the answer budget.
+	//
+	// blogAskWriteTimeout 限定单次 SSE 写。
+	//
+	// 上下文截止无法打断阻塞中的 Write：打开流后不再读取的客户端会填满 TCP 窗口，处理器就会
+	// 抱着一个全站名额停在 Write 里——同一个「一条连接锁死功能」的缺陷换了个面目。十秒远长于
+	// 任何真实写入所需，又短到让停滞的读者在回答预算内被断开。
+	blogAskWriteTimeout = 10 * time.Second
 
 	// blogReactPerMinute is how many reaction calls one visitor may make per minute.
 	//
@@ -133,6 +185,21 @@ type blogGuard struct {
 	applies map[string]*blogGuardEntry // friend-application buckets // 友链申请频次桶
 	gens    map[string]*blogGuardEntry // generation locks (one answer per address) // 生成锁（每地址一次回答）
 
+	// askActive is the number of generation slots held right now, across every address. It is
+	// the global capacity limit; unlike the old single slot it is never "owned" by anyone and
+	// is always returned by the release function.
+	//
+	// askActive 是此刻全站被持有的生成名额数。它构成全站容量上限；与旧的单槽不同，它从不属于
+	// 某位访客，且永远由释放函数归还。
+	askActive int
+	// askTimeout is the wall-clock budget applied to one answer. A field rather than the bare
+	// constant so a test can inject milliseconds and observe the deadline path without sleeping
+	// for a minute.
+	//
+	// askTimeout 是单次回答的墙钟预算。做成字段而不是直接用常量，是为了让测试注入毫秒级时长、
+	// 观察截止路径，而不必真等一分钟。
+	askTimeout time.Duration
+
 	// votes dedups one reaction per (day, address, slug, kind). The day is stored with each
 	// key and compared on read, so yesterday's keys are dead on arrival and no timer is needed.
 	//
@@ -148,12 +215,13 @@ type blogGuard struct {
 // newBlogGuard 返回一个空的守卫。
 func newBlogGuard() *blogGuard {
 	return &blogGuard{
-		asks:    make(map[string]*blogGuardEntry),
-		reacts:  make(map[string]*blogGuardEntry),
-		applies: make(map[string]*blogGuardEntry),
-		gens:    make(map[string]*blogGuardEntry),
-		votes:   make(map[string]struct{}),
-		now:     time.Now,
+		asks:       make(map[string]*blogGuardEntry),
+		reacts:     make(map[string]*blogGuardEntry),
+		applies:    make(map[string]*blogGuardEntry),
+		gens:       make(map[string]*blogGuardEntry),
+		askTimeout: blogAskTimeout,
+		votes:      make(map[string]struct{}),
+		now:        time.Now,
 	}
 }
 
@@ -188,9 +256,9 @@ var blogGuardInstance = newBlogGuard()
 // which was right for "nginx on the same host" and wrong for the deployment this blog is moving
 // to — a reverse proxy on the ICP-filing host, one hop away. In that topology every request
 // would arrive from the proxy's public address, so a loopback-only rule would key *all visitors*
-// on one address: six questions per minute for the whole internet, and one generation lock held
-// by whoever asked first. The failure would look like a limit working too well, which is exactly
-// the kind of defect that survives a smoke test.
+// on one address: three questions per minute for the whole internet, and one per-address
+// generation lock held by whoever asked first. The failure would look like a limit working too
+// well, which is exactly the kind of defect that survives a smoke test.
 //
 // 把请求解析成限流所键的地址。
 //
@@ -203,8 +271,8 @@ var blogGuardInstance = newBlogGuard()
 //
 // 可信集合之所以做成类型而不是一个函数：它原本硬编码为回环，这对「同机 nginx」是对的，
 // 对即将迁移到的部署是错的——反代在备案接入机上，隔了一跳。那种拓扑下所有请求都来自代理的
-// 公网地址，只信回环的规则会把**全体访客**键到同一个地址上：全站每分钟 6 次提问，
-// 一把生成锁被最先提问的人占住。这个缺陷的表现是「限制生效得过于彻底」，
+// 公网地址，只信回环的规则会把**全体访客**键到同一个地址上：全站每分钟 3 次提问，
+// 一把按地址的生成锁被最先提问的人占住。这个缺陷的表现是「限制生效得过于彻底」，
 // 恰恰是冒烟测试抓不到的那一类。
 type clientIdentityResolver struct {
 	ips  []net.IP
@@ -389,15 +457,16 @@ func (g *blogGuard) sweepLocked(now time.Time) {
 // allowAsk reports whether this visitor may start a question now.
 //
 // Loopback is exempt: the baseline script (tokengen/ask_baseline.py) fires seven questions in
-// a few hundred milliseconds, and a 6/minute bucket would reject the seventh — turning a
+// a few hundred milliseconds, and a 3/minute bucket would reject the fourth — turning a
 // diagnostic tool that proves the retrieval pipeline works into one that reports a rate-limit
-// error. The exemption is only reachable from the machine itself.
+// error. The exemption is only reachable from the machine itself; the global capacity limit
+// still applies, so the script competes for the same two slots as everyone else.
 //
 // allowAsk 返回该访客此刻是否可以发起提问。
 //
 // 回环地址豁免：基线脚本（tokengen/ask_baseline.py）在几百毫秒内发完七个问题，
-// 而 6 次/分的桶会拒掉第七个——把「证明检索管线正常」的诊断工具变成一个报限流错误的工具。
-// 该豁免只能从本机到达。
+// 而 3 次/分的桶会拒掉第四个——把「证明检索管线正常」的诊断工具变成一个报限流错误的工具。
+// 该豁免只能从本机到达；全站容量上限仍然生效，因此脚本与所有人争同样的两个名额。
 func (g *blogGuard) allowAsk(key string) bool {
 	if isLoopbackAddr(key) {
 		return true
@@ -409,35 +478,116 @@ func (g *blogGuard) allowAsk(key string) bool {
 	return g.entryLocked(g.asks, key, blogAskPerMinute, blogAskBurst, now).lim.AllowN(now, 1)
 }
 
-// tryLockGeneration reserves this visitor's single generation slot.
+// askSlotDecision is the outcome of reserving one generation slot.
 //
-// Returns a release function on success and nil on refusal. Non-blocking on purpose: a visitor
+// The distinction between "you are already asking" and "everybody else is asking" matters
+// because the two need different advice: the first reader should wait for their own answer, the
+// second should try again in a moment. Collapsing them into one 429 message was how the old
+// single-slot design told every visitor "your previous question is still being answered" when in
+// fact a stranger held the slot.
+//
+// askSlotDecision 是预占一个生成名额的结果。
+//
+// 「你自己已经在问了」与「别人占满了」必须分开，因为两种情形需要不同的建议：前者应等自己的
+// 回答结束，后者稍后再来。把两者合并成一条 429 文案，正是旧单槽设计造成的现象——明明是一个
+// 陌生人占着名额，却对每位访客说「您上一个问题还在回答」。
+type askSlotDecision int
+
+const (
+	askSlotGranted    askSlotDecision = iota // 拿到名额
+	askSlotBusySelf                          // this address already has an answer streaming // 本地址已有回答在流式输出
+	askSlotBusyGlobal                        // the whole blog is at capacity // 全站名额已满
+)
+
+// Refusal messages. They live next to the decisions so the matrix — which limit fired, what the
+// reader is told — is visible in one place, and so a test can pin the wording.
+//
+// 拒绝文案。放在判定旁边，使「哪条限制生效 → 读者被告知什么」这张矩阵在一处可见，
+// 测试也能钉住文案。
+const (
+	blogAskMsgTooFrequent = "提问太频繁，请稍等一会儿再问"
+	blogAskMsgBusySelf    = "您上一个问题还在回答，请等它结束"
+	blogAskMsgBusyGlobal  = "当前提问的人有点多，请稍后再试"
+)
+
+// tryLockGeneration reserves one generation slot for this visitor.
+//
+// Returns a release function and the decision. Refusal is non-blocking on purpose: a visitor
 // with an answer already streaming is told to wait, rather than queued behind their own
-// previous question for up to half a minute.
+// previous question for up to a minute.
 //
-// tryLockGeneration 预占该访客唯一的生成名额。
+// Two limits are enforced in this order:
 //
-// 成功返回释放函数，拒绝时返回 nil。刻意非阻塞：已经有回答在流式输出的访客会被直接告知等待，
-// 而不是被排在自己上一个问题后面等半分钟。
-func (g *blogGuard) tryLockGeneration(key string) func() {
-	if isLoopbackAddr(key) {
-		return func() {}
-	}
+//  1. per address — one answer at a time. This is the rule that stops a single reader from
+//     opening a second paid generation while the first is still streaming.
+//  2. global — at most blogAskGlobalConcurrency answers. This is the capacity limit that keeps
+//     the small upstream pipe from being flooded by many different addresses. It applies to
+//     loopback too: it is a fact about the machine, not a judgement about the caller.
+//
+// Loopback is exempt from rule 1 only, preserving the local retrieval baseline script; it can
+// still run out of global capacity, which is the point of having a cap at all.
+//
+// tryLockGeneration 为该访客预占一个生成名额。
+//
+// 返回释放函数与判定结果。拒绝刻意非阻塞：已经有回答在流式输出的访客会被直接告知等待，
+// 而不是排在自己上一个问题后面等上一分钟。
+//
+// 这里按顺序执行两条限制：
+//
+//  1. 按地址——同一时刻一个回答。它挡住同一位读者在第一个生成还在流式输出时再开一个。
+//  2. 全站——最多 blogAskGlobalConcurrency 个回答。它是容量限制，防止许多不同地址同时灌满
+//     上游小水管。它对回环同样生效：这是关于机器的事实，不是对调用方的判断。
+//
+// 回环只豁免第 1 条，以保住本机的检索基线脚本；它仍可能被全站名额拒之门外——那正是容量上限的意义。
+func (g *blogGuard) tryLockGeneration(key string) (func(), askSlotDecision) {
+	loopback := isLoopbackAddr(key)
 	now := g.now()
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.sweepLocked(now)
+
 	e := g.entryLocked(g.gens, key, blogAskPerMinute, blogAskBurst, now)
-	if e.busy {
-		return nil
+	if !loopback && e.busy {
+		return nil, askSlotBusySelf
 	}
-	e.busy = true
+	if g.askActive >= blogAskGlobalConcurrency {
+		return nil, askSlotBusyGlobal
+	}
+	if !loopback {
+		e.busy = true
+	}
+	g.askActive++
+
+	// The release is idempotent: a handler that defers it and also calls it on an error path
+	// must not return two slots, which would let the global counter drift below the real number
+	// of in-flight answers and eventually disable the cap.
+	//
+	// 释放是幂等的：既 defer 又在错误路径调用的处理器不能归还两个名额，否则全站计数会低于
+	// 真实在途回答数，最终让上限失效。
+	var once sync.Once
 	return func() {
-		g.mu.Lock()
-		defer g.mu.Unlock()
-		e.busy = false
-		e.seen = g.now()
+		once.Do(func() {
+			g.mu.Lock()
+			defer g.mu.Unlock()
+			if e.busy {
+				e.busy = false
+				e.seen = g.now()
+			}
+			if g.askActive > 0 {
+				g.askActive--
+			}
+		})
+	}, askSlotGranted
+}
+
+// askBudget returns the wall-clock budget for one answer.
+//
+// askBudget 返回单次回答的墙钟预算。
+func (g *blogGuard) askBudget() time.Duration {
+	if g.askTimeout > 0 {
+		return g.askTimeout
 	}
+	return blogAskTimeout
 }
 
 // reactDecision is the outcome of a reaction gate check.
@@ -531,6 +681,7 @@ func (g *blogGuard) resetForTest(now func() time.Time) {
 	g.applies = make(map[string]*blogGuardEntry)
 	g.gens = make(map[string]*blogGuardEntry)
 	g.votes = make(map[string]struct{})
+	g.askActive = 0
 	g.lastSweep = time.Time{}
 	g.now = now
 }
