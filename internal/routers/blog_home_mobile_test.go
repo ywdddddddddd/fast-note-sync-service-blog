@@ -113,12 +113,25 @@ func TestCardPageCarriesItsHooks(t *testing.T) {
 		t.Fatalf("hero stats did not use WordsText")
 	}
 
-	// The mobile capsule and its two sheets must exist even though the page has no rail.
-	// 移动胶囊与它的两块面板必须存在，即便这一页没有右栏。
-	for _, want := range []string{`id="fns-dock"`, `class="card-sheet sheet-nav"`, `id="fns-scrim"`} {
+	// The mobile capsule opens one sheet and carries three keys. 推荐 and 活跃度 were removed:
+	// the recommendation block belongs to the list rail, and the heat map is already a card on
+	// this page, so both keys were a second control for something the reader already had.
+	// 移动胶囊只开一块面板、只带三键：推荐本属于列表页右栏，热力图本来就是这一页的一张卡，
+	// 两键都在给读者已经有的东西配第二个控件，故移除。
+	for _, want := range []string{
+		`id="fns-dock"`, `class="card-sheet sheet-nav"`, `id="fns-scrim"`, `--dock-n:3`,
+	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("card page lacks %q", want)
 		}
+	}
+	for _, gone := range []string{`sheet-rec`, `dock-hot`, `dock-live`} {
+		if strings.Contains(out, gone) {
+			t.Fatalf("card page still renders %q", gone)
+		}
+	}
+	if n := strings.Count(out, `class="dock-b"`); n != 3 {
+		t.Fatalf("card page capsule has %d keys, want 3", n)
 	}
 
 	// And the article list must NOT be here: the card page is a card, not a feed.

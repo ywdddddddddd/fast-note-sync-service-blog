@@ -96,7 +96,7 @@ var blogChromePartials = `
 
 {{define "pill"}}{{if eq .Kind "text"}}<span class="pill">{{template "pillicon" .}}<b>{{.Label}}</b></span>{{else if eq .Kind "rss"}}<button type="button" class="pill" data-feed="{{.Href}}">{{template "pillicon" .}}<b>{{.Label}}</b></button>{{else if eq .Kind "qr"}}<button type="button" class="pill" data-qr="1">{{template "pillicon" .}}<b>{{.Label}}</b></button>{{else}}<a class="pill" href="{{.Href}}"{{if eq .Kind "mail"}}{{else}} target="_blank" rel="noopener noreferrer"{{end}}>{{template "pillicon" .}}<b>{{.Label}}</b></a>{{end}}{{end}}
 
-{{define "navdock"}}<div class="dock dock-collapsible" id="fns-dock" role="group" aria-label="页面入口" data-slot="0">
+{{define "navdock"}}<div class="dock dock-collapsible" id="fns-dock" role="group" aria-label="页面入口" data-slot="0" style="--dock-n:3">
   <button type="button" class="dock-orb" id="fns-orb" aria-label="展开页面入口" aria-expanded="false">
     <span class="taiji-lottie" data-lottie="code">
       <svg class="taiji" viewBox="0 0 24 24" aria-hidden="true">
@@ -108,10 +108,8 @@ var blogChromePartials = `
     </span>
   </button>
   <span class="dock-thumb" aria-hidden="true"></span>
-  <a class="dock-b" href="/blog" aria-label="名片页 · 目录与推荐" title="目录与推荐在名片页"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M0 1.75A.75.75 0 0 1 .75 1h4.253c1.227 0 2.317.59 3 1.501A3.743 3.743 0 0 1 11.006 1h4.245a.75.75 0 0 1 .75.75v10.5a.75.75 0 0 1-.75.75h-4.507a2.25 2.25 0 0 0-1.591.659l-.622.621a.75.75 0 0 1-1.06 0l-.622-.621A2.25 2.25 0 0 0 5.258 13H.75a.75.75 0 0 1-.75-.75Zm7.251 10.324.004-5.073-.002-2.253A2.25 2.25 0 0 0 5.003 2.5H1.5v9h3.757a3.75 3.75 0 0 1 1.994.574ZM8.755 4.75l-.004 7.322a3.752 3.752 0 0 1 1.992-.572H14.5v-9h-3.495a2.25 2.25 0 0 0-2.25 2.25Z"/></svg></a>
-  <a class="dock-b" href="/blog" aria-label="推荐在名片页" title="推荐在名片页"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 .25a.75.75 0 0 1 .673.418l1.882 3.815 4.21.612a.75.75 0 0 1 .416 1.279l-3.046 2.97.719 4.192a.751.751 0 0 1-1.088.791L8 12.347l-3.766 1.98a.75.75 0 0 1-1.088-.79l.72-4.194L.818 6.374a.75.75 0 0 1 .416-1.28l4.21-.611L7.327.668A.75.75 0 0 1 8 .25Z"/></svg></a>
+  <a class="dock-b" href="/blog" aria-label="名片页 · 目录" title="目录在名片页"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M0 1.75A.75.75 0 0 1 .75 1h4.253c1.227 0 2.317.59 3 1.501A3.743 3.743 0 0 1 11.006 1h4.245a.75.75 0 0 1 .75.75v10.5a.75.75 0 0 1-.75.75h-4.507a2.25 2.25 0 0 0-1.591.659l-.622.621a.75.75 0 0 1-1.06 0l-.622-.621A2.25 2.25 0 0 0 5.258 13H.75a.75.75 0 0 1-.75-.75Zm7.251 10.324.004-5.073-.002-2.253A2.25 2.25 0 0 0 5.003 2.5H1.5v9h3.757a3.75 3.75 0 0 1 1.994.574ZM8.755 4.75l-.004 7.322a3.752 3.752 0 0 1 1.992-.572H14.5v-9h-3.495a2.25 2.25 0 0 0-2.25 2.25Z"/></svg></a>
   <a class="dock-b" href="/blog/walk" aria-label="漫游 · 随机打开一篇笔记"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M13.25 1c.966 0 1.75.784 1.75 1.75v10.5c0 .464-.184.909-.513 1.237A1.746 1.746 0 0 1 13.25 15H2.75c-.464 0-.909-.184-1.237-.513A1.746 1.746 0 0 1 1 13.25V2.75C1 1.784 1.784 1 2.75 1h10.5ZM2.75 2.5a.25.25 0 0 0-.25.25v10.5c0 .138.112.25.25.25h10.5a.25.25 0 0 0 .25-.25V2.75a.25.25 0 0 0-.25-.25H2.75Z"/><path d="M5 12a1 1 0 1 0 0-2 1 1 0 0 0 0 2Zm6-6a1 1 0 1 0 0-2 1 1 0 0 0 0 2ZM8 9a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z"/></svg></a>
-  <a class="dock-b" href="/blog" aria-label="活跃度在名片页" title="活跃度在名片页"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M6 2c.306 0 .582.187.696.471L10 10.731l1.304-3.26A.751.751 0 0 1 12 7h3.25a.75.75 0 0 1 0 1.5h-2.742l-1.812 4.528a.751.751 0 0 1-1.392 0L6 4.77 4.696 8.03A.75.75 0 0 1 4 8.5H.75a.75.75 0 0 1 0-1.5h2.742l1.812-4.529A.751.751 0 0 1 6 2Z"/></svg></a>
   <button type="button" class="dock-b" id="dock-ask" aria-label="问道 · 向知识库提问" aria-expanded="false"{{if .AskEnabled}} data-ask-open{{else}} data-ask-off="1" title="问答未启用：需要在 config.yaml 里打开 ai.enabled"{{end}}><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M1.75 1h8.5c.966 0 1.75.784 1.75 1.75v5.5A1.75 1.75 0 0 1 10.25 10H7.061l-2.574 2.573A1.458 1.458 0 0 1 2 11.543V10h-.25A1.75 1.75 0 0 1 0 8.25v-5.5C0 1.784.784 1 1.75 1ZM1.5 2.75v5.5c0 .138.112.25.25.25h1a.75.75 0 0 1 .75.75v2.19l2.72-2.72a.749.749 0 0 1 .53-.22h3.5a.25.25 0 0 0 .25-.25v-5.5a.25.25 0 0 0-.25-.25h-8.5a.25.25 0 0 0-.25.25Zm13 2a.25.25 0 0 0-.25-.25h-.5a.75.75 0 0 1 0-1.5h.5c.966 0 1.75.784 1.75 1.75v5.5A1.75 1.75 0 0 1 14.25 12H14v1.543a1.458 1.458 0 0 1-2.487 1.03L9.22 12.28a.749.749 0 0 1 .326-1.275.749.749 0 0 1 .734.215l2.22 2.22v-2.19a.75.75 0 0 1 .75-.75h1a.25.25 0 0 0 .25-.25Z"/></svg></button>
 </div>{{end}}
 
@@ -215,25 +213,19 @@ var blogCardTmpl = template.Must(template.New("blog-card").Funcs(blogAssetFuncs)
 {{template "blogfooter" .}}
 </div>
 
-<!-- The two sheets the mobile capsule opens. They are always in the DOM and moved by class, not
+<!-- The navigation sheet the mobile capsule opens. It is always in the DOM and moved by class, not
      by the hidden attribute: a display:none panel cannot animate in, and toggling hidden from a
      class-driven stylesheet is the kind of two-owner state that produces "the button did nothing".
 
-     移动胶囊打开的两块面板。它们始终在 DOM 里，由 class 移动而不是 hidden 属性：
+     移动胶囊打开的目录面板。它始终在 DOM 里，由 class 移动而不是 hidden 属性：
      display:none 的面板无法滑入，而用 class 驱动的样式表再去切换 hidden，
      正是那种会产生「点了没反应」的双所有者状态。 -->
 <div class="card-sheets">
   <aside class="card-sheet sheet-nav" aria-label="目录">{{template "blognav" .}}</aside>
-  {{if .Recs}}<aside class="card-sheet sheet-rec" aria-label="推荐">
-    <div class="nav-title">推荐 · 最近更新的栏目</div>
-    <ul class="rec">
-      {{range .Recs}}<li><a href="{{.Href}}"><span class="rec-name">{{.Name}}</span><b class="rec-upd">{{.Updated}}</b></a>{{if .Desc}}<p>{{.Desc}}</p>{{end}}<span class="rec-meta">{{.Count}} 篇 · {{.Words}} 字</span></li>{{end}}
-    </ul>
-  </aside>{{end}}
 </div>
 
 <div class="fns-scrim" id="fns-scrim" hidden></div>
-<div class="dock dock-collapsible" id="fns-dock" role="group" aria-label="页面入口" data-slot="0">
+<div class="dock dock-collapsible" id="fns-dock" role="group" aria-label="页面入口" data-slot="0" style="--dock-n:3">
   <button type="button" class="dock-orb" id="fns-orb" aria-label="展开页面入口" aria-expanded="false">
     <span class="taiji-lottie" data-lottie="code">
       <svg class="taiji" viewBox="0 0 24 24" aria-hidden="true">
@@ -246,10 +238,8 @@ var blogCardTmpl = template.Must(template.New("blog-card").Funcs(blogAssetFuncs)
   </button>
   <span class="dock-thumb" aria-hidden="true"></span>
   <button type="button" class="dock-b" data-i="0" id="dock-nav" aria-label="目录" aria-expanded="false"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M0 1.75A.75.75 0 0 1 .75 1h4.253c1.227 0 2.317.59 3 1.501A3.743 3.743 0 0 1 11.006 1h4.245a.75.75 0 0 1 .75.75v10.5a.75.75 0 0 1-.75.75h-4.507a2.25 2.25 0 0 0-1.591.659l-.622.621a.75.75 0 0 1-1.06 0l-.622-.621A2.25 2.25 0 0 0 5.258 13H.75a.75.75 0 0 1-.75-.75Zm7.251 10.324.004-5.073-.002-2.253A2.25 2.25 0 0 0 5.003 2.5H1.5v9h3.757a3.75 3.75 0 0 1 1.994.574ZM8.755 4.75l-.004 7.322a3.752 3.752 0 0 1 1.992-.572H14.5v-9h-3.495a2.25 2.25 0 0 0-2.25 2.25Z"/></svg></button>
-  <button type="button" class="dock-b" data-i="1" id="dock-hot" aria-label="推荐" aria-expanded="false"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 .25a.75.75 0 0 1 .673.418l1.882 3.815 4.21.612a.75.75 0 0 1 .416 1.279l-3.046 2.97.719 4.192a.751.751 0 0 1-1.088.791L8 12.347l-3.766 1.98a.75.75 0 0 1-1.088-.79l.72-4.194L.818 6.374a.75.75 0 0 1 .416-1.28l4.21-.611L7.327.668A.75.75 0 0 1 8 .25Z"/></svg></button>
-  <button type="button" class="dock-b" data-i="2" id="dock-walk" aria-label="漫游 · 随机打开一篇笔记"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M13.25 1c.966 0 1.75.784 1.75 1.75v10.5c0 .464-.184.909-.513 1.237A1.746 1.746 0 0 1 13.25 15H2.75c-.464 0-.909-.184-1.237-.513A1.746 1.746 0 0 1 1 13.25V2.75C1 1.784 1.784 1 2.75 1h10.5ZM2.75 2.5a.25.25 0 0 0-.25.25v10.5c0 .138.112.25.25.25h10.5a.25.25 0 0 0 .25-.25V2.75a.25.25 0 0 0-.25-.25H2.75Z"/><path d="M5 12a1 1 0 1 0 0-2 1 1 0 0 0 0 2Zm6-6a1 1 0 1 0 0-2 1 1 0 0 0 0 2ZM8 9a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z"/></svg></button>
-  <button type="button" class="dock-b" data-i="3" id="dock-live" aria-label="活跃度"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M6 2c.306 0 .582.187.696.471L10 10.731l1.304-3.26A.751.751 0 0 1 12 7h3.25a.75.75 0 0 1 0 1.5h-2.742l-1.812 4.528a.751.751 0 0 1-1.392 0L6 4.77 4.696 8.03A.75.75 0 0 1 4 8.5H.75a.75.75 0 0 1 0-1.5h2.742l1.812-4.529A.751.751 0 0 1 6 2Z"/></svg></button>
-  <button type="button" class="dock-b" data-i="4" id="dock-ask" aria-label="问道 · 向知识库提问" aria-expanded="false"{{if .AskEnabled}} data-ask-open{{else}} data-ask-off="1" title="问答未启用：需要在 config.yaml 里打开 ai.enabled"{{end}}><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M1.75 1h8.5c.966 0 1.75.784 1.75 1.75v5.5A1.75 1.75 0 0 1 10.25 10H7.061l-2.574 2.573A1.458 1.458 0 0 1 2 11.543V10h-.25A1.75 1.75 0 0 1 0 8.25v-5.5C0 1.784.784 1 1.75 1ZM1.5 2.75v5.5c0 .138.112.25.25.25h1a.75.75 0 0 1 .75.75v2.19l2.72-2.72a.749.749 0 0 1 .53-.22h3.5a.25.25 0 0 0 .25-.25v-5.5a.25.25 0 0 0-.25-.25h-8.5a.25.25 0 0 0-.25.25Zm13 2a.25.25 0 0 0-.25-.25h-.5a.75.75 0 0 1 0-1.5h.5c.966 0 1.75.784 1.75 1.75v5.5A1.75 1.75 0 0 1 14.25 12H14v1.543a1.458 1.458 0 0 1-2.487 1.03L9.22 12.28a.749.749 0 0 1 .326-1.275.749.749 0 0 1 .734.215l2.22 2.22v-2.19a.75.75 0 0 1 .75-.75h1a.25.25 0 0 0 .25-.25Z"/></svg></button>
+  <button type="button" class="dock-b" data-i="1" id="dock-walk" aria-label="漫游 · 随机打开一篇笔记"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M13.25 1c.966 0 1.75.784 1.75 1.75v10.5c0 .464-.184.909-.513 1.237A1.746 1.746 0 0 1 13.25 15H2.75c-.464 0-.909-.184-1.237-.513A1.746 1.746 0 0 1 1 13.25V2.75C1 1.784 1.784 1 2.75 1h10.5ZM2.75 2.5a.25.25 0 0 0-.25.25v10.5c0 .138.112.25.25.25h10.5a.25.25 0 0 0 .25-.25V2.75a.25.25 0 0 0-.25-.25H2.75Z"/><path d="M5 12a1 1 0 1 0 0-2 1 1 0 0 0 0 2Zm6-6a1 1 0 1 0 0-2 1 1 0 0 0 0 2ZM8 9a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z"/></svg></button>
+  <button type="button" class="dock-b" data-i="2" id="dock-ask" aria-label="问道 · 向知识库提问" aria-expanded="false"{{if .AskEnabled}} data-ask-open{{else}} data-ask-off="1" title="问答未启用：需要在 config.yaml 里打开 ai.enabled"{{end}}><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M1.75 1h8.5c.966 0 1.75.784 1.75 1.75v5.5A1.75 1.75 0 0 1 10.25 10H7.061l-2.574 2.573A1.458 1.458 0 0 1 2 11.543V10h-.25A1.75 1.75 0 0 1 0 8.25v-5.5C0 1.784.784 1 1.75 1ZM1.5 2.75v5.5c0 .138.112.25.25.25h1a.75.75 0 0 1 .75.75v2.19l2.72-2.72a.749.749 0 0 1 .53-.22h3.5a.25.25 0 0 0 .25-.25v-5.5a.25.25 0 0 0-.25-.25h-8.5a.25.25 0 0 0-.25.25Zm13 2a.25.25 0 0 0-.25-.25h-.5a.75.75 0 0 1 0-1.5h.5c.966 0 1.75.784 1.75 1.75v5.5A1.75 1.75 0 0 1 14.25 12H14v1.543a1.458 1.458 0 0 1-2.487 1.03L9.22 12.28a.749.749 0 0 1 .326-1.275.749.749 0 0 1 .734.215l2.22 2.22v-2.19a.75.75 0 0 1 .75-.75h1a.25.25 0 0 0 .25-.25Z"/></svg></button>
 </div>
 
 <script>{{.DockJS}}</script>

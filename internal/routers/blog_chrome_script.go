@@ -105,28 +105,28 @@ func blogNavDockJS() string {
 })();`
 }
 
-// blogDockJS wires the five-key capsule on the card page.
+// blogDockJS wires the three-key capsule on the card page.
 //
-// Three behaviours differ from the previous page, and each one follows from the card page having
-// no article list and no right rail:
+// The capsule keeps only the keys this page can actually act on:
 //
-//  1. 漫游 navigates to /blog/walk instead of picking a card off the page — there are no cards
-//     here, and the server route already exists for the article page's own capsule.
-//  2. 活跃 scrolls to the heat map instead of opening a drawer. The heat map is a block on this
-//     page, not a rail panel; a drawer that shows the same figure twice would be worse than a
-//     scroll that moves you to it.
-//  3. 目录 and 推荐 still open as bottom sheets, but their contents live in hidden containers
-//     rather than in a rail, because this page has no rail to borrow.
+//  1. 目录 opens the site navigation as a bottom sheet, because this page has no rail to borrow.
+//  2. 漫游 navigates to /blog/walk — there are no cards here to pick from.
+//  3. 问道 opens the knowledge-base panel when AI is enabled.
 //
-// blogDockJS 接线名片页的五键胶囊。
+// 推荐 and 活跃度 are deliberately absent: the recommendation block belongs to the list rail, and
+// the heat map is already a card on this page. A key that opens a sheet with the same content, or
+// scrolls to a block the reader can see, is a second control for one thing.
 //
-// 三处行为与旧首页不同，每一处都来自「名片页没有文章列表、没有右栏」这件事：
+// blogDockJS 接线名片页的三键胶囊。
 //
-//  1. 漫游 跳到 /blog/walk，而不是从页面里挑一张卡——这里没有卡片，
-//     而服务端那条路由本来就是为文章页的胶囊准备的。
-//  2. 活跃 滚动到热力图，而不是开抽屉。热力图是这一页上的一块，不是右栏面板；
-//     一个把同一个数字再显示一遍的抽屉，比一次把你带到它面前的滚动更糟。
-//  3. 目录 与 推荐 仍以底部面板打开，但内容放在隐藏容器里而不是右栏——这一页没有右栏可借。
+// 只保留这一页真能行动的键：
+//
+//  1. 目录 以底部面板打开全站导航——这一页没有右栏可借。
+//  2. 漫游 跳到 /blog/walk——这里没有卡片可挑。
+//  3. 问道 在 AI 启用时打开知识库面板。
+//
+// 有意去掉 推荐 与 活跃度：推荐本属于列表页右栏，热力图本来就是这一页的一张卡。
+// 一个打开同样内容的面板、或滚动到读者已经看得见的一块，等于给同一件事配了第二个控件。
 func blogDockJS() string {
 	return `(function () {
   var dock = document.getElementById('fns-dock');
@@ -134,7 +134,7 @@ func blogDockJS() string {
   var scrim = document.getElementById('fns-scrim');
   var SLIDE = 300;
   var open = null;
-  var sheetIds = { nav: 'dock-nav', rec: 'dock-hot' };
+  var sheetIds = { nav: 'dock-nav' };
 
   function hum(ms) { if (navigator.vibrate) { try { navigator.vibrate(ms); } catch (e) {} } }
   function slide(i) { dock.style.setProperty('--slot', i); }
@@ -160,7 +160,7 @@ func blogDockJS() string {
   }
 
   function close() {
-    document.body.classList.remove('drawer-nav', 'drawer-rec');
+    document.body.classList.remove('drawer-nav');
     if (scrim) { scrim.hidden = true; }
     for (var k in sheetIds) {
       if (Object.prototype.hasOwnProperty.call(sheetIds, k)) {
@@ -198,21 +198,14 @@ func blogDockJS() string {
   }
 
   bind('dock-nav', 0, function () { openSheet('nav'); });
-  bind('dock-hot', 1, function () { openSheet('rec'); });
-  bind('dock-walk', 2, function () { location.href = '/blog/walk'; });
-  bind('dock-live', 3, function () {
-    var el = document.getElementById('activity');
-    if (!el) { return; }
-    var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    el.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'center' });
-  });
+  bind('dock-walk', 1, function () { location.href = '/blog/walk'; });
 
   // 问道：只有 AI 真的启用时才有挂载点与脚本。
-  // 未启用时按钮仍然存在（胶囊是五键的固定形状），但点它必须给出解释——
+  // 未启用时按钮仍然存在（胶囊形状固定），但点它必须给出解释——
   // 一个按下毫无反应的键，读者只会以为站点坏了。
   //
   // 问道 only works when AI is enabled: only then are the mount point and the script rendered.
-  // The key stays (the capsule is a fixed five-key shape), but pressing it has to explain itself —
+  // The key stays (the capsule has a fixed shape), but pressing it has to explain itself —
   // a key that does nothing reads as a broken site.
   var ask = document.getElementById('dock-ask');
   if (ask && ask.hasAttribute('data-ask-off')) {

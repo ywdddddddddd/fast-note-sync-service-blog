@@ -1507,7 +1507,7 @@ var blogPageTmpl = template.Must(template.New("blog-page").Funcs(blogAssetFuncs)
   <!-- 页面笔记的三点胶囊：首页 · 漫游 · 问道。
        比阅读页少两格，因为这两种东西在这一页上不存在 —— 全局目录没有（页面是终点），
        局部图谱也没有（本页不携带图谱）。少两格比给对方一个点了没反应的键诚实。 -->
-  <div class="dock dock-collapsible" id="fns-dock" role="group" aria-label="页面入口" data-slot="0">
+  <div class="dock dock-collapsible" id="fns-dock" role="group" aria-label="页面入口" data-slot="0" style="--dock-n:3">
     <button type="button" class="dock-orb" id="fns-orb" aria-label="展开页面入口" aria-expanded="false">
       <span class="taiji-lottie" data-lottie="code">
         <svg class="taiji" viewBox="0 0 24 24" aria-hidden="true">

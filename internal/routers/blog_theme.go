@@ -2819,11 +2819,7 @@ html.warp-flight-lock,body.warp-flight-lock{overflow:hidden}
   body.drawer-nav .fns-scrim,
   body.drawer-toc .fns-scrim,
   body.drawer-hot .fns-scrim,
-  body.drawer-live .fns-scrim,
-  /* drawer-rec 漏了这一条：遮罩会 display:block 却停在 opacity:0，
-     而且 pointer-events 仍是 none —— 于是它既看不见、也收不到点击，
-     「点空白处关闭」于是完全不成立。首页那个「推荐·最近更新的栏目」走的正是 drawer-rec。 */
-  body.drawer-rec .fns-scrim{
+  body.drawer-live .fns-scrim{
     opacity:1;pointer-events:auto;
     -webkit-backdrop-filter:blur(2px);backdrop-filter:blur(2px);
   }
@@ -3777,7 +3773,7 @@ html.light .theme-btn.has-lottie .tl svg{filter:none;opacity:.8}
 .footer-mark{opacity:.9}
 .footer-bottom{display:flex;flex-direction:column;gap:.15rem;align-items:center}
 
-/* ── 名片页的两块面板（移动胶囊打开） ──────────────────────────────────── */
+/* ── 名片页的目录面板（移动胶囊打开） ──────────────────────────────────── */
 .card-sheets{position:fixed;inset:0;z-index:58;pointer-events:none}
 .card-sheet{
   position:absolute;inset-inline:0;bottom:0;max-height:72vh;overflow-y:auto;
@@ -3788,7 +3784,6 @@ html.light .theme-btn.has-lottie .tl svg{filter:none;opacity:.8}
   pointer-events:auto;
 }
 body.drawer-nav .sheet-nav{transform:translateY(0)}
-body.drawer-rec .sheet-rec{transform:translateY(0)}
 
 /* The folder tree inside a card sheet must be a plain block.
    On mobile the same .aside element is the page-level drawer: position:fixed, height:var(--sheet-h),
@@ -3835,7 +3830,10 @@ body.drawer-rec .sheet-rec{transform:translateY(0)}
      宽度从 48 长到 202 是居中的，所以视觉上就是从球的位置向两侧生长。 */
   transition:width .46s cubic-bezier(.34,1.4,.64,1),background .3s ease;
 }
-.dock.dock-collapsible.is-open{width:202px}
+  /* 展开宽度跟着键数走。三个页面的槽位数不同：首页与列表页三格、阅读页五格，
+     页面笔记也是三格。--dock-n 由模板写在 .dock 上，缺省 5 保持旧的五格宽度。
+     12px = 左右各 5px 内边距 + 1px 边框。写死 202px 会让三格胶囊右边空出两格。 */
+  .dock.dock-collapsible.is-open{width:calc(var(--dock-n, 5) * var(--slot-w) + 12px)}
 /* 开合瞬间的一圈光晕：从胶囊边缘扩出去再消失。
    球本身在胶囊内部，任何从球发出的光环都会被 overflow:hidden 裁掉，
    所以光环挂在胶囊自己身上——读者看到的是「这里刚刚张开了」。 */

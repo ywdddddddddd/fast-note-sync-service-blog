@@ -211,16 +211,15 @@ const blogThemeScript = `
       var reduce = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
       if (reduce) { return; }
 
-      // The list pages put their cards inside .cards, the article page is a single .card, the shelf
-      // has its own column class, and the home page's栏目 list lives inside a drawer as plain rows
-      // under ul.rec. Selecting element names instead of roles would have missed all four — this
-      // list is the actual markup, checked against the rendered DOM rather than guessed from CSS.
+      // The list pages put their cards inside .cards, the article page is a single .card, and the
+      // shelf has its own column class. Selecting element names instead of roles would have missed
+      // all of them — this list is the actual markup, checked against the rendered DOM rather than
+      // guessed from CSS.
       //
-      // 列表页的卡片在 .cards 里，文章页是一整块 .card，资料页有它自己的列类名，
-      // 而首页的「栏目」是抽屉里 ul.rec 下面的普通行。
-      // 凭角色去猜元素名会四处全部落空——这份清单来自实际渲染出来的 DOM，不是从 CSS 推的。
+      // 列表页的卡片在 .cards 里，文章页是一整块 .card，资料页有它自己的列类名。
+      // 凭角色去猜元素名会全部落空——这份清单来自实际渲染出来的 DOM，不是从 CSS 推的。
       var SEL = '.cards > *, .post-card, .card, .post-body, .page-body, .aside, .rail, .footer,' +
-                ' .shelf-col, .shelf-card, .sheet-rec > ul > li';
+                ' .shelf-col, .shelf-card';
       var nodes = Array.prototype.slice.call(document.querySelectorAll(SEL));
       if (!nodes.length) { return; }
 

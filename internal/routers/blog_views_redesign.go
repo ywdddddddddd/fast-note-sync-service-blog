@@ -81,12 +81,8 @@ type blogCardView struct {
 	// 事实回答"这是谁"，那个答案是不变的；最新几条标题回答"还写不写"，那才是回头客真正的问题。
 	// 三条正好与左侧五行事实对齐，使树的最后一条日期与「对象」同底；
 	// 单开一张「最新一篇」卡只会得到一行字。
-	Latest   []*dto.BlogEntryDTO
-	Activity *dto.BlogActivityDTO
-	// Recs feed the recommendation sheet the capsule opens and the rail on list pages.
-	//
-	// Recs 供胶囊打开的推荐面板与列表页右栏使用。
-	Recs       []*dto.BlogSectionRecDTO
+	Latest     []*dto.BlogEntryDTO
+	Activity   *dto.BlogActivityDTO
 	StatsJS    template.JS
 	DockJS     template.JS
 	AskEnabled bool

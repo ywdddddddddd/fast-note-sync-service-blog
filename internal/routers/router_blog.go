@@ -334,7 +334,6 @@ func registerBlogRoutes(r *gin.Engine, appContainer *app.App) {
 			Pills:      home.Pills,
 			Latest:     blogLatestEntries(home.Entries, 3),
 			Activity:   home.Activity,
-			Recs:       home.Recs,
 			DockJS:     template.JS(blogDockJS()),
 			AskEnabled: blogAskEnabled(appContainer),
 		}
