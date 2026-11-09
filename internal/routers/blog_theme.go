@@ -20,9 +20,12 @@ const blogCSS = `
 
    这份文件是**子集**：原字库 10.2 MB / 46786 字形，含完整中文字库；现在只保留
    博客实际会用到的那批字——全部笔记正文（含未发布笔记，明天发布也不缺字）、
-   模板里的界面文字、ASCII 与常用标点，共 3782 个码位，压到 927 KB。
-   原字体覆盖的 3743 个字一个没少；缺的 39 个是 emoji 与 Symbol 私用区字符，
-   原字体本来就没有，浏览器会按字体栈回退。
+   模板里的界面文字、ASCII 与常用标点，共 3850 个码位，压到 945 KB。
+   原字库能覆盖的 3809 个字一个没少；其余 41 个是 emoji、数学字母与私用区/零宽
+   字符，原字库本来就没有，浏览器会按字体栈回退。
+
+   2026-11-09 按最新语料重新子集：新增 107 个用字（剞劂卿懑拙汪笺篆绚羁譬…），
+   文件从 949268 B 增至 968216 B。新增字后再改这里的 ?v=，读者才会取新文件。
 
    实测动机：读者第一次访问要下 10 MB 字库，期间 font-display:swap 显示的是
    回退字体，观感就是「字体坏了 + 加载慢」。换域名后浏览器缓存归零，这个问题
@@ -33,7 +36,7 @@ const blogCSS = `
    font-display:swap 让文字先用回退字体渲染，字体到达后替换，避免首屏空白。 */
 @font-face{
   font-family:"CustomFont";
-  src:url("/static/fonts/font.woff2?v=61bbee1cc3") format("woff2");
+  src:url("/static/fonts/font.woff2?v=9a69d88c89") format("woff2");
   font-weight:normal;font-style:normal;font-display:swap;
 }
 :root{
