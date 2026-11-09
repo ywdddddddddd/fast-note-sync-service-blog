@@ -723,6 +723,13 @@ const blogWarpScript = `
       view = null;
       primed = false;
       finished = true;
+      // A restored document still carries departing = true from the click that left it. Without
+      // clearing it, the click interceptor's next depart() returns at the guard and every
+      // in-site link goes dead until a reload.
+      //
+      // 恢复的文档仍带着离开时置上的 departing = true。不复位它，点击拦截器之后的
+      // depart() 会在守卫处直接返回，所有站内链接一直失效，直到刷新。
+      departing = false;
       return;
     }
     if (STILL) { return; }

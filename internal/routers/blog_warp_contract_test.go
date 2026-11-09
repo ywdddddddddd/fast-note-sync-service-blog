@@ -98,6 +98,24 @@ func TestWarpScriptContract(t *testing.T) {
 	if !strings.Contains(js, "classList.remove('fns-warping', 'fns-arrived')") {
 		t.Error("恢复时没有摘掉 fns-warping：返回得到一张白页")
 	}
+	// 返回后 departing 必须复位。
+	//
+	// 失败形态：离开时 departing=true 被 bfcache 原样带回；不复位时点击委托先
+	// preventDefault，再进 depart() 会被 `if (departing) { return; }` 吞掉，
+	// 页面上所有站内链接都「点了没反应」，刷新才恢复。
+	// 只在 persisted 分支内找：文件开头的变量声明里也有 departing = false。
+	persistedAt := strings.Index(js, "if (ev.persisted) {")
+	if persistedAt < 0 {
+		t.Error("找不到 pageshow 的 persisted 分支")
+	} else {
+		branch := js[persistedAt:]
+		end := strings.Index(branch, "return;")
+		if end < 0 {
+			t.Error("persisted 分支没有 return")
+		} else if !strings.Contains(branch[:end], "departing = false") {
+			t.Error("bfcache 恢复分支没有复位 departing：返回后站内链接全部失效")
+		}
+	}
 
 	// ⑧ 就绪判定要覆盖图片，而不只是文档。
 	//
