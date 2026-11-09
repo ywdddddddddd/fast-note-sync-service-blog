@@ -161,54 +161,36 @@ var blogCardTmpl = template.Must(template.New("blog-card").Funcs(blogAssetFuncs)
 
 <main class="card-wrap">
   <section class="hero" data-anim="1">
-    <div class="hero-avatar">
+    {{$aboutURL := ""}}{{range .Pages}}{{if eq .Alias "about"}}{{$aboutURL = .URL}}{{end}}{{end}}
+    {{if $aboutURL}}<a class="hero-avatar" href="{{$aboutURL}}" aria-label="关于我" title="关于我">{{else}}<div class="hero-avatar">{{end}}
       {{if .Profile}}{{if .Profile.Avatar}}<img src="{{.Profile.Avatar}}" alt="{{.Profile.Name}}">{{else}}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3a4 4 0 1 0 0 8 4 4 0 0 0 0-8Z"/><path d="M4 21c0-3.9 3.6-7 8-7s8 3.1 8 7"/></svg>{{end}}{{end}}
-    </div>
+    {{if $aboutURL}}</a>{{else}}</div>{{end}}
     {{if .Profile}}{{if .Profile.Name}}<h1 class="hero-name">{{.Profile.Name}}</h1>{{end}}{{if .Profile.Tagline}}<p class="hero-tag">{{.Profile.Tagline}}</p>{{end}}{{end}}
+    {{if .Stats}}<div class="hero-stats"><p class="hs-main"><span class="hs-item">站龄 <b>{{.Stats.DaysOnline}}</b> 天</span><span class="hs-dot" aria-hidden="true">·</span><span class="hs-item">最后更新 <b>{{if .Stats.Updated}}{{.Stats.Updated}}{{else}}—{{end}}</b></span><span class="hs-dot" aria-hidden="true">·</span><span class="hs-item">总字数 <b>{{.Stats.WordsText}}</b></span></p></div>{{end}}
     {{if .Pills}}<div class="pills">{{range .Pills}}{{template "pill" .}}{{end}}</div>{{end}}
   </section>
 
   {{if .Profile}}{{if .Profile.Meta}}
   <section class="card card-pad kv-block" data-anim="2">
-    <div class="sec-head">
-      <h2 class="sec-label">关于</h2>
-      {{range .Pages}}{{if eq .Alias "about"}}<a class="sec-more" href="{{.URL}}">更多<span class="sec-more-a" aria-hidden="true">→</span></a>{{end}}{{end}}
-    </div>
     <div class="kv-split">
+      <div class="sec-head">
+        <h2 class="sec-label">关于</h2>
+        {{range .Pages}}{{if eq .Alias "about"}}<a class="sec-more" href="{{.URL}}">更多<span class="sec-more-a" aria-hidden="true">→</span></a>{{end}}{{end}}
+      </div>
       <dl class="kv">
         {{range .Profile.Meta}}<div class="kv-row"><dt>{{.Label}}</dt><dd>{{.Value}}</dd></div>{{end}}
       </dl>
       {{if .Latest}}
-      <a class="kv-latest" href="/blog/{{.Latest.Slug}}">
+      <div class="kv-latest kv-tree">
         <span class="kv-latest-k">最近更新</span>
-        <span class="kv-latest-t">{{.Latest.Title}}</span>
-        {{if .Latest.CreatedAt}}<span class="kv-latest-d">{{.Latest.CreatedAt}}</span>{{end}}
-      </a>
+        <ul class="tree">
+          {{range .Latest}}<li><a class="tree-row" href="/blog/{{.Slug}}"><span class="tree-node" aria-hidden="true"></span><span class="tree-t">{{.Title}}</span>{{if .CreatedAt}}<span class="tree-d">{{.CreatedAt}}</span>{{end}}</a></li>{{end}}
+        </ul>
+      </div>
       {{end}}
     </div>
   </section>
   {{end}}{{end}}
-
-  <section class="stats-row" data-anim="3">
-    <div class="stat-card">
-      <div class="stat-ico"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M4.75 0a.75.75 0 0 1 .75.75V2h5V.75a.75.75 0 0 1 1.5 0V2h1.25c.966 0 1.75.784 1.75 1.75v10.5A1.75 1.75 0 0 1 13.25 16H2.75A1.75 1.75 0 0 1 1 14.25V3.75C1 2.784 1.784 2 2.75 2H4V.75A.75.75 0 0 1 4.75 0ZM2.5 5.5v8.75c0 .138.112.25.25.25h10.5a.25.25 0 0 0 .25-.25V5.5h-11Z"/></svg></div>
-      <div class="stat-num">{{.Stats.DaysOnline}}</div>
-      <div class="stat-label">站龄 · 天</div>
-      {{if .Stats.Since}}<div class="stat-sub">自 {{.Stats.Since}}</div>{{end}}
-    </div>
-    <div class="stat-card">
-      <div class="stat-ico"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M1.75 1h12.5c.966 0 1.75.784 1.75 1.75v10.5A1.75 1.75 0 0 1 14.25 15H1.75A1.75 1.75 0 0 1 0 13.25V2.75C0 1.784.784 1 1.75 1Zm.25 1.5v10.25h12.5V2.5H2Zm2 2.5h4v1.5H4V5Zm0 3h7v1.5H4V8Zm0 3h5v1.5H4V11Z"/></svg></div>
-      <div class="stat-num stat-date">{{if .Stats.Updated}}{{.Stats.Updated}}{{else}}—{{end}}</div>
-      <div class="stat-label">最后更新</div>
-      <div class="stat-sub">{{.Stats.Notes}} 篇公开笔记</div>
-    </div>
-    <div class="stat-card">
-      <div class="stat-ico"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M2 1.75C2 .784 2.784 0 3.75 0h6.586c.464 0 .909.184 1.237.513l2.914 2.914c.329.328.513.773.513 1.237v9.586A1.75 1.75 0 0 1 13.25 16H3.75A1.75 1.75 0 0 1 2 14.25V1.75Zm1.5 0v12.5c0 .138.112.25.25.25h9.5a.25.25 0 0 0 .25-.25V4.5H10.75A1.75 1.75 0 0 1 9 2.75V1.5H3.75a.25.25 0 0 0-.25.25Zm7.5.75v.25c0 .138.112.25.25.25h.25L11 2.5Z"/></svg></div>
-      <div class="stat-num">{{.Stats.WordsText}}</div>
-      <div class="stat-label">总字数</div>
-      <div class="stat-sub">{{.Stats.Tags}} 个标签 · {{.Stats.Links}} 条双链</div>
-    </div>
-  </section>
 
   {{if .Activity}}
   <section class="card card-pad act-card" id="activity" data-anim="4">

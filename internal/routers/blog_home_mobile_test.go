@@ -29,6 +29,7 @@ func TestCardPageCarriesItsHooks(t *testing.T) {
 			Title:    "问道漫步",
 			SiteName: "问道漫步",
 			Sections: []*dto.BlogSectionDTO{{Name: "口腔笔记", Slug: "口腔笔记", Count: 40}},
+			Pages:    []dto.BlogNavPageDTO{{Alias: "about", Title: "关于我", URL: "/blog/about"}},
 		},
 		Stats: &dto.BlogStatsDTO{
 			Notes: 152, Words: 858121, WordsText: "85.8万",
@@ -41,6 +42,7 @@ func TestCardPageCarriesItsHooks(t *testing.T) {
 			Links:    []dto.BlogProfileLinkDTO{{Label: "GitHub", Href: "https://github.com/x", Kind: "link", Icon: "mark-github"}},
 		},
 		Pills:    []dto.BlogProfileLinkDTO{{Label: "浙江 · 金华", Kind: "text", Icon: "location"}},
+		Latest:   []*dto.BlogEntryDTO{{Slug: "note", Title: "最近一篇", CreatedAt: "2026-11-02"}},
 		Activity: &dto.BlogActivityDTO{Weeks: 14, Days: []dto.BlogDayDTO{{Date: "2026-11-01", Lvl: 2}}},
 		DockJS:   "void 0;",
 	})
@@ -60,10 +62,44 @@ func TestCardPageCarriesItsHooks(t *testing.T) {
 		}
 	}
 
-	// The "关于" rows, the three statistic cards and the heat map are the only content blocks.
-	// 「关于」键值行、三张统计卡与热力图是仅有的内容区块。
+	// The portrait links to the about page when one exists, and the conditional open/close
+	// must pair: the anchor ends before the name.
+	// 存在关于页时，头像整块指向关于页；条件开闭必须配对——<a> 在名字之前闭合。
+	avatarAt := strings.Index(out, `<a class="hero-avatar" href="/blog/about" aria-label="关于我"`)
+	nameAt := strings.Index(out, `<h1 class="hero-name"`)
+	if avatarAt < 0 || nameAt < 0 || avatarAt > nameAt {
+		t.Fatalf("hero avatar does not link to the about page or is not closed before the name")
+	}
+	if !strings.Contains(out[avatarAt:nameAt], "</a>") {
+		t.Fatalf("hero avatar anchor is not closed before the name")
+	}
+
+	// The about card's grid owns title, facts and tree in that order.
+	// 关于卡的网格依次容纳标题、事实与树。
+	splitAt := strings.Index(out, `class="kv-split"`)
+	if splitAt < 0 {
+		t.Fatalf("about card has no kv-split")
+	}
+	split := out[splitAt:]
+	headAt := strings.Index(split, `class="sec-head"`)
+	kvAt := strings.Index(split, `class="kv"`)
+	treeAt := strings.Index(split, `class="kv-latest kv-tree"`)
+	if headAt < 0 || kvAt < 0 || treeAt < 0 || !(headAt < kvAt && kvAt < treeAt) {
+		t.Fatalf("about card is not laid out as title → facts → tree")
+	}
+
+	// The old three-card row is gone from the DOM (its CSS stays for rollback).
+	// 旧的三卡行已不渲染（其样式保留给回滚）。
+	if strings.Contains(out, `<section class="stats-row"`) {
+		t.Fatalf("card page still renders the stats-row section")
+	}
+
+	// The "关于" rows, the hero statistics strip, the latest-updates tree and the heat map are
+	// the only content blocks.
+	// 「关于」键值行、hero 统计条、最近更新树与热力图是仅有的内容区块。
 	for _, want := range []string{
-		`class="kv"`, `class="kv-row"`, `class="stats-row"`, `class="stat-card"`,
+		`class="kv"`, `class="kv-row"`, `class="hero-stats"`, `class="hs-main"`,
+		`class="kv-latest kv-tree"`, `class="tree-row"`, `class="tree-node"`, `class="tree-t"`,
 		`act-card`, `id="activity"`,
 	} {
 		if !strings.Contains(out, want) {
@@ -71,10 +107,10 @@ func TestCardPageCarriesItsHooks(t *testing.T) {
 		}
 	}
 
-	// The compact word count, not the raw six digits: 858121 does not fit a stat card.
-	// 压缩字数而不是原始六位数：858121 塞不进一张统计卡。
+	// The compact word count, not the raw six digits: 858121 does not fit the hero strip.
+	// 压缩字数而不是原始六位数：858121 塞不进 hero 统计条。
 	if !strings.Contains(out, "85.8万") {
-		t.Fatalf("stat card did not use WordsText")
+		t.Fatalf("hero stats did not use WordsText")
 	}
 
 	// The mobile capsule and its two sheets must exist even though the page has no rail.

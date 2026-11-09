@@ -3365,8 +3365,26 @@ html.is-wx .ask-panel{left:.45rem;right:.45rem;width:auto}
 }
 .hero-avatar img{width:100%;height:100%;object-fit:cover;border-radius:12px}
 .hero-avatar svg{width:72px;height:72px;color:var(--muted-foreground)}
+/* The portrait is the shortest path to "who is this", so the whole block is a link to the about
+   page. Only the anchor variant gains hover/focus affordances; the div fallback used when no
+   about page exists keeps the old static look.
+   头像是最短的「这是谁」入口，所以整块可点、直达关于页。只有 <a> 变体加悬停/聚焦反馈；
+   没有关于页时退回的 <div> 保持原来的静态外观。 */
+a.hero-avatar{text-decoration:none;transition:border-color .18s ease,box-shadow .18s ease}
+a.hero-avatar:hover{border-color:color-mix(in srgb,var(--border) 35%,var(--foreground));box-shadow:var(--shadow-md)}
+a.hero-avatar:focus-visible{outline:2px solid var(--foreground);outline-offset:3px}
 .hero-name{margin:.4rem 0 0;font-size:2rem;line-height:1.25;font-weight:700;letter-spacing:-.02em}
 .hero-tag{margin:0;font-size:.95rem;line-height:1.7;color:var(--muted-foreground);max-width:34rem}
+/* Three stat cards folded into one line inside the hero. The cards cost most of a phone screen
+   for three numbers; after the tagline the reader is already in a reading rhythm, so the figures
+   belong in that same line of thought rather than in a block of their own.
+   三张统计卡收进 hero 的一行：三张卡为三个数字吃掉大半屏，而简介之后读者已经在阅读节奏里，
+   这些数字属于同一口气，不该另起一块。 */
+.hero-stats{display:flex;flex-direction:column;align-items:center;gap:.3rem;width:100%;max-width:36rem;min-width:0}
+.hs-main{margin:0;display:flex;flex-wrap:wrap;justify-content:center;align-items:baseline;width:100%;min-width:0;column-gap:.5rem;row-gap:.05rem;font-size:.8125rem;line-height:1.6;color:var(--muted-foreground)}
+.hs-item{white-space:nowrap}
+.hs-item b{font-size:1rem;font-weight:600;color:var(--foreground);font-variant-numeric:tabular-nums;letter-spacing:-.01em;margin:0 .12rem}
+.hs-dot{color:var(--muted-foreground);opacity:.72}
 .pills{display:flex;flex-wrap:wrap;justify-content:center;gap:.5rem;margin-top:.35rem}
 .pill{
   display:inline-flex;align-items:center;gap:.45rem;
@@ -3385,28 +3403,35 @@ html.is-wx .ask-panel{left:.45rem;right:.45rem;width:auto}
 .sec-label{margin:0;font-size:.8125rem;font-weight:600;letter-spacing:.08em;color:var(--muted-foreground);text-transform:uppercase}
 .sec-note{font-size:.75rem;color:var(--muted-foreground)}
 .kv{display:grid;grid-template-columns:144px 1fr;gap:.55rem 1rem;margin:0}
-/* 「关于」卡分两栏：左是人，右是最近写的一篇。右栏只在有最新笔记时出现，
-   没有就退回原来的单栏，卡片不会留一个空位。 */
-.kv-split{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(0,1fr);gap:2.2rem;align-items:start}
-.kv-latest{
-  display:flex;flex-direction:column;gap:.4rem;
-  padding-left:1.4rem;border-left:1px solid var(--border);
-  text-decoration:none;color:inherit;min-width:0;
-  transition:opacity .18s;
-}
-.kv-latest:hover{opacity:.78}
+/* 「关于」卡分两栏：左列是标题与事实，右栏是最近写的那几篇。
+   标题移进网格，右栏才能从标题行起跨到事实行，与左列同顶同底。
+   右栏只在有最近笔记时出现，没有就退回单栏，卡片不会留一个空位。 */
+.kv-split{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(0,1fr);column-gap:2.2rem;row-gap:0;align-items:start}
+.kv-split .sec-head{grid-column:1;grid-row:1;margin-bottom:.9rem}
+.kv-split .kv{grid-column:1;grid-row:2}
+.kv-latest{display:flex;flex-direction:column;gap:.4rem;grid-column:2;grid-row:1 / span 2;padding-left:1.4rem;border-left:1px solid var(--border);color:inherit;min-width:0}
 .kv-latest-k{font-size:.75rem;color:var(--muted-foreground);letter-spacing:.08em}
-.kv-latest-t{
-  font-size:.95rem;line-height:1.55;font-weight:500;color:var(--foreground);
-  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;
-}
-.kv-latest-d{font-size:.78rem;color:var(--muted-foreground);font-variant-numeric:tabular-nums}
+/* The divider between the two columns doubles as the tree's trunk on desktop: each node is
+   pinned to the line, the newest filled and the rest hollow, so "recent updates" reads as a
+   branch growing off the facts rather than as a second list.
+   桌面端分栏的竖线就是树的枝干：节点钉在线上，第一条实心、其余空心，
+   「最近更新」读作从事实长出的分枝，而不是另一份列表。 */
+.kv-tree .kv-latest-k{display:block;margin-bottom:.78rem}
+.kv-tree .tree{list-style:none;margin:.1rem 0 0;padding:0;display:flex;flex-direction:column;gap:.52rem}
+.kv-tree .tree-row{position:relative;display:block;text-decoration:none;color:inherit;min-width:0;padding-left:1.05rem}
+.kv-tree .tree-node{position:absolute;left:-1.65rem;top:.5em;width:7px;height:7px;border-radius:50%;background:var(--card);border:1px solid var(--muted-foreground);box-sizing:border-box;transition:background .18s,border-color .18s}
+.kv-tree li:first-child .tree-node{background:var(--foreground);border-color:var(--foreground)}
+.kv-tree .tree-row:hover .tree-node{background:var(--foreground);border-color:var(--foreground)}
+.kv-tree .tree-t{display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden;font-size:.875rem;line-height:1.5;font-weight:500;color:var(--foreground)}
+.kv-tree .tree-d{display:block;margin-top:.05rem;font-size:.7rem;line-height:1.4;color:var(--muted-foreground);font-variant-numeric:tabular-nums}
+.kv-tree .tree-row:hover .tree-t{opacity:.72}
 /* 这张卡的「更多」紧挨着「关于」，不推到右端。
    它是标题的附属词（关于 → 更多），不是这一栏的操作按钮；推到最右边会被读成
    "这一块还有个别的入口"，而读者的视线从「关于」出发根本走不到那儿。
    标题行沿用 .kv 的两栏骨架（144px 标签列 + 1rem 间隔），因此「更多」的左边
    正好落在「Y 染色体」那一列的左边：它是右栏的第一行，而不是标题的尾巴。
-   字号、字重、字距与 .sec-label 完全一致：两者是同一行字，只是后半句可点。 */
+   字号、字重、字距与 .sec-label 完全一致：两者是同一行字，只是后半句可点。
+   移动端例外：≤860px 两端对齐（见下方媒体查询）。 */
 .kv-block .sec-head{
   display:grid;grid-template-columns:144px minmax(0,1fr);
   gap:0 1rem;align-items:baseline;
@@ -3426,13 +3451,26 @@ html.is-wx .ask-panel{left:.45rem;right:.45rem;width:auto}
 .sec-more-a{font-size:.85rem;line-height:1;transition:translate .18s}
 .sec-more:hover .sec-more-a{translate:2px 0}
 @media (max-width:860px){
-  .kv-split{grid-template-columns:minmax(0,1fr);gap:1.1rem}
-  .kv-latest{padding-left:0;padding-top:.9rem;border-left:0;border-top:1px solid var(--border)}
+  /* Mobile drops the 144px label column, pushes 「更多」 to the right edge, and stacks the
+     branch below the facts with a trunk of its own (the desktop divider is now a top border).
+     移动端丢掉 144px 标签列，「更多」推到右端；树枝堆到事实下方并自画一根枝干
+     （桌面端的分栏竖线此时已变成上边框）。 */
+  .kv-split{grid-template-columns:minmax(0,1fr);row-gap:1.1rem}
+  .kv-split .sec-head{display:flex;align-items:baseline;justify-content:space-between;gap:1rem;grid-column:1;grid-row:1;margin-bottom:.9rem}
+  .kv-split .sec-more{justify-self:auto}
+  .kv-split .kv{grid-column:1;grid-row:2}
+  .kv-split .kv-latest{grid-column:1;grid-row:3;padding-left:0;padding-top:.9rem;border-left:0;border-top:1px solid var(--border)}
+  .kv-tree .kv-latest-k{margin-bottom:0}
+  .kv-tree .tree{position:relative}
+  .kv-tree .tree::before{content:"";position:absolute;left:.5px;top:.6em;bottom:.45em;width:1px;background:var(--border)}
+  .kv-tree .tree-node{left:-3px}
 }
 .kv-row{display:contents}
 .kv dt{margin:0;font-size:.875rem;color:var(--muted-foreground)}
 .kv dd{margin:0;font-size:.9375rem;color:var(--foreground);font-weight:500}
 
+/* 首页已改为 hero 统计条（.hero-stats），三张卡不再渲染；这里保留给回滚。
+   The home page now folds these figures into the hero strip; this card grid stays only for rollback. */
 .stats-row{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:.75rem}
 .stat-card{
   border:1px solid var(--border);border-radius:12px;background:var(--card);
@@ -3902,12 +3940,13 @@ body.is-post .rail.is-spring,.graph-panel.is-spring{transition:none!important}
 }
 .dock-toast.is-on{opacity:1;transform:translate(-50%,0)}
 
-/* Stats as one row of three cells.
+/* Stats as one row of three cells. The home page no longer renders this block — the three
+   figures moved into the hero strip (.hero-stats) — but the styles stay for rollback.
    Three stacked cards at ~90px each ate most of a phone screen for three numbers. One row keeps
    the same information in a third of the height, and the numbers read as a set rather than as
    three separate claims.
 
-   统计做成一行三格。
+   统计做成一行三格。首页已改为 hero 统计条（.hero-stats），这里保留给回滚。
    三张竖卡各约 90px，为三个数字吃掉了大半屏。一行把同样的信息压到三分之一高度，
    而且三个数字读起来是一组，而不是三条各自独立的声明。 */
 .stats-row{

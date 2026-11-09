@@ -332,7 +332,7 @@ func registerBlogRoutes(r *gin.Engine, appContainer *app.App) {
 			Stats:      home.Stats,
 			Profile:    home.Profile,
 			Pills:      home.Pills,
-			Latest:     blogLatestEntry(home.Entries),
+			Latest:     blogLatestEntries(home.Entries, 3),
 			Activity:   home.Activity,
 			Recs:       home.Recs,
 			DockJS:     template.JS(blogDockJS()),
@@ -655,27 +655,41 @@ func registerBlogRoutes(r *gin.Engine, appContainer *app.App) {
 	})
 }
 
-// blogLatestEntry returns the newest published entry, or nil when every date is missing.
+// blogLatestEntries returns up to limit of the newest published entries, or nil when every date
+// is missing or limit is not positive.
 //
 // Comparing the rendered date strings rather than parsing them is deliberate: they are
 // already "2006-01-02", which sorts lexicographically the same way it sorts chronologically,
-// and a parse would have to invent a policy for the empty case anyway.
+// and a parse would have to invent a policy for the empty case anyway. The sort is stable, so
+// entries sharing a date keep the caller's order — which is the order the home page already
+// presents them in.
 //
-// blogLatestEntry 返回最近创建的一篇已发布条目；所有日期都缺失时返回 nil。
+// blogLatestEntries 返回最多 limit 篇最近创建的已发布条目；所有日期都缺失或 limit 不为正时返回 nil。
 //
 // 这里直接比较渲染好的日期字符串而不是解析它们：格式已经是 2006-01-02，字典序与时间序一致，
-// 而解析反而要为"空日期"另立一条规则。
-func blogLatestEntry(entries []*dto.BlogEntryDTO) *dto.BlogEntryDTO {
-	var best *dto.BlogEntryDTO
+// 而解析反而要为"空日期"另立一条规则。排序是稳定的，相同日期的条目保持调用方顺序，
+// 也就是首页原本呈现它们的顺序。
+func blogLatestEntries(entries []*dto.BlogEntryDTO, limit int) []*dto.BlogEntryDTO {
+	if limit <= 0 {
+		return nil
+	}
+	valid := make([]*dto.BlogEntryDTO, 0, len(entries))
 	for _, e := range entries {
 		if e == nil || e.CreatedAt == "" {
 			continue
 		}
-		if best == nil || e.CreatedAt > best.CreatedAt {
-			best = e
-		}
+		valid = append(valid, e)
 	}
-	return best
+	if len(valid) == 0 {
+		return nil
+	}
+	sort.SliceStable(valid, func(i, j int) bool {
+		return valid[i].CreatedAt > valid[j].CreatedAt
+	})
+	if len(valid) > limit {
+		valid = valid[:limit]
+	}
+	return valid
 }
 
 // blogShareData 组装分享卡需要的字段，序列化后塞进页面。
