@@ -3491,9 +3491,9 @@ a.hero-avatar:focus-visible{outline:2px solid var(--foreground);outline-offset:3
 .act-card .heat .hc.lv2{background:color-mix(in srgb,var(--foreground) 34%,var(--muted))}
 .act-card .heat .hc.lv3{background:color-mix(in srgb,var(--foreground) 55%,var(--muted))}
 .act-card .heat .hc.lv4{background:color-mix(in srgb,var(--foreground) 78%,var(--muted))}
-.act-card .heat-months{display:grid;grid-auto-flow:column;grid-auto-columns:16px;gap:3px;margin-top:.35rem;
-  justify-content:center;font-size:.625rem;color:var(--muted-foreground)}
-.act-card .heat-months i{font-style:normal;overflow:hidden;white-space:nowrap;text-align:center}
+.act-card .heat-months{display:grid;grid-template-columns:repeat(var(--weeks),16px);column-gap:3px;
+  margin-top:.35rem;justify-content:center;font-size:.625rem;color:var(--muted-foreground)}
+.act-card .heat-months i{font-style:normal;overflow:visible;white-space:nowrap;text-align:left}
 .act-foot{display:flex;justify-content:space-between;align-items:center;gap:1rem;margin-top:.7rem;
   font-size:.6875rem;color:var(--muted-foreground)}
 .heat-legend{display:inline-flex;align-items:center;gap:3px}

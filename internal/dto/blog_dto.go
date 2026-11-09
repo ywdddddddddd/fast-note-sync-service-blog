@@ -112,6 +112,14 @@ type BlogActivityDTO struct {
 	NoteDays int          `json:"noteDays"` // days with at least one note // 有笔记的天数
 	Max      int          `json:"max"`      // busiest day count // 单日最多
 	Months   []string     `json:"months"`   // month labels under the grid // 网格下方的月份标签
+	// MonthCols is the 1-based week column of each label, parallel to Months. The template pins
+	// labels with grid-column so each one sits above its own week; rendering them as auto-flow
+	// columns put every label in the middle of the strip.
+	//
+	// MonthCols 是 Months 每个标签所在的周列（1-based），与 Months 等长。
+	// 模板用 grid-column 把标签钉在自己那一周的上方；若按自动流列渲染，
+	// 所有标签都会挤到色带中间。
+	MonthCols []int `json:"monthCols"`
 }
 
 // BlogNavDTO the whole left-hand navigation tree.
@@ -269,7 +277,7 @@ type BlogStatsDTO struct {
 	Tags     int    `json:"tags"`     // Distinct tags // 标签种数
 	Folders  int    `json:"folders"`  // Distinct source folders // 来源目录数
 	AvgWords int    `json:"avgWords"` // Average characters per note // 篇均字数
-	Updated  string `json:"updated"`  // Most recent source change // 最近一次源文件变更时间
+	Updated  string `json:"updated"`  // Most recent article date // 最近一篇文章的日期
 	// WordsText is Words in a human-sized form ("82.8万"). The raw count is six digits, which
 	// does not fit the single-line status strip that the mobile home page shows in place of the
 	// seven-cell dashboard; on the desktop the raw number stays the authority.
@@ -554,13 +562,13 @@ type BlogProfileLinkDTO struct {
 // Slug 保留着，它仍然指着最新那篇；模板不再用它当链接，但在栏目页会变成死路时还有用
 // （见 blogAggregateSections）。
 type BlogSectionRecDTO struct {
-	Name    string `json:"name"`   // 目录名 // folder name
-	Parent  string `json:"parent"` // 一级目录名，一级栏目自身为空 // parent section, empty for a top-level one
-	Desc    string `json:"desc"`   // 手写的一句话 // hand-written one-liner
-	Slug    string `json:"slug"`   // 该栏目最新一篇的 slug // newest article in the folder
-	Href    string `json:"href"`   // 该栏目自己的页面 // the folder's own page
-	Count   int    `json:"count"`  // 已发布篇数 // published notes inside
-	Words   int    `json:"words"`  // 该栏目总字数 // total characters inside
+	Name    string `json:"name"`    // 目录名 // folder name
+	Parent  string `json:"parent"`  // 一级目录名，一级栏目自身为空 // parent section, empty for a top-level one
+	Desc    string `json:"desc"`    // 手写的一句话 // hand-written one-liner
+	Slug    string `json:"slug"`    // 该栏目最新一篇的 slug // newest article in the folder
+	Href    string `json:"href"`    // 该栏目自己的页面 // the folder's own page
+	Count   int    `json:"count"`   // 已发布篇数 // published notes inside
+	Words   int    `json:"words"`   // 该栏目总字数 // total characters inside
 	Updated string `json:"updated"` // 该栏目最新变更日期 // newest change date
 
 	// Cover is picked at random from the covers of the notes inside the folder, one per request.

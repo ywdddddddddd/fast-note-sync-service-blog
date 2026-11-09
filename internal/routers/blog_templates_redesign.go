@@ -201,13 +201,12 @@ var blogCardTmpl = template.Must(template.New("blog-card").Funcs(blogAssetFuncs)
     <div class="heat" style="--weeks:{{.Activity.Weeks}}">
       {{range .Activity.Days}}<i class="hc lv{{.Lvl}}" title="{{.Date}} · {{.Count}} 篇"></i>{{end}}
     </div>
-    <div class="heat-months" style="--weeks:{{.Activity.Weeks}}">{{range .Activity.Months}}<i>{{.}}</i>{{end}}</div>
+    <div class="heat-months" style="--weeks:{{.Activity.Weeks}}">{{range $i, $m := .Activity.Months}}{{if lt $i (len $.Activity.MonthCols)}}<i style="grid-column:{{index $.Activity.MonthCols $i}} / span 1">{{$m}}</i>{{end}}{{end}}</div>
     <div class="act-foot">
       <span>{{.Activity.NoteDays}} 天有笔记</span>
       <span class="heat-legend">少
         <i class="hc lv0"></i><i class="hc lv1"></i><i class="hc lv2"></i><i class="hc lv3"></i><i class="hc lv4"></i>
       多</span>
-      <span>单日最多 {{.Activity.Max}} 篇</span>
     </div>
   </section>
   {{end}}

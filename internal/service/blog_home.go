@@ -532,24 +532,23 @@ func (s *shareService) loadBlogSources(ctx context.Context, uid int64) ([]*blogH
 			Title:    strings.TrimSuffix(filepath.Base(note.Path), ".md"),
 			Slug:     s.BuildLocalShortLink(uid, sh.ID),
 			Content:  note.Content,
-			// The heat map is driven by Ctime — the file's own creation time as the client
-			// reports it — because that is the only one of these fields that actually spreads
-			// across the vault's history. updated_timestamp is written by the sync pipeline and
-			// therefore collapses onto the days the vault was first ingested: measured against
-			// this vault it covered 16 distinct days, with 140 notes landing on a single one,
-			// which made the calendar look like everything was written on two afternoons.
-			// Ctime spanned 37 distinct days over 15 months.
+			// MTime is the best file timestamp available, used as the date fallback when the
+			// share record carries no CreatedAt (see blogNoteDate): CreatedAt — the share's own
+			// date — is the article date the entries, the about card and the heat map all show,
+			// while a note without one is attributed to the day its file was created (Ctime),
+			// then last modified (Mtime), then imported (updated_timestamp).
 			//
-			// Mtime is the fallback (a note edited since import belongs to that day) and
-			// updated_timestamp is the last resort for rows where the client sent no times.
+			// Not every note has a usable file time: updated_timestamp is written by the sync
+			// pipeline and can collapse onto the days the vault was first ingested, which is why
+			// it is the last resort rather than the first.
 			//
-			// 热力图以 Ctime 为准——即客户端上报的文件创建时间——因为在这些字段里只有它真正
-			// 分布在仓库的历史跨度上。updated_timestamp 由同步管线写入，因而会坍缩到仓库首次
-			// 导入的那几天：在本仓库实测只覆盖 16 个不同日期，其中一天堆了 140 篇，
-			// 于是日历看起来像所有笔记都是某两个下午写出来的。Ctime 则在 15 个月里覆盖 37 天。
+			// MTime 是可用的最佳文件时间戳，仅在分享记录没有 CreatedAt 时作为日期回退
+			// （见 blogNoteDate）：CreatedAt——分享记录自带的日期——才是条目、关于卡与热力图
+			// 统一显示的文章日期；没有它的笔记则归到文件创建日（Ctime），
+			// 其次最后修改日（Mtime），最后才是导入日（updated_timestamp）。
 			//
-			// 回退顺序为 Mtime（导入后又被编辑过的笔记属于那一天），最后才是
-			// updated_timestamp（应对客户端未上报时间的记录）。
+			// 并非每条记录都有可用的文件时间：updated_timestamp 由同步管线写入，
+			// 可能坍缩到仓库首次导入的那几天，所以它只作最后的兜底。
 			MTime:     firstNonZero(note.Ctime, note.Mtime, note.UpdatedTimestamp),
 			CreatedAt: createdAt,
 			Summary:   blogPlainText(note.Content, 90),
@@ -766,12 +765,13 @@ func (s *shareService) GetBlogHome(ctx context.Context, uid int64, baseURL strin
 	// ── 条目、目录树、活跃度热力图、统计 ──
 	root := &blogTreeNode{name: "", children: map[string]*blogTreeNode{}}
 	totalLinks := 0
-	var latest int64
-	// earliest bounds the heat map so the window can span the vault's real history instead of
-	// a fixed trailing range that most notes fall outside of.
-	// earliest 用于界定热力图的窗口，使其横跨仓库真实的历史跨度，
-	// 而不是让大多数笔记落在固定回溯窗口之外。
-	var earliest int64
+	// Every date on this page — the hero's "last updated", the about card's date, the day counter
+	// and the heat map — is the article date, not the file's mtime. Reading the same value in all
+	// four places is what keeps one note from appearing under two dates on one page.
+	//
+	// 本页所有日期——hero 的「最后更新」、关于卡的日期、站龄天数与热力图——都取文章日期，
+	// 而不是文件 mtime。四处读同一个值，同一篇笔记才不会在同一页上以两个日期出现。
+	var earliestDate, latestDate string
 	dayCount := map[string]int{}
 
 	for _, src := range sources {
@@ -792,13 +792,13 @@ func (s *shareService) GetBlogHome(ctx context.Context, uid int64, baseURL strin
 		})
 		home.Stats.Words += src.Words
 		totalLinks += linksOut[src.NoteID]
-		if src.MTime > latest {
-			latest = src.MTime
-		}
-		if src.MTime > 0 {
-			dayCount[time.UnixMilli(src.MTime).Format("2006-01-02")]++
-			if earliest == 0 || src.MTime < earliest {
-				earliest = src.MTime
+		if date := blogNoteDate(src.CreatedAt, src.MTime); date != "" {
+			dayCount[date]++
+			if earliestDate == "" || date < earliestDate {
+				earliestDate = date
+			}
+			if date > latestDate {
+				latestDate = date
 			}
 		}
 
@@ -825,7 +825,18 @@ func (s *shareService) GetBlogHome(ctx context.Context, uid int64, baseURL strin
 	// 而文章页（读的是 GetBlogNav）却有的原因。
 	home.Nav.Tree = root.toDTO()
 	home.Nav.Total = len(sources)
-	home.Activity = buildActivity(dayCount, earliest, 14, 53)
+	// The heat map windows on the earliest article date, parsed back into a midnight timestamp in
+	// Local — the same wall clock its labels are formatted in.
+	//
+	// 热力图以最早的文章日期定窗口，并解析回本地时区的零点时间戳——
+	// 与它标签格式化所用的同一套壁钟时间。
+	earliestMS := int64(0)
+	if earliestDate != "" {
+		if d, err := time.ParseInLocation("2006-01-02", earliestDate, time.Local); err == nil {
+			earliestMS = d.UnixMilli()
+		}
+	}
+	home.Activity = buildActivity(dayCount, earliestMS, 14, 53)
 
 	// ── Sections, card identity, day counter ──
 	// ── 版块、名片身份、天数 ──
@@ -849,16 +860,17 @@ func (s *shareService) GetBlogHome(ctx context.Context, uid int64, baseURL strin
 	// 因此这两层对「存在什么」不会各说一套。
 	home.Recs = blogAggregateSections(home.Entries, "", 1, blogRecLimit)
 
-	// The start date is the earliest published note's timestamp — the same value the heat map
-	// already windows on. Deriving it means the card cannot claim a different history from the
-	// archive that sits under it on the same page.
+	// The start date is the earliest published article's date — the same value the heat map
+	// windows on. Parsing it back into local midnight means the day counter advances on the same
+	// boundary the dates are rendered with.
 	//
-	// 起始日期取最早一篇已发布笔记的时间戳，也就是热力图已经在用来定窗口的那个值。
-	// 推导它意味着名片不可能宣称一段与它下方归档不同的历史。
-	if earliest > 0 {
-		start := time.UnixMilli(earliest)
-		home.Stats.Since = start.Format("2006-01-02")
-		home.Stats.DaysOnline = int(time.Since(start).Hours() / 24)
+	// 起始日期取最早一篇已发布笔记的文章日期，也就是热力图用来定窗口的那个值。
+	// 把它解析回本地时区零点，意味着天数在与日期渲染相同的边界上递增。
+	if earliestDate != "" {
+		if start, err := time.ParseInLocation("2006-01-02", earliestDate, time.Local); err == nil {
+			home.Stats.Since = earliestDate
+			home.Stats.DaysOnline = int(time.Since(start).Hours() / 24)
+		}
 	}
 
 	// The card page identity is parsed out of the résumé page note. A missing note leaves Profile
@@ -885,8 +897,8 @@ func (s *shareService) GetBlogHome(ctx context.Context, uid int64, baseURL strin
 	if home.Stats.Notes > 0 {
 		home.Stats.AvgWords = home.Stats.Words / home.Stats.Notes
 	}
-	if latest > 0 {
-		home.Stats.Updated = time.UnixMilli(latest).Format("2006-01-02")
+	if latestDate != "" {
+		home.Stats.Updated = latestDate
 	}
 
 	// ── Tag cloud (most used first) ──
@@ -1169,27 +1181,56 @@ func (n *blogTreeNode) folderCount() int {
 
 // ── Activity heat map ────────────────────────────────────────────────
 
-// buildActivity aggregates note timestamps into a GitHub-style heat map.
+// blogNoteDate resolves the date the home page attributes a note to.
+//
+// CreatedAt — the share record's own date — is the article date shown by the entry cards, the
+// about card and the heat map alike. A note whose share record has no date falls back to its file
+// timestamp (MTime, already Ctime-first) so it still lands somewhere on the calendar; a note with
+// neither has no date and is omitted from the day counts.
+//
+// blogNoteDate 解析首页给一篇笔记归属的日期。
+//
+// CreatedAt——分享记录自带的日期——就是条目卡、关于卡与热力图共同显示的文章日期。
+// 分享记录没有日期时回退到文件时间戳（MTime，本身已优先 Ctime），因此它仍会落在日历上；
+// 两者都没有的笔记没有日期，不参与按天计数。
+func blogNoteDate(createdAt string, mtime int64) string {
+	if createdAt != "" {
+		return createdAt
+	}
+	if mtime > 0 {
+		return time.UnixMilli(mtime).Format("2006-01-02")
+	}
+	return ""
+}
+
+// buildActivity aggregates article dates into a GitHub-style heat map.
 //
 // The window adapts to the corpus: it always covers at least minWeeks and at most maxWeeks,
-// stretching so the earliest published note is visible. A fixed trailing window was the wrong
-// shape here — once the map moved to each file's real creation time, most of the vault sat
-// fifteen months back and fell outside a four-month strip, leaving it nearly empty.
+// stretching so the earliest published article is visible. A fixed trailing window was the wrong
+// shape here — the vault's history reaches back more than a year, so most of it fell outside a
+// four-month strip and the map looked nearly empty.
 //
-// What this is: each note's own timestamp, not an edit log. So it is a map of when the
-// published notes were written (or last touched, for ones edited after import) rather than a
-// daily output chart.
+// What this is: one date per article, not an edit log. The date is the same CreatedAt the entry
+// cards and about card show (see blogNoteDate), so the calendar and the lists cannot disagree.
 //
-// buildActivity 把笔记时间戳聚合成 GitHub 风格的热力图。
+// buildActivity 把文章日期聚合成 GitHub 风格的热力图。
 //
-// 窗口随语料自适应：至少 minWeeks 周、至多 maxWeeks 周，并拉伸到能看见最早一篇已发布笔记。
-// 固定回溯窗口在这里是错的形状——热力图改用文件真实创建时间之后，仓库里大部分内容位于
-// 十五个月前，落在四个月的色带之外，整张图会近乎空白。
+// 窗口随语料自适应：至少 minWeeks 周、至多 maxWeeks 周，并拉伸到能看见最早一篇已发布文章。
+// 固定回溯窗口在这里是错的形状——仓库历史超过一年，大部分内容会落在四个月的色带之外，
+// 整张图近乎空白。
 //
-// 它是「每篇笔记自己的时间戳」，而非编辑日志：反映已发布笔记写于何时
-// （导入后又被编辑过的则记其最后一次改动那天），而不是每日产出量。
+// 它是「每篇文章一个日期」，而非编辑日志。日期与条目卡、关于卡显示的是同一个 CreatedAt
+// （见 blogNoteDate），因此日历与列表不可能各说一套。
 func buildActivity(dayCount map[string]int, earliestMS int64, minWeeks, maxWeeks int) *dto.BlogActivityDTO {
-	now := time.Now()
+	return buildActivityAt(dayCount, earliestMS, minWeeks, maxWeeks, time.Now())
+}
+
+// buildActivityAt is buildActivity with an injected clock, so the month columns can be asserted
+// against a fixed calendar instead of whatever day the test happens to run on.
+//
+// buildActivityAt 是注入了时钟的 buildActivity，使月份列可以针对固定日历断言，
+// 而不依赖测试恰好运行在哪一天。
+func buildActivityAt(dayCount map[string]int, earliestMS int64, minWeeks, maxWeeks int, now time.Time) *dto.BlogActivityDTO {
 	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
 
 	// A week column starts on Sunday, so the first column is aligned back to the containing week.
@@ -1217,13 +1258,34 @@ func buildActivity(dayCount map[string]int, earliestMS int64, minWeeks, maxWeeks
 	maxCount, noteDays := 0, 0
 	seenMonth := map[string]bool{}
 	months := make([]string, 0, 6)
+	// MonthCols carries the 1-based week column of each label. The first column names the month
+	// the window opens in; every later month is placed on the week that contains its 1st, so a
+	// label sits above its own week. Auto-flow columns used to pack the labels side by side,
+	// which put all of them in the middle of the strip.
+	//
+	// MonthCols 存每个标签所在的周列（1-based）。首列标出窗口起始日所在的月份；
+	// 之后的月份落在包含当月 1 号的那一周，因此标签正好在自己那一周的上方。
+	// 过去的自动流列会把标签挤成一排，全部落在色带中间。
+	monthCols := make([]int, 0, 6)
+	if weeks > 0 {
+		mk := start.Format("1月")
+		seenMonth[mk] = true
+		months = append(months, mk)
+		monthCols = append(monthCols, 1)
+	}
 
 	for w := 0; w < weeks; w++ {
-		colFirst := true
 		for d := 0; d < 7; d++ {
 			day := start.AddDate(0, 0, w*7+d)
 			if day.After(today) {
 				continue
+			}
+			if day.Day() == 1 {
+				if mk := day.Format("1月"); !seenMonth[mk] {
+					seenMonth[mk] = true
+					months = append(months, mk)
+					monthCols = append(monthCols, w+1)
+				}
 			}
 			key := day.Format("2006-01-02")
 			c := dayCount[key]
@@ -1238,14 +1300,7 @@ func buildActivity(dayCount map[string]int, earliestMS int64, minWeeks, maxWeeks
 				lvl = 4
 			}
 			days = append(days, dto.BlogDayDTO{Date: key, Count: c, Week: w, Dow: d, Lvl: lvl})
-			if colFirst {
-				if mk := day.Format("1月"); !seenMonth[mk] {
-					seenMonth[mk] = true
-					months = append(months, mk)
-				}
-				colFirst = false
-			}
 		}
 	}
-	return &dto.BlogActivityDTO{Days: days, Weeks: weeks, NoteDays: noteDays, Max: maxCount, Months: months}
+	return &dto.BlogActivityDTO{Days: days, Weeks: weeks, NoteDays: noteDays, Max: maxCount, Months: months, MonthCols: monthCols}
 }
