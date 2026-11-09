@@ -765,13 +765,21 @@ func (s *shareService) GetBlogHome(ctx context.Context, uid int64, baseURL strin
 	// ── 条目、目录树、活跃度热力图、统计 ──
 	root := &blogTreeNode{name: "", children: map[string]*blogTreeNode{}}
 	totalLinks := 0
-	// Every date on this page — the hero's "last updated", the about card's date, the day counter
-	// and the heat map — is the article date, not the file's mtime. Reading the same value in all
-	// four places is what keeps one note from appearing under two dates on one page.
+	// Per-article dates — the hero's "last updated", the about card's date, the day counts and the
+	// heat map — are the article date (CreatedAt, see blogNoteDate), not the file's mtime. That is
+	// what keeps one note from appearing under two dates on one page.
 	//
-	// 本页所有日期——hero 的「最后更新」、关于卡的日期、站龄天数与热力图——都取文章日期，
-	// 而不是文件 mtime。四处读同一个值，同一篇笔记才不会在同一页上以两个日期出现。
+	// The day counter is the exception, deliberately: it measures blog history, so it starts from
+	// the earliest file timestamp (earliestMTime), not from the share record. Share records only
+	// begin when the site went live, while the vault's files reach further back.
+	//
+	// 逐篇日期——hero 的「最后更新」、关于卡的日期、按天计数与热力图——取文章日期
+	// （CreatedAt，见 blogNoteDate），而不是文件 mtime；同一篇笔记才不会在同一页上出现两个日期。
+	//
+	// 站龄是刻意的例外：它度量的是博客历史，因此从最早的文件时间戳（earliestMTime）起算，
+	// 而不是从分享记录起算——分享记录从站点上线才开始，而仓库文件的历史更早。
 	var earliestDate, latestDate string
+	var earliestMTime int64
 	dayCount := map[string]int{}
 
 	for _, src := range sources {
@@ -792,6 +800,9 @@ func (s *shareService) GetBlogHome(ctx context.Context, uid int64, baseURL strin
 		})
 		home.Stats.Words += src.Words
 		totalLinks += linksOut[src.NoteID]
+		if src.MTime > 0 && (earliestMTime == 0 || src.MTime < earliestMTime) {
+			earliestMTime = src.MTime
+		}
 		if date := blogNoteDate(src.CreatedAt, src.MTime); date != "" {
 			dayCount[date]++
 			if earliestDate == "" || date < earliestDate {
@@ -826,10 +837,13 @@ func (s *shareService) GetBlogHome(ctx context.Context, uid int64, baseURL strin
 	home.Nav.Tree = root.toDTO()
 	home.Nav.Total = len(sources)
 	// The heat map windows on the earliest article date, parsed back into a midnight timestamp in
-	// Local — the same wall clock its labels are formatted in.
+	// Local — the same wall clock its labels are formatted in. This is deliberately different from
+	// the day counter above: the day counter measures file history (earliestMTime), while the
+	// calendar measures article dates shared with the entry and about cards.
 	//
 	// 热力图以最早的文章日期定窗口，并解析回本地时区的零点时间戳——
-	// 与它标签格式化所用的同一套壁钟时间。
+	// 与它标签格式化所用的同一套壁钟时间。这与上面的站龄刻意不同：
+	// 站龄看文件历史（earliestMTime），日历看与条目卡、关于卡共用的文章日期。
 	earliestMS := int64(0)
 	if earliestDate != "" {
 		if d, err := time.ParseInLocation("2006-01-02", earliestDate, time.Local); err == nil {
@@ -860,17 +874,17 @@ func (s *shareService) GetBlogHome(ctx context.Context, uid int64, baseURL strin
 	// 因此这两层对「存在什么」不会各说一套。
 	home.Recs = blogAggregateSections(home.Entries, "", 1, blogRecLimit)
 
-	// The start date is the earliest published article's date — the same value the heat map
-	// windows on. Parsing it back into local midnight means the day counter advances on the same
-	// boundary the dates are rendered with.
+	// The day counter is blog history, not share history: it starts from the earliest file
+	// timestamp, because share records only begin when the site went live while the vault's files
+	// reach further back. Article dates still drive Stats.Updated, the day counts and the heat map.
 	//
-	// 起始日期取最早一篇已发布笔记的文章日期，也就是热力图用来定窗口的那个值。
-	// 把它解析回本地时区零点，意味着天数在与日期渲染相同的边界上递增。
-	if earliestDate != "" {
-		if start, err := time.ParseInLocation("2006-01-02", earliestDate, time.Local); err == nil {
-			home.Stats.Since = earliestDate
-			home.Stats.DaysOnline = int(time.Since(start).Hours() / 24)
-		}
+	// 站龄是博客的历史，不是分享的历史：起点取最早的文件时间戳，
+	// 因为分享记录从站点上线才开始，而仓库文件的历史更早。
+	// 文章日期仍用于 Stats.Updated、按天计数与热力图。
+	if earliestMTime > 0 {
+		start := time.UnixMilli(earliestMTime)
+		home.Stats.Since = start.Format("2006-01-02")
+		home.Stats.DaysOnline = int(time.Since(start).Hours() / 24)
 	}
 
 	// The card page identity is parsed out of the résumé page note. A missing note leaves Profile

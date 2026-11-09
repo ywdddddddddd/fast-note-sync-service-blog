@@ -196,7 +196,7 @@ var blogCardTmpl = template.Must(template.New("blog-card").Funcs(blogAssetFuncs)
   <section class="card card-pad act-card" id="activity" data-anim="4">
     <div class="sec-head">
       <h2 class="sec-label">活跃度</h2>
-      <span class="sec-note">按笔记创建日期 · 最近 {{.Activity.Weeks}} 周</span>
+      <span class="sec-note">按文章日期 · 最近 {{.Activity.Weeks}} 周</span>
     </div>
     <div class="heat" style="--weeks:{{.Activity.Weeks}}">
       {{range .Activity.Days}}<i class="hc lv{{.Lvl}}" title="{{.Date}} · {{.Count}} 篇"></i>{{end}}
