@@ -82,6 +82,14 @@ type NoteRepository interface {
 	// 用于批量存在性预检查，避免逐条查询的 N+1
 	ListByPathHashesMeta(ctx context.Context, pathHashes []string, vaultID, uid int64) (map[string]*Note, error)
 
+	// ListByPathSuffix 按路径后缀获取用户全部未删除笔记（读取正文）
+	// 用于博客的保留元数据笔记，例如每个栏目目录里的 `_栏目说明.md`。
+	//
+	// ListByPathSuffix returns every live note of the user whose path ends with suffix.
+	// It exists for reserved metadata notes such as the per-folder `_栏目说明.md`: those are
+	// deliberately unshared, so they never appear in a share-driven source list.
+	ListByPathSuffix(ctx context.Context, uid int64, suffix string) ([]*Note, error)
+
 	// GetByPath 根据路径获取笔记
 	GetByPath(ctx context.Context, path string, vaultID, uid int64) (*Note, error)
 

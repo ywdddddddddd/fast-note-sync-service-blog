@@ -66,7 +66,7 @@ func (s *shareService) GetBlogList(ctx context.Context, uid int64, baseURL strin
 	switch {
 	case section == "":
 		// /blog/all — everything, newest first, recommending the top level of the taxonomy.
-		recs = blogAggregateSections(home.Entries, "", 1, blogRecLimit)
+		recs = blogAggregateSections(home.Entries, "", 1, blogRecLimit, home.SectionDescs)
 
 	case sub == "":
 		// /blog/c/<section> — a table of contents for one section.
@@ -77,8 +77,8 @@ func (s *shareService) GetBlogList(ctx context.Context, uid int64, baseURL strin
 		kicker = sec.Name
 		basePath = root + "/blog/c/" + url.PathEscape(section)
 		inSection := blogFilterSection(home.Entries, section)
-		subs = blogAggregateSections(home.Entries, section, 2, 0)
-		recs = blogAggregateSections(home.Entries, section, 2, blogRecLimit)
+		subs = blogAggregateSections(home.Entries, section, 2, 0, home.SectionDescs)
+		recs = blogAggregateSections(home.Entries, section, 2, blogRecLimit, home.SectionDescs)
 		if len(subs) == 0 {
 			// No second level under this section: show its notes instead of an empty shelf.
 			subs = nil

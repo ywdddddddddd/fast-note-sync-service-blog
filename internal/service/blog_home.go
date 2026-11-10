@@ -494,6 +494,14 @@ func (s *shareService) loadBlogSources(ctx context.Context, uid int64) ([]*blogH
 		if err != nil || note == nil || note.Action == "delete" {
 			continue
 		}
+		// A `_栏目说明.md` is metadata for its folder, not an article. It is normally unshared;
+		// this guard keeps an accidental folder-level share from turning it into a card.
+		//
+		// `_栏目说明.md` 是目录的元数据，不是文章。它通常不分享；这道守卫防止
+		// 「分享整个文件夹」把它变成一张卡片。
+		if blogIsSectionNote(note.Path) {
+			continue
+		}
 		// Same de-duplication rule as the index list: one entry per source path.
 		// 与索引列表相同的去重规则：同一来源路径只保留一条。
 		if _, dup := seenPath[note.Path]; dup {
@@ -872,7 +880,14 @@ func (s *shareService) GetBlogHome(ctx context.Context, uid int64, baseURL strin
 	// 名片页站在分类的顶层，因此它推荐一级版块。右栏随读者逐级下降：
 	// /blog/c/<版块> 要的是那个版块的子目录。两者出自同一个聚合函数，
 	// 因此这两层对「存在什么」不会各说一套。
-	home.Recs = blogAggregateSections(home.Entries, "", 1, blogRecLimit)
+	//
+	// Descriptions come from the vault, not from a map in this package: every folder may carry
+	// its own `_栏目说明.md`, which is also what the Obsidian command edits.
+	//
+	// 说明来自仓库，而不是本包里的 map：每个目录都可以带自己的 `_栏目说明.md`，
+	// 也就是 Obsidian 命令编辑的那份笔记。
+	home.SectionDescs = s.loadBlogSectionDescs(ctx, uid)
+	home.Recs = blogAggregateSections(home.Entries, "", 1, blogRecLimit, home.SectionDescs)
 
 	// The day counter is blog history, not share history: it starts from the earliest file
 	// timestamp, because share records only begin when the site went live while the vault's files

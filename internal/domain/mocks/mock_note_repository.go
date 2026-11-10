@@ -64,6 +64,14 @@ func (m *MockNoteRepository) ListByPathHashesMeta(ctx context.Context, pathHashe
 	return args.Get(0).(map[string]*domain.Note), args.Error(1)
 }
 
+func (m *MockNoteRepository) ListByPathSuffix(ctx context.Context, uid int64, suffix string) ([]*domain.Note, error) {
+	args := m.Called(ctx, uid, suffix)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]*domain.Note), args.Error(1)
+}
+
 func (m *MockNoteRepository) GetByPath(ctx context.Context, path string, vaultID, uid int64) (*domain.Note, error) {
 	args := m.Called(ctx, path, vaultID, uid)
 	if args.Get(0) == nil {
@@ -261,7 +269,6 @@ func (m *MockNoteRepository) RebuildVaultIndex(ctx context.Context, uid, vaultID
 	args := m.Called(ctx, uid, vaultID)
 	return args.Error(0)
 }
-
 
 // Compile-time check: MockNoteRepository must implement domain.NoteRepository.
 // 编译时检查：MockNoteRepository 必须实现 domain.NoteRepository 接口。

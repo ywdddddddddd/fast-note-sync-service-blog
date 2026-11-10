@@ -58,6 +58,40 @@ func (r *noteRepository) note(uid int64) *query.Query {
 	}, r.GetKey(uid)+"#note_v3", r.GetKey(uid))
 }
 
+// ListByPathSuffix returns every live note whose path ends with suffix.
+//
+// The suffix always starts with "/" at the call sites that use it (a reserved file name inside a
+// folder), so a folder called `x_栏目说明.md` cannot satisfy a prefix-less match. Content is
+// loaded: the caller parses frontmatter out of it.
+//
+// ListByPathSuffix 按路径后缀返回全部未删除笔记。
+//
+// 现有调用方的后缀都以 "/" 开头（目录内的保留文件名），因此一个叫 `x_栏目说明.md` 的目录
+// 不会被无前缀匹配误中。正文会一并读出：调用方要从中解析 frontmatter。
+func (r *noteRepository) ListByPathSuffix(ctx context.Context, uid int64, suffix string) ([]*domain.Note, error) {
+	u := r.note(uid).Note
+	q := u.WithContext(ctx).Where(u.Action.Neq("delete"))
+	var ms []*model.Note
+	// GLOB, not LIKE: `_` is a single-character wildcard in LIKE, so a suffix such as
+	// `/_栏目说明.md` would also match `X栏目说明.md`. GLOB treats `_` literally and is
+	// case-sensitive, which is what a reserved file name needs.
+	//
+	// 用 GLOB 而不是 LIKE：`_` 在 LIKE 里是单字符通配符，`/_栏目说明.md` 会连
+	// `X栏目说明.md` 一起命中。GLOB 把 `_` 当字面量且区分大小写，正是保留文件名需要的。
+	if err := q.UnderlyingDB().Where("path GLOB ?", "*"+suffix).Find(&ms).Error; err != nil {
+		return nil, err
+	}
+	res := make([]*domain.Note, 0, len(ms))
+	for _, m := range ms {
+		note, err := r.toDomain(m, uid)
+		if err != nil {
+			return nil, err
+		}
+		res = append(res, note)
+	}
+	return res, nil
+}
+
 // ListByIDs retrieves note list by ID list
 // ListByIDs 根据ID列表获取笔记列表
 func (r *noteRepository) ListByIDs(ctx context.Context, ids []int64, uid int64) ([]*domain.Note, error) {

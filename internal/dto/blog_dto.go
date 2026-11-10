@@ -331,6 +331,15 @@ type BlogHomeDTO struct {
 	// Recs are the second-level folders with recent activity; see blogSectionRecs.
 	// Recs 是最近有变动的二级文件夹；见 blogSectionRecs。
 	Recs []*BlogSectionRecDTO `json:"recs,omitempty"`
+
+	// SectionDescs maps a normalized folder name to the line stored in that folder's
+	// `_栏目说明.md`. It is internal plumbing between GetBlogHome and the list pages: the
+	// templates receive the resolved Desc on each section card, never this map.
+	//
+	// SectionDescs 把归一化目录名映射到该目录 `_栏目说明.md` 里的说明。
+	// 它只是 GetBlogHome 与列表页之间的内部数据：模板拿到的是每张栏目卡上已经解析好的 Desc，
+	// 从不读取这个 map。
+	SectionDescs map[string]string `json:"-"`
 }
 
 // BlogPostDTO a rendered blog post

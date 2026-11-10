@@ -36,39 +36,6 @@ const blogRecLimit = 5
 // 六张卡大约就是一坐，十五张会把页面变成一个滚不到底的清单。
 const blogSubPageSize = 6
 
-// blogSectionBlurbs are hand-written one-liners for the folders that exist today.
-//
-// They are hard-coded on purpose. The owner asked for fixed copy because folder contents do not
-// change often, and a generated summary would drift from the folder the moment it is edited.
-// A folder that is not in this map falls back to its own name — see the note in
-// blogAggregateSections.
-//
-// blogSectionBlurbs 是为现有文件夹手写的一句话说明。
-//
-// 有意写死。站主要求固定文案，因为文件夹内容不常变，而自动生成的摘要会在文件夹被编辑的那一刻
-// 开始漂移。不在这张表里的文件夹回退到它自己的名字——理由见 blogAggregateSections。
-var blogSectionBlurbs = map[string]string{
-	"口腔笔记":      "牙体牙髓、口腔外科与修复的临床记录。",
-	"健康生活":      "作息、训练与饮食，以及它们对身体的影响。",
-	"能力提升":      "科研、技术与方法论上的长期投入。",
-	"修复笔记":      "牙体缺损的修复路径：嵌体、高嵌体、全冠与桩核。",
-	"口外笔记":      "口腔颌面外科：麻醉、拔牙、感染与创伤处理。",
-	"口组笔记":      "口腔组织病理：牙体与牙周组织的发生、结构与病变。",
-	"口解笔记":      "口腔解剖生理：牙体形态、咬合与颌位关系。",
-	"正畸笔记":      "错𬌗畸形的诊断、矫治器与力学设计。",
-	"牙体牙髓":      "龋病、牙髓病与根尖周病的诊断与治疗。",
-	"种植笔记":      "种植体植入、骨结合与上部修复。",
-	"牙体笔记":      "牙体形态与牙体预备的基础记录。",
-	"彭教授的根管教学":  "根管治疗的临床要点与教学示范。",
-	"健身":        "训练计划、动作模式与恢复。",
-	"光线":        "自然光与人工光的取舍，以及它对作息的影响。",
-	"压力":        "压力的来源、生理反应与调节手段。",
-	"睡眠":        "睡眠结构、昼夜节律与常见睡眠问题。",
-	"饮食":        "宏量营养素、进食时机与日常搭配。",
-	"科研学术":      "论文阅读、研究方法与写作。",
-	"技术实践":      "工具、环境与踩坑记录。",
-}
-
 // blogEntryFolderAt returns the folder name at the given depth of a note's vault-relative path.
 //
 // depth 1 is the section, depth 2 the sub-section. An empty result means the note does not reach
@@ -124,7 +91,9 @@ func blogEntryFolderAt(path string, depth int) string {
 // 封面取自各目录内的笔记，每次调用随机一张。目录本身没有封面，而在作者已经为里面的笔记选好真实封面图
 // 的情况下另画一个占位，等于把那批图丢掉。每次请求重抽，这也是站主要求的：
 // 同一个目录每次打开页面都换一张封面。
-func blogAggregateSections(entries []*dto.BlogEntryDTO, parent string, depth, limit int) []*dto.BlogSectionRecDTO {
+//
+// descs 是目录说明（见 blogSectionDescsFromNotes）；没有说明的目录回退到它自己的名字。
+func blogAggregateSections(entries []*dto.BlogEntryDTO, parent string, depth, limit int, descs map[string]string) []*dto.BlogSectionRecDTO {
 	if depth < 1 {
 		depth = 1
 	}
@@ -192,15 +161,16 @@ func blogAggregateSections(entries []*dto.BlogEntryDTO, parent string, depth, li
 			// 而那正是被删掉的热门列表在做的事。
 			continue
 		}
-		desc, ok := blogSectionBlurbs[a.name]
-		if !ok {
-			// The owner's instruction: an unknown folder uses its own name as the summary until
-			// someone writes a real line for it. It reads redundant, and that is the point — a
-			// redundant line is obviously unfinished, whereas a clever generated one hides that.
-			//
-			// 站主的指示：未收录的文件夹先用它自己的名字当摘要，等人来写真正的一句话。
-			// 它读起来是重复的，而这正是重点——重复的一行一眼看得出是待补，
-			// 而一句机器生成的漂亮话会把这件事藏起来。
+		// The description comes from the folder's own `_栏目说明.md` (see blogSectionDesc); a
+		// folder without one uses its own name. The redundant line is the point: it is obviously
+		// unfinished, whereas a clever generated summary would hide that someone still has to
+		// write the real sentence.
+		//
+		// 说明来自目录自己的 `_栏目说明.md`（见 blogSectionDesc）；没有说明的目录用目录名。
+		// 重复的一行正是重点：它一眼看得出是待补，而一句机器生成的漂亮话会把「还差人写一句」
+		// 这件事藏起来。
+		desc := descs[a.name]
+		if desc == "" {
 			desc = a.name
 		}
 		rec := &dto.BlogSectionRecDTO{
