@@ -174,6 +174,12 @@ func registerBlogRoutes(r *gin.Engine, appContainer *app.App) {
 	//
 	// 章末练习。与 lottie.js 同理注册在 "/blog/:slug" 之前：这些是接口，不是笔记。
 	registerBlogQuizRoutes(blog, shareSvc)
+	// Reading audio. Registered before "/blog/:slug" for the same literal-segment reason as
+	// the feed: /blog/audio.js and /blog/audio/<file> are endpoints, not notes.
+	//
+	// 朗读音频。与订阅源同理注册在 "/blog/:slug" 之前：/blog/audio.js 与 /blog/audio/<file>
+	// 是接口，不是笔记。
+	registerBlogAudioRoutes(blog, appContainer, shareSvc)
 	// 分享卡上的二维码。同样必须在 "/blog/:slug" 之前注册，否则会被当成一篇笔记的 slug。
 	//
 	// 分享卡的二维码。同理，先于 "/blog/:slug" 注册。
@@ -596,6 +602,12 @@ func registerBlogRoutes(r *gin.Engine, appContainer *app.App) {
 			siteAvatar = site.Avatar
 		}
 
+		audioView := blogAudioLookup(appContainer, slug)
+		postCSS := blogCSS
+		if audioView != nil {
+			postCSS += blogAudioCSS
+		}
+
 		var pbuf bytes.Buffer
 		if perr := blogPostTmpl.Execute(&pbuf, blogPostView{
 			Title:       post.Title + " · " + siteTitle,
@@ -608,7 +620,7 @@ func registerBlogRoutes(r *gin.Engine, appContainer *app.App) {
 			Description: postDesc,
 			FeedURL:     strings.TrimRight(base, "/") + "/blog/rss.xml",
 			JSONLD:      blogPostJSONLD(siteTitle, post.Title, postURL, postDesc, post.CreatedAt),
-			CSS:         template.CSS(blogCSS),
+			CSS:         template.CSS(postCSS),
 			Nav:         nav,
 			Pages:       pages,
 			HasShelf:    shelfHasBooks(),
@@ -621,6 +633,7 @@ func registerBlogRoutes(r *gin.Engine, appContainer *app.App) {
 			ActiveSlug:  slug,
 			PostTitle:   post.Title,
 			PostPath:    post.Path,
+			Audio:       audioView,
 			PostCover:   post.Cover,
 			PostMeta:    meta,
 			Body:        template.HTML(body), //nolint:gosec // rendered by goldmark from the user's own notes

@@ -211,8 +211,14 @@ type blogPostView struct {
 	//
 	// PostCover 是文章 hero，仅对绝对的封面引用填充。
 	// 本地附件为何不在这里解析，见 dto.BlogPostDTO.Cover。
-	PostCover  *dto.BlogCoverDTO
-	PostMeta   []string
+	PostCover *dto.BlogCoverDTO
+	PostMeta  []string
+	// Audio is non-nil when this article has a generated reading. The template renders the
+	// one-line entry; the player fetches the sentence timings on first click.
+	//
+	// Audio 非空表示这篇文章已有生成好的朗读。模板只渲染那一行入口；逐句时间轴由播放器在
+	// 首次点击时按需拉取。
+	Audio      *blogPostAudioView
 	Body       template.HTML
 	TOC        []tocEntry
 	Tags       []string
@@ -524,6 +530,12 @@ var blogPostTmpl = template.Must(template.New("blog-post").Funcs(blogAssetFuncs)
         <div class="post-meta">
           {{range .PostMeta}}<span>{{.}}</span>{{end}}
         </div>
+        {{if .Audio}}
+        <button type="button" class="listen-line" id="fns-listen" data-src="{{.Audio.Src}}" data-timings="{{.Audio.Timings}}" data-text-hash="{{.Audio.TextHash}}">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 14v-2a8 8 0 0 1 16 0v2"/><path d="M4 14a2 2 0 0 1 2-2h1v6H6a2 2 0 0 1-2-2Z"/><path d="M20 14a2 2 0 0 0-2-2h-1v6h1a2 2 0 0 0 2-2Z"/></svg>
+          <span>听全文</span>
+        </button>
+        {{end}}
         <div class="post-body">{{.Body}}</div>
 
         <!-- Interaction bar.
@@ -766,6 +778,7 @@ var blogPostTmpl = template.Must(template.New("blog-post").Funcs(blogAssetFuncs)
 <script src="/blog/feed.js?v={{assetVer}}" defer></script>
 <script src="/blog/lightbox.js?v={{assetVer}}" defer></script>
 <script src="/blog/code.js?v={{assetVer}}" defer></script>
+{{if .Audio}}<script src="/blog/audio.js?v={{assetVer}}" defer></script>{{end}}
 
   <!-- Mobile edge tabs and their drawers.
        Only rendered on reading pages: the home page has no in-page outline, and its side columns
