@@ -602,11 +602,12 @@ func registerBlogRoutes(r *gin.Engine, appContainer *app.App) {
 			siteAvatar = site.Avatar
 		}
 
-		audioView := blogAudioLookup(appContainer, slug)
-		postCSS := blogCSS
-		if audioView != nil {
-			postCSS += blogAudioCSS
-		}
+		// Every article gets the entry; if no audio exists yet, the player asks for one on the
+		// first click and the server generates it then.
+		//
+		// 每篇文章都有入口；还没有音频时，播放器在首次点击后请求服务端生成。
+		audioView := blogAudioViewForArticle(appContainer, slug)
+		postCSS := blogCSS + blogAudioCSS
 
 		var pbuf bytes.Buffer
 		if perr := blogPostTmpl.Execute(&pbuf, blogPostView{

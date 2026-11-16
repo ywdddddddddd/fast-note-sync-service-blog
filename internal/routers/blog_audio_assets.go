@@ -58,11 +58,39 @@ body.is-listening .topnav,body.is-listening .crumb{visibility:hidden}
 .fns-audio-exit:hover{background:rgba(52,50,45,.15);color:var(--foreground)}
 .fns-audio-exit svg{width:13px;height:13px}
 
-/* Sentence highlight. The Custom Highlight API paints without touching the DOM; browsers
-   without it fall back to a class on the containing block, which is still useful and never
-   changes the article's markup. */
-::highlight(fns-audio){background-color:rgba(75,122,67,.13)}
-.fns-audio-hl{background:rgba(75,122,67,.13);border-radius:3px;box-shadow:0 0 0 4px rgba(75,122,67,.13)}
+/* Sentence highlight. We paint our own fixed rectangles from the current sentence's client
+   rects instead of the Custom Highlight API: Safari's highlight registry can keep the previous
+   range painted after the registry entry is replaced, which is exactly the "old sentence stays
+   green" residue. Clearing every mark before drawing the next one makes that impossible. */
+.fns-audio-mark{
+  position:fixed;z-index:6;pointer-events:none;
+  background:rgba(75,122,67,.15);border-radius:3px;
+}
+.listen-line[aria-busy="true"]{opacity:.55;pointer-events:none}
+.fns-audio-modal{
+  position:fixed;inset:0;z-index:80;display:flex;align-items:center;justify-content:center;
+  padding:20px;background:rgba(0,0,0,.18);
+}
+.fns-audio-card{
+  width:min(360px,100%);background:var(--card);border:1px solid var(--border);
+  border-radius:14px;box-shadow:0 24px 60px rgba(0,0,0,.18);padding:22px 22px 16px;
+}
+.fns-audio-card h3{margin:0 0 10px;font-size:16px;font-weight:650;display:flex;align-items:center}
+.fns-audio-card p{margin:0;font-size:13px;line-height:1.8;color:var(--c2,#5c5a56)}
+.fns-audio-card p.fns-audio-sub{margin-top:8px;font-size:12px;color:var(--muted-foreground)}
+.fns-audio-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:18px}
+.fns-audio-btn{
+  border:1px solid var(--border);background:var(--card);color:var(--foreground);
+  border-radius:999px;padding:7px 14px;font-size:12px;cursor:pointer;
+}
+.fns-audio-btn.primary{background:var(--foreground);color:var(--card);border-color:var(--foreground)}
+.fns-audio-spinner{
+  width:16px;height:16px;border:2px solid rgba(0,0,0,.12);border-top-color:var(--foreground);
+  border-radius:50%;animation:fns-audio-spin .8s linear infinite;display:inline-block;
+  margin-right:8px;flex:none;
+}
+@keyframes fns-audio-spin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion: reduce){.fns-audio-spinner{animation:none}}
 
 @media (max-width:860px){
   .fns-audio-ctl{
@@ -95,15 +123,16 @@ const blogAudioScript = `
   var body = document.body;
   var src = trigger.getAttribute('data-src') || '';
   var timingsURL = trigger.getAttribute('data-timings') || '';
+  var slug = trigger.getAttribute('data-slug') || '';
+  var ready = trigger.getAttribute('data-ready') === '1';
   var expectHash = trigger.getAttribute('data-text-hash') || '';
   var storeKey = 'fns-audio:' + (src.split('?')[0] || location.pathname);
   var reduce = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
-  var canHighlight = !!(window.CSS && CSS.highlights && window.Highlight && window.Range);
 
   var audio = null, ctl = null, playBtn = null, exitBtn = null;
   var sentences = [], blocks = [], fullText = '';
   var current = -1, followPausedUntil = 0, saveTimer = 0, lastSave = 0;
-  var fallbackEl = null;
+  var marks = [], currentRange = null, markRaf = 0;
   var exiting = false;
 
   function norm(s) { return (s || '').replace(/\s+/g, ' ').trim(); }
@@ -184,30 +213,76 @@ const blogAudioScript = `
     return r;
   }
 
-  function clearHighlight() {
-    if (canHighlight) { try { CSS.highlights.delete('fns-audio'); } catch (e) {} }
-    if (fallbackEl) { fallbackEl.classList.remove('fns-audio-hl'); fallbackEl = null; }
+  function clearMarks() {
+    for (var i = 0; i < marks.length; i++) {
+      if (marks[i].parentNode) marks[i].parentNode.removeChild(marks[i]);
+    }
+    marks = [];
+    currentRange = null;
+  }
+
+  // One rectangle per line box: a sentence that wraps gets several marks, and the page can
+  // scroll underneath them without the marks drifting because they are re-laid out on scroll.
+  //
+  // 每个行盒一个矩形：换行的句子会有多个遮罩；它们按当前 rect 重排，页面滚动时不会漂移。
+  function layoutMarks() {
+    if (!currentRange) return;
+    var rects = currentRange.getClientRects();
+    // A range over inline elements returns one rect per text run, so the same visual line can
+    // arrive as a dozen overlapping boxes. Group by line and merge, or overlapping translucent
+    // boxes stack into a darker, uneven band.
+    //
+    // range 跨内联元素时会给同一行返回多个文本 run 的矩形；按行分组合并，否则半透明盒子叠加
+    // 会变成深浅不一的色带。
+    var groups = {}, valid = [];
+    for (var i = 0; i < rects.length; i++) {
+      var r = rects[i];
+      if (!(r.width > 0 && r.height > 0)) continue;
+      var key = Math.round(r.top / 2) + ':' + Math.round(r.height / 2);
+      var g = groups[key];
+      if (!g) {
+        g = groups[key] = { left: r.left, right: r.right, top: r.top, bottom: r.bottom };
+        valid.push(g);
+      } else {
+        if (r.left < g.left) g.left = r.left;
+        if (r.right > g.right) g.right = r.right;
+        if (r.top < g.top) g.top = r.top;
+        if (r.bottom > g.bottom) g.bottom = r.bottom;
+      }
+    }
+    while (marks.length > valid.length) {
+      var extra = marks.pop();
+      if (extra.parentNode) extra.parentNode.removeChild(extra);
+    }
+    while (marks.length < valid.length) {
+      var m = document.createElement('div');
+      m.className = 'fns-audio-mark';
+      document.body.appendChild(m);
+      marks.push(m);
+    }
+    for (var j = 0; j < valid.length; j++) {
+      marks[j].style.left = valid[j].left + 'px';
+      marks[j].style.top = valid[j].top + 'px';
+      marks[j].style.width = (valid[j].right - valid[j].left) + 'px';
+      marks[j].style.height = (valid[j].bottom - valid[j].top) + 'px';
+    }
+  }
+
+  function scheduleMarks() {
+    if (markRaf) return;
+    markRaf = window.requestAnimationFrame(function () {
+      markRaf = 0;
+      layoutMarks();
+    });
   }
 
   function paint(i) {
-    clearHighlight();
+    clearMarks();
     if (i < 0 || i >= sentences.length) return;
-    if (canHighlight && sentences[i].range) {
-      try {
-        var h = new Highlight(sentences[i].range);
-        CSS.highlights.set('fns-audio', h);
-        return;
-      } catch (e) {}
-    }
-    // Fallback: mark the whole containing block. It is coarser than a sentence but keeps the
-    // reading position visible on browsers without Custom Highlight.
-    //
-    // 回退：标出整块。比逐句粗，但在不支持 Custom Highlight 的浏览器里仍能看见读到哪。
     var r = sentences[i].range;
     if (!r) return;
-    var node = r.startContainer.nodeType === 1 ? r.startContainer : r.startContainer.parentElement;
-    var block = node && node.closest ? node.closest('p,li,h2,h3,h4') : null;
-    if (block) { block.classList.add('fns-audio-hl'); fallbackEl = block; }
+    currentRange = r;
+    layoutMarks();
   }
 
   function sentenceAt(ms) {
@@ -338,13 +413,18 @@ const blogAudioScript = `
         });
       } catch (e) {}
     }
+    // Images/fonts finishing late can shift the text under a fixed mark; re-laying it out on
+    // every timeupdate (about 4 Hz) keeps the rectangle on the sentence without a second timer.
+    //
+    // 图片/字体晚到会把文字顶移；每次 timeupdate（约 4Hz）重排一次，不需要额外定时器。
+    scheduleMarks();
   }
 
   function exit() {
     if (exiting) return;
     exiting = true;
     save();
-    clearHighlight();
+    clearMarks();
     clearMediaSession();
     if (saveTimer) { clearInterval(saveTimer); saveTimer = 0; }
     if (audio) {
@@ -407,7 +487,184 @@ const blogAudioScript = `
       .catch(function () { applyTimings(data); });
   }
 
-  function start() {
+  var modal = null, pollTimer = 0, pollStart = 0;
+
+  function closeModal() {
+    if (pollTimer) { window.clearInterval(pollTimer); pollTimer = 0; }
+    if (modal && modal.parentNode) modal.parentNode.removeChild(modal);
+    modal = null;
+  }
+
+  function makeModal() {
+    closeModal();
+    var wrap = document.createElement('div');
+    wrap.className = 'fns-audio-modal';
+    var card = document.createElement('div');
+    card.className = 'fns-audio-card';
+    wrap.appendChild(card);
+    wrap.addEventListener('click', function (e) { if (e.target === wrap) closeModal(); });
+    document.body.appendChild(wrap);
+    modal = wrap;
+    return card;
+  }
+
+  function modalButton(text, primary, onClick) {
+    var b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'fns-audio-btn' + (primary ? ' primary' : '');
+    b.textContent = text;
+    b.addEventListener('click', onClick);
+    return b;
+  }
+
+  // The browser can estimate the wait from the same text it would send to the server; no extra
+  // request is needed just to render the confirmation.
+  //
+  // 浏览器用与服务端相同的正文估算等待时间，仅为了显示确认框不需要额外请求。
+  function estimateSec() {
+    var text = buildArticleText();
+    return 15 + Math.round(text.length / 70);
+  }
+
+  function minutesText(sec) {
+    var m = Math.max(1, Math.ceil((sec || 0) / 60));
+    return '约 ' + m + ' 分钟';
+  }
+
+  function showConfirm(est) {
+    var card = makeModal();
+    var h = document.createElement('h3');
+    h.textContent = '听全文';
+    var p = document.createElement('p');
+    p.textContent = '首次收听需要先生成语音，预计' + minutesText(est || estimateSec()) +
+      '。生成完成后会自动播放，是否继续？';
+    var actions = document.createElement('div');
+    actions.className = 'fns-audio-actions';
+    actions.appendChild(modalButton('取消', false, closeModal));
+    actions.appendChild(modalButton('生成并播放', true, function () {
+      closeModal();
+      requestGenerate();
+    }));
+    card.appendChild(h);
+    card.appendChild(p);
+    card.appendChild(actions);
+  }
+
+  function requestStatus() {
+    return fetch('/blog/audio/status?slug=' + encodeURIComponent(slug) + '&t=' + Date.now(), { cache: 'no-store' })
+      .then(function (r) { return r.json(); });
+  }
+
+  function requestGenerate() {
+    trigger.setAttribute('aria-busy', 'true');
+    fetch('/blog/audio/prepare', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ slug: slug })
+    }).then(function (r) {
+      return r.json().then(function (b) { return { ok: r.ok, body: b }; });
+    }).then(function (res) {
+      trigger.removeAttribute('aria-busy');
+      var b = res.body || {};
+      if (!res.ok) { showError(b.error || '生成请求失败，请稍后重试'); return; }
+      if (b.status === 'ready') { begin(b.src, b.timings); return; }
+      if (b.status === 'queued' || b.status === 'generating') { showBusy(b.status, b.estimateSec); return; }
+      if (b.status === 'failed') { showError(b.error || '生成失败'); return; }
+      showConfirm(b.estimateSec);
+    }).catch(function () {
+      trigger.removeAttribute('aria-busy');
+      showError('网络错误，请稍后重试');
+    });
+  }
+
+  function showBusy(status, est) {
+    var card = makeModal();
+    var h = document.createElement('h3');
+    var spin = document.createElement('span');
+    spin.className = 'fns-audio-spinner';
+    var title = document.createElement('span');
+    title.textContent = status === 'generating' ? '正在生成语音…' : '排队等待生成…';
+    h.appendChild(spin);
+    h.appendChild(title);
+    var p = document.createElement('p');
+    p.className = 'fns-audio-sub';
+    var started = Date.now();
+    function tick() {
+      var elapsed = Math.round((Date.now() - started) / 1000);
+      p.textContent = '预计' + minutesText(est) + ' · 已用 ' + elapsed + ' 秒';
+    }
+    tick();
+    var actions = document.createElement('div');
+    actions.className = 'fns-audio-actions';
+    actions.appendChild(modalButton('后台生成', false, closeModal));
+    card.appendChild(h);
+    card.appendChild(p);
+    card.appendChild(actions);
+
+    pollStart = started;
+    pollTimer = window.setInterval(function () {
+      requestStatus().then(function (st) {
+        if (!modal) return;
+        if (st.status === 'ready') {
+          closeModal();
+          begin(st.src, st.timings);
+          return;
+        }
+        if (st.status === 'failed') {
+          closeModal();
+          showError(st.error || '生成失败');
+          return;
+        }
+        tick();
+      }).catch(function () { /* transient network error: keep polling */ });
+    }, 2000);
+  }
+
+  function showError(msg) {
+    var card = makeModal();
+    var h = document.createElement('h3');
+    h.textContent = '生成失败';
+    var p = document.createElement('p');
+    p.textContent = msg || '请稍后重试';
+    var actions = document.createElement('div');
+    actions.className = 'fns-audio-actions';
+    actions.appendChild(modalButton('关闭', false, closeModal));
+    actions.appendChild(modalButton('重试', true, function () {
+      closeModal();
+      requestGenerate();
+    }));
+    card.appendChild(h);
+    card.appendChild(p);
+    card.appendChild(actions);
+  }
+
+  // The entry is present on every article. A ready article plays immediately; one without
+  // audio first checks the server (a cached page may be stale), then offers the estimate.
+  //
+  // 每篇文章都有入口。已有音频的直接播放；没有的先问服务端（页面可能被缓存而状态已变），
+  // 再给出预计时间让用户确认。
+  function entryClick() {
+    if (audio) return;
+    if (ready) { begin(src, timingsURL); return; }
+    trigger.setAttribute('aria-busy', 'true');
+    requestStatus().then(function (st) {
+      trigger.removeAttribute('aria-busy');
+      if (st.status === 'ready') { begin(st.src, st.timings); return; }
+      if (st.status === 'queued' || st.status === 'generating') { showBusy(st.status, st.estimateSec); return; }
+      if (st.status === 'failed') { showError(st.error || '生成失败'); return; }
+      showConfirm(st.estimateSec);
+    }).catch(function () {
+      trigger.removeAttribute('aria-busy');
+      showConfirm();
+    });
+  }
+
+  function begin(srcArg, timingsArg) {
+    if (audio) return;
+    closeModal();
+    src = srcArg || src;
+    timingsURL = timingsArg || timingsURL;
+    trigger.removeAttribute('aria-busy');
     var saved = loadSaved();
     body.classList.add('is-listening');
     trigger.setAttribute('aria-busy', 'true');
@@ -468,7 +725,13 @@ const blogAudioScript = `
     if (/^(ArrowUp|ArrowDown|PageUp|PageDown|Home|End| )$/.test(e.key)) pauseFollow();
   });
   window.addEventListener('pagehide', save);
+  // The marks are viewport-fixed; their source range is not. Recompute on scroll/resize so a
+  // highlight follows the text instead of staying at the old screen position.
+  //
+  // 遮罩是视口固定的，源 range 不是；滚动/缩放时重算，让高亮跟着文字走而不是停在旧位置。
+  window.addEventListener('scroll', scheduleMarks, { passive: true });
+  window.addEventListener('resize', scheduleMarks);
 
-  trigger.addEventListener('click', start);
+  trigger.addEventListener('click', entryClick);
 })();
 `

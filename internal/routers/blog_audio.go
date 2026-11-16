@@ -1,19 +1,18 @@
 package routers
 
-// Blog audio ("听全文") plumbing: the manifest the article page reads, the public sources
-// list the local generator matches against, and the byte route that serves the MP3s.
+// Blog audio ("听全文") plumbing: the manifest the article page reads, the public sources list
+// the local bulk generator matches against, the on-demand prepare/status endpoints, and the
+// byte route that serves the MP3s.
 //
-// The audio itself is produced offline by tools/blog-audio and uploaded into
-// storage/blog-audio. The server never synthesises speech: keeping TTS out of the request
-// path means a slow or broken edge-tts run can never delay a page, and the files are
-// immutable once generated.
+// The article page always renders the entry. If audio.json has no entry yet, the player offers
+// to generate it after showing an estimate; the TTS sidecar does the work and the manifest is
+// updated, so the next visitor (and the current one) can play immediately.
 //
-// 博客「听全文」的服务端部分：文章页读取的清单、生成脚本用来匹配已分享笔记的公开来源表、
-// 以及提供 MP3 字节的下载路由。
+// 博客「听全文」的服务端部分：文章页读取的清单、本地批量生成器用来匹配的公开来源表、按需
+// prepare/status 端点，以及提供 MP3 字节的下载路由。
 //
-// 音频由本地 tools/blog-audio 离线生成后上传到 storage/blog-audio。服务端不做语音合成：
-// 把 TTS 放在请求路径之外，一次缓慢或失败的 edge-tts 就不可能拖慢页面；生成后的文件也是
-// 不可变的。
+// 文章页始终渲染入口。audio.json 还没有条目时，播放器先显示预计时间，确认后由 TTS sidecar 生成
+// 并更新清单，因此下一位访客（以及当前访客）随后都能直接播放。
 
 import (
 	"encoding/json"
@@ -38,9 +37,11 @@ import (
 // 其余内容（句子时间轴）由播放器在首次点击时按需拉取，因此有音频的文章不会因为逐句时间轴
 // 而变重。
 type blogPostAudioView struct {
+	Slug     string
 	Src      string
 	Timings  string
 	TextHash string
+	Ready    bool
 }
 
 type blogAudioManifestEntry struct {
@@ -54,6 +55,15 @@ type blogAudioManifestEntry struct {
 type blogAudioManifest struct {
 	Version int                               `json:"version"`
 	Items   map[string]blogAudioManifestEntry `json:"items"`
+}
+
+type blogAudioStatusResponse struct {
+	Status      string `json:"status"`
+	EstimateSec int64  `json:"estimateSec,omitempty"`
+	Error       string `json:"error,omitempty"`
+	Src         string `json:"src,omitempty"`
+	Timings     string `json:"timings,omitempty"`
+	TextHash    string `json:"textHash,omitempty"`
 }
 
 var (
@@ -80,13 +90,13 @@ func blogAudioManifestPath(appContainer *app.App) string {
 	return filepath.Join(blogAudioDir(appContainer), "audio.json")
 }
 
-// blogAudioLookup returns the manifest entry for one slug, or nil when the article has no audio.
-// The manifest is cached by mtime: the generator rewrites it on every run, and re-reading a
-// small JSON file on each article render would be wasted work.
+// blogAudioManifestCached returns the manifest, reloading it when the file's mtime changes.
+// The generator rewrites it on every run, and re-reading a small JSON file on each article
+// render would be wasted work.
 //
-// blogAudioLookup 返回某个 slug 的清单条目；文章没有音频时返回 nil。
-// 清单按 mtime 缓存：生成脚本每次运行都会重写它，而每次渲染文章都重读一个小 JSON 是白费工。
-func blogAudioLookup(appContainer *app.App, slug string) *blogPostAudioView {
+// blogAudioManifestCached 返回清单，并在文件 mtime 变化时重载。生成器每次运行都会重写它，
+// 而每次渲染文章都重读一个小 JSON 是白费工。
+func blogAudioManifestCached(appContainer *app.App) *blogAudioManifest {
 	p := blogAudioManifestPath(appContainer)
 	st, err := os.Stat(p)
 	if err != nil {
@@ -97,7 +107,7 @@ func blogAudioLookup(appContainer *app.App, slug string) *blogPostAudioView {
 	if blogAudioManifestVal != nil && blogAudioManifestAt == st.ModTime().UnixNano() {
 		m := blogAudioManifestVal
 		blogAudioManifestMu.Unlock()
-		return blogAudioEntryView(m, slug)
+		return m
 	}
 	blogAudioManifestMu.Unlock()
 
@@ -114,46 +124,90 @@ func blogAudioLookup(appContainer *app.App, slug string) *blogPostAudioView {
 	blogAudioManifestVal = &m
 	blogAudioManifestAt = st.ModTime().UnixNano()
 	blogAudioManifestMu.Unlock()
-
-	return blogAudioEntryView(&m, slug)
+	return &m
 }
 
-func blogAudioEntryView(m *blogAudioManifest, slug string) *blogPostAudioView {
+// blogAudioViewForArticle always returns a view so the entry exists on every article. Ready is
+// false when audio.json has no usable entry yet; the player then asks the server to generate.
+//
+// blogAudioViewForArticle 总是返回一个视图，使每篇文章都有入口。audio.json 还没有可用条目时
+// Ready 为 false，播放器随后请求服务端生成。
+func blogAudioViewForArticle(appContainer *app.App, slug string) *blogPostAudioView {
+	v := &blogPostAudioView{
+		Slug:    slug,
+		Src:     "/blog/audio/" + slug + ".mp3",
+		Timings: "/blog/audio/" + slug + ".timings.json",
+	}
+	m := blogAudioManifestCached(appContainer)
+	if m == nil {
+		return v
+	}
 	e, ok := m.Items[slug]
 	if !ok || e.File == "" {
-		return nil
+		return v
 	}
 	q := ""
 	if h := strings.TrimSpace(e.TextHash); h != "" {
-		if len(h) > 10 {
-			h = h[:10]
-		}
-		q = "?v=" + h
+		q = "?v=" + blogAudioHashPrefix(h)
 	}
 	timings := e.Timings
 	if timings == "" {
 		timings = strings.TrimSuffix(e.File, filepath.Ext(e.File)) + ".timings.json"
 	}
-	return &blogPostAudioView{
+	v.Ready = true
+	v.Src = "/blog/audio/" + e.File + q
+	v.Timings = "/blog/audio/" + timings + q
+	v.TextHash = e.TextHash
+	return v
+}
+
+// blogAudioReady returns a ready response only when the manifest entry exists and its MP3 is
+// actually on disk. A manifest row whose file was deleted must not claim readiness.
+//
+// blogAudioReady 只在清单条目存在且 MP3 真在磁盘上时返回 ready。文件被删掉的清单行不能声称就绪。
+func blogAudioReady(appContainer *app.App, slug string) *blogAudioStatusResponse {
+	m := blogAudioManifestCached(appContainer)
+	if m == nil {
+		return nil
+	}
+	e, ok := m.Items[slug]
+	if !ok || e.File == "" {
+		return nil
+	}
+	st, err := os.Stat(filepath.Join(blogAudioDir(appContainer), e.File))
+	if err != nil || st.IsDir() {
+		return nil
+	}
+	timings := e.Timings
+	if timings == "" {
+		timings = strings.TrimSuffix(e.File, filepath.Ext(e.File)) + ".timings.json"
+	}
+	q := ""
+	if h := strings.TrimSpace(e.TextHash); h != "" {
+		q = "?v=" + blogAudioHashPrefix(h)
+	}
+	return &blogAudioStatusResponse{
+		Status:   blogAudioReadyStatus,
 		Src:      "/blog/audio/" + e.File + q,
 		Timings:  "/blog/audio/" + timings + q,
 		TextHash: e.TextHash,
 	}
 }
 
-// registerBlogAudioRoutes wires the three audio surfaces. All of them must be registered
-// before the "/blog/:slug" catch-all, for the same reason as the feed and the shelf: these
-// are endpoints, not notes.
+// registerBlogAudioRoutes wires the audio surfaces. All of them must be registered before the
+// "/blog/:slug" catch-all, for the same reason as the feed and the shelf: these are endpoints,
+// not notes.
 //
-// registerBlogAudioRoutes 注册音频的三个入口。和其它字面端点一样，必须排在 "/blog/:slug"
-// 之前：这些是接口，不是笔记。
+// registerBlogAudioRoutes 注册音频入口。和其它字面端点一样，必须排在 "/blog/:slug" 之前：
+// 这些是接口，不是笔记。
 func registerBlogAudioRoutes(r *gin.RouterGroup, appContainer *app.App, shareSvc service.ShareService) {
+	gen := newBlogAudioGen(appContainer)
+
 	// The player bundle. no-cache for the same reason as ask.js: the asset ver query is only
 	// a cache-buster when the version actually changes, and a stale player is harder to debug
 	// than one extra request.
 	//
-	// 播放器脚本。与 ask.js 相同，使用 no-cache：资源版本号只在其真的变化时才是缓存破坏器，
-	// 而一个过期的播放器比多一次请求更难排查。
+	// 播放器脚本。与 ask.js 相同，使用 no-cache。
 	r.GET("/blog/audio.js", func(c *gin.Context) {
 		if _, ok := blogEnabled(c, appContainer); !ok {
 			return
@@ -161,6 +215,109 @@ func registerBlogAudioRoutes(r *gin.RouterGroup, appContainer *app.App, shareSvc
 		c.Header("Content-Type", "application/javascript; charset=utf-8")
 		c.Header("Cache-Control", "no-cache")
 		c.String(http.StatusOK, blogAudioScript)
+	})
+
+	// First click on an article without audio asks the server to build it. The handler renders
+	// the note once to know the current text hash, so a stale manifest entry is detected and a
+	// changed article is regenerated instead of playing the previous voice.
+	//
+	// 第一次点击没有音频的文章时，请求服务端生成。处理器渲染一次笔记以取得当前正文哈希，
+	// 因此过期的清单条目会被发现，改过的文章会重新生成而不是播放旧嗓音。
+	r.POST("/blog/audio/prepare", func(c *gin.Context) {
+		if _, ok := blogEnabled(c, appContainer); !ok {
+			return
+		}
+		var req struct {
+			Slug string `json:"slug"`
+		}
+		// The body is one short slug; anything larger is not a client this endpoint serves.
+		// 请求体只有一个短 slug；比这更大的都不属于这个端点要服务的客户端。
+		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 4096)
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid body"})
+			return
+		}
+		slug := strings.TrimSpace(req.Slug)
+		if !blogAudioSlugRe.MatchString(slug) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid slug"})
+			return
+		}
+		post, err := shareSvc.RenderBlogBySlug(c.Request.Context(), slug)
+		if err != nil {
+			// Never distinguish "never existed" from "unpublished" for a public caller.
+			// 对公开调用者绝不区分「从未存在」与「已取消发布」。
+			c.JSON(http.StatusNotFound, gin.H{"error": "not available"})
+			return
+		}
+		body := sanitizeImages(externalizeLinks(post.HTML))
+		_, body = extractTOC(body)
+		fullText, sentences := blogAudioExtract(body)
+		if strings.TrimSpace(fullText) == "" {
+			c.JSON(http.StatusUnprocessableEntity, gin.H{"error": "no speakable text"})
+			return
+		}
+		textHash := blogAudioTextHash(fullText)
+
+		if ready := blogAudioReady(appContainer, slug); ready != nil && ready.TextHash == textHash {
+			c.JSON(http.StatusOK, ready)
+			return
+		}
+
+		if st := gen.status(slug); st != nil {
+			switch st.Status {
+			case blogAudioQueued, blogAudioGenerating:
+				c.JSON(http.StatusOK, blogAudioStatusResponse{
+					Status:      st.Status,
+					EstimateSec: st.Estimate,
+				})
+				return
+			}
+		}
+
+		estimate := blogAudioEstimate(fullText)
+		job := &blogAudioJob{
+			Slug:      slug,
+			TextHash:  textHash,
+			Text:      fullText,
+			Sentences: sentences,
+			Voice:     blogAudioDefaultVoice,
+			Estimate:  estimate,
+		}
+		status, est, ok := gen.enqueue(job)
+		if !ok {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "生成队列已满，请稍后再试"})
+			return
+		}
+		c.JSON(http.StatusOK, blogAudioStatusResponse{Status: status, EstimateSec: est})
+	})
+
+	// Poll target while a job is running. no-store: this is per-request state, never a cache
+	// candidate.
+	//
+	// 生成期间的轮询目标。no-store：这是逐请求状态，绝不能进缓存。
+	r.GET("/blog/audio/status", func(c *gin.Context) {
+		if _, ok := blogEnabled(c, appContainer); !ok {
+			return
+		}
+		slug := strings.TrimSpace(c.Query("slug"))
+		if !blogAudioSlugRe.MatchString(slug) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid slug"})
+			return
+		}
+		c.Header("Cache-Control", "no-store")
+		if ready := blogAudioReady(appContainer, slug); ready != nil {
+			c.JSON(http.StatusOK, ready)
+			return
+		}
+		if st := gen.status(slug); st != nil {
+			c.JSON(http.StatusOK, blogAudioStatusResponse{
+				Status:      st.Status,
+				EstimateSec: st.Estimate,
+				Error:       st.Error,
+			})
+			return
+		}
+		c.JSON(http.StatusOK, blogAudioStatusResponse{Status: "missing"})
 	})
 
 	r.GET("/blog/audio/:file", func(c *gin.Context) {
@@ -171,11 +328,10 @@ func registerBlogAudioRoutes(r *gin.RouterGroup, appContainer *app.App, shareSvc
 		name := c.Param("file")
 
 		// The source table is public by design: it contains only the path hash (not the path)
-		// and the already-public slug of notes that are currently shared. The local generator
-		// needs it to know which of its `audio: true` notes are actually published.
+		// and the already-public slug of notes that are currently shared. The local bulk
+		// generator needs it to know which of its `audio: true` notes are actually published.
 		//
 		// 来源表是刻意公开的：它只包含路径哈希（不是路径）和当前已分享笔记的公开 slug。
-		// 本地生成脚本需要它来判断哪些带 `audio: true` 的笔记真的已发布。
 		if name == "sources.json" {
 			uid := blogUID(cfg.UID)
 			entries, err := shareSvc.ListBlogEntries(c.Request.Context(), uid)
@@ -208,7 +364,7 @@ func registerBlogAudioRoutes(r *gin.RouterGroup, appContainer *app.App, shareSvc
 		// Only flat, generated names. The regexp rejects separators and "..", so the route can
 		// never be talked into reading another file through the storage directory.
 		//
-		// 只接受扁平的生成文件名。正则拒绝分隔符与 ".."，路由因此不可能被诱导读取存储目录之外的任何文件。
+		// 只接受扁平的生成文件名。正则拒绝分隔符与 ".."。
 		if !blogAudioFileRe.MatchString(name) {
 			c.Status(http.StatusNotFound)
 			return
@@ -225,7 +381,7 @@ func registerBlogAudioRoutes(r *gin.RouterGroup, appContainer *app.App, shareSvc
 			// Immutable: the URL carries the first ten characters of the text hash, so a
 			// regenerated article gets a new URL and never serves a stale voice.
 			//
-			// 不可变：URL 带有正文哈希前 10 位，重新生成的文章会得到新 URL，绝不会播到旧嗓音。
+			// 不可变：URL 带有正文哈希前 10 位，重新生成的文章会得到新 URL。
 			c.Header("Content-Type", "audio/mpeg")
 			c.Header("Cache-Control", "public, max-age=31536000, immutable")
 		case strings.HasSuffix(name, ".json"):
@@ -239,8 +395,7 @@ func registerBlogAudioRoutes(r *gin.RouterGroup, appContainer *app.App, shareSvc
 		// ServeFile, not c.FileFromFS: the former implements Range, which every mobile audio
 		// element needs to seek without downloading the whole file again.
 		//
-		// 用 ServeFile 而不是 c.FileFromFS：前者实现 Range，手机上的 audio 元素要靠它拖动进度
-		// 而不必重新下载整个文件。
+		// 用 ServeFile 而不是 c.FileFromFS：前者实现 Range。
 		http.ServeFile(c.Writer, c.Request, p)
 	})
 }
