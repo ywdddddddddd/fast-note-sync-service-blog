@@ -150,7 +150,14 @@ const blogAudioScript = `
   var slug = trigger.getAttribute('data-slug') || '';
   var ready = trigger.getAttribute('data-ready') === '1';
   var expectHash = trigger.getAttribute('data-text-hash') || '';
-  var storeKey = 'fns-audio:' + (src.split('?')[0] || location.pathname);
+  // The query carries the transcript hash, so it belongs in the resume key: after a
+  // regeneration, the new voice must start at the beginning rather than inherit the position
+  // saved for the previous, shorter audio.
+  //
+  // query 里带的是转写哈希，因此必须进入续听键：重新生成后，新语音要从头开始，而不是继承上一版
+  // 更短音频保存的位置。
+  function storeKeyFor(u) { return 'fns-audio:' + (u || location.pathname); }
+  var storeKey = storeKeyFor(src);
   var reduce = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
 
   var audio = null, ctl = null, playBtn = null, exitBtn = null;
@@ -673,14 +680,16 @@ const blogAudioScript = `
     card.appendChild(actions);
   }
 
-  // The entry is present on every article. A ready article plays immediately; one without
-  // audio first checks the server (a cached page may be stale), then offers the estimate.
+  // The entry is present on every article. Always ask the server first: the page itself may be
+  // up to 60 seconds old, and an old data-src can point at the audio URL of a previous
+  // transcript. Status is authoritative and no-store, so a click on a cached page still gets the
+  // current file instead of replaying the shorter one it had before.
   //
-  // 每篇文章都有入口。已有音频的直接播放；没有的先问服务端（页面可能被缓存而状态已变），
-  // 再给出预计时间让用户确认。
+  // 每篇文章都有入口。点击时始终先问服务端：页面本身可能已经缓存了 60 秒，旧的 data-src 可能
+  // 指向上一次转写的音频 URL。status 是权威且 no-store 的，因此缓存页上的点击仍会拿到当前文件，
+  // 而不是重放之前的短版本。
   function entryClick() {
     if (audio) return;
-    if (ready) { begin(src, timingsURL); return; }
     trigger.setAttribute('aria-busy', 'true');
     requestStatus().then(function (st) {
       trigger.removeAttribute('aria-busy');
@@ -690,6 +699,9 @@ const blogAudioScript = `
       showConfirm(st.estimateSec);
     }).catch(function () {
       trigger.removeAttribute('aria-busy');
+      // Offline: the SSR values may still be valid, so a ready page can play what it has.
+      // 离线：SSR 值可能仍然有效，ready 页面可以播放手里的文件。
+      if (ready) { begin(src, timingsURL); return; }
       showConfirm();
     });
   }
@@ -699,6 +711,7 @@ const blogAudioScript = `
     closeModal();
     src = srcArg || src;
     timingsURL = timingsArg || timingsURL;
+    storeKey = storeKeyFor(src);
     trigger.removeAttribute('aria-busy');
     var saved = loadSaved();
     body.classList.add('is-listening');

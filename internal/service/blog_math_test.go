@@ -93,6 +93,22 @@ func TestHasMathMarkup(t *testing.T) {
 	}
 }
 
+// TestPreprocessMathCJKAdjacent is the shape reported on the blog: the dollars touch Chinese on
+// both sides, with no space for the old regex to anchor on.
+//
+// TestPreprocessMathCJKAdjacent 是博客上报告的形态：美元符号两侧都紧贴中文，旧正则找不到可
+// 锚定的空格。
+func TestPreprocessMathCJKAdjacent(t *testing.T) {
+	src := "牙冠完整$\\rightarrow$排除龋源性感染"
+	got := render(t, newTestMarkdown(), preprocessMath(src))
+	if !strings.Contains(got, `class="math-inline"`) || !strings.Contains(got, `\rightarrow`) {
+		t.Fatalf("CJK-adjacent formula not marked up: %s", got)
+	}
+	if strings.Contains(got, "$\\rightarrow$") {
+		t.Fatalf("dollars survived in output: %s", got)
+	}
+}
+
 // TestPreprocessMathEndToEnd runs the configured pipeline over a mixed document.
 // TestPreprocessMathEndToEnd 在配置好的管线上跑一篇混合文档。
 func TestPreprocessMathEndToEnd(t *testing.T) {
