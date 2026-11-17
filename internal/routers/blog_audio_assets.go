@@ -66,6 +66,22 @@ body.is-listening .topnav,body.is-listening .crumb{visibility:hidden}
   position:fixed;z-index:6;pointer-events:none;
   background:rgba(75,122,67,.15);border-radius:3px;
 }
+/* Dark mode: the light green at 15% over #1a1a1a is nearly invisible. Lift both the colour and
+   the alpha, and do it for the explicit toggle (html.dark) and for the system preference. */
+html.dark .fns-audio-mark{background:rgba(122,168,112,.24)}
+@media (prefers-color-scheme:dark){
+  html:not(.light) .fns-audio-mark{background:rgba(122,168,112,.24)}
+}
+html.dark .fns-audio-play{background:rgba(237,237,237,.13);border-color:rgba(255,255,255,.10)}
+html.dark .fns-audio-play:hover{background:rgba(237,237,237,.20)}
+html.dark .fns-audio-exit{background:rgba(237,237,237,.10);border-color:rgba(255,255,255,.10)}
+html.dark .fns-audio-exit:hover{background:rgba(237,237,237,.18)}
+@media (prefers-color-scheme:dark){
+  html:not(.light) .fns-audio-play{background:rgba(237,237,237,.13);border-color:rgba(255,255,255,.10)}
+  html:not(.light) .fns-audio-play:hover{background:rgba(237,237,237,.20)}
+  html:not(.light) .fns-audio-exit{background:rgba(237,237,237,.10);border-color:rgba(255,255,255,.10)}
+  html:not(.light) .fns-audio-exit:hover{background:rgba(237,237,237,.18)}
+}
 .listen-line[aria-busy="true"]{opacity:.55;pointer-events:none}
 .fns-audio-modal{
   position:fixed;inset:0;z-index:80;display:flex;align-items:center;justify-content:center;
@@ -76,7 +92,7 @@ body.is-listening .topnav,body.is-listening .crumb{visibility:hidden}
   border-radius:14px;box-shadow:0 24px 60px rgba(0,0,0,.18);padding:22px 22px 16px;
 }
 .fns-audio-card h3{margin:0 0 10px;font-size:16px;font-weight:650;display:flex;align-items:center}
-.fns-audio-card p{margin:0;font-size:13px;line-height:1.8;color:var(--c2,#5c5a56)}
+.fns-audio-card p{margin:0;font-size:13px;line-height:1.8;color:var(--muted-foreground,#5c5a56)}
 .fns-audio-card p.fns-audio-sub{margin-top:8px;font-size:12px;color:var(--muted-foreground)}
 .fns-audio-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:18px}
 .fns-audio-btn{
@@ -89,6 +105,10 @@ body.is-listening .topnav,body.is-listening .crumb{visibility:hidden}
   border-radius:50%;animation:fns-audio-spin .8s linear infinite;display:inline-block;
   margin-right:8px;flex:none;
 }
+html.dark .fns-audio-spinner{border-color:rgba(255,255,255,.14);border-top-color:var(--foreground)}
+@media (prefers-color-scheme:dark){
+  html:not(.light) .fns-audio-spinner{border-color:rgba(255,255,255,.14);border-top-color:var(--foreground)}
+}
 @keyframes fns-audio-spin{to{transform:rotate(360deg)}}
 @media (prefers-reduced-motion: reduce){.fns-audio-spinner{animation:none}}
 
@@ -99,6 +119,10 @@ body.is-listening .topnav,body.is-listening .crumb{visibility:hidden}
     background:rgba(255,255,255,.84);
     -webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px);
     border-bottom:1px solid var(--border);
+  }
+  html.dark .fns-audio-ctl{background:rgba(26,26,26,.86)}
+  @media (prefers-color-scheme:dark){
+    html:not(.light) .fns-audio-ctl{background:rgba(26,26,26,.86)}
   }
   .fns-audio-play{width:40px;height:40px}
   .fns-audio-exit{right:14px;width:32px;height:32px}
@@ -154,7 +178,8 @@ const blogAudioScript = `
         } else if (n.nodeType === 1) {
           var tag = (n.tagName || '').toLowerCase();
           if (blockChild(tag)) continue;
-          if (n.classList && (n.classList.contains('math') || n.classList.contains('katex') ||
+          if (n.classList && (n.classList.contains('math') || n.classList.contains('math-inline') ||
+              n.classList.contains('math-block') || n.classList.contains('katex') ||
               n.classList.contains('fns-audio-ignore'))) continue;
           walk(n);
         }
@@ -183,7 +208,7 @@ const blogAudioScript = `
     var full = '';
     for (var i = 0; i < els.length; i++) {
       var el = els[i];
-      if (el.closest && el.closest('pre,code,table,figure,.quiz,.fns-quiz,.fns-graph,.fns-audio-ignore')) continue;
+      if (el.closest && el.closest('pre,code,table,figure,.quiz,.fns-quiz,.fns-graph,.math,.math-inline,.math-block,.katex,.fns-audio-ignore')) continue;
       var m = blockMap(el);
       if (!m.text) continue;
       blocks.push({ start: full.length, text: m.text, map: m.map, el: el });

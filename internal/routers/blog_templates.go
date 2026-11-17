@@ -488,17 +488,12 @@ var blogPostTmpl = template.Must(template.New("blog-post").Funcs(blogAssetFuncs)
 <meta name="twitter:title" content="{{.PostTitle}}">
 <meta name="twitter:description" content="{{.Description}}">
 {{if .JSONLD}}<script type="application/ld+json">{{.JSONLD}}</script>{{end}}
-{{if .HasMath}}<!-- Formulas are marked up but NOT typeset by the server: there is no production-grade
-     TeX renderer in Go, and the only paths to one are shipping a browser engine or a ~1 MB
-     JavaScript library. The LaTeX source is in the page and the stylesheet keeps it readable,
-     so nothing is lost.
-
-     To enable typesetting, drop a MathJax bundle at /static/mathjax/tex-mml-chtml.js and
-     uncomment the single line below. That is deliberately a deployment decision rather than a
-     default: the service must stay self-contained and must not reference assets it does not ship.
-
-     <script defer src="/static/mathjax/tex-mml-chtml.js"></script>
--->{{end}}
+{{if .HasMath}}<!-- Formulas stay readable as LaTeX without JavaScript; KaTeX replaces them only when
+     this article actually carries math. The assets are shipped in the binary under
+     /static/katex, so there is no external CDN dependency. -->
+<link rel="stylesheet" href="/static/katex/katex.min.css?v=0.16.11">
+<script defer src="/static/katex/katex.min.js?v=0.16.11"></script>
+<script defer src="/static/katex/render.js?v=0.16.11"></script>{{end}}
 <style>{{.CSS}}</style>
 </head>
 <body class="is-post">
@@ -1179,15 +1174,9 @@ var blogPageTmpl = template.Must(template.New("blog-page").Funcs(blogAssetFuncs)
 <meta name="twitter:title" content="{{.PageTitle}}">
 <meta name="twitter:description" content="{{.Description}}">
 {{if .JSONLD}}<script type="application/ld+json">{{.JSONLD}}</script>{{end}}
-{{if .HasMath}}<!-- Same deployment note as the article page: formulas are marked up but not
-     typeset by the server. To enable typesetting, drop a MathJax bundle at
-     /static/mathjax/tex-mml-chtml.js and uncomment the line below.
-
-     与文章页相同的部署说明：公式已被标记，但不由服务端排版。
-     若要启用排版，把 MathJax 放到 /static/mathjax/tex-mml-chtml.js 并取消下面一行的注释。
-
-     <script defer src="/static/mathjax/tex-mml-chtml.js"></script>
--->{{end}}
+{{if .HasMath}}<link rel="stylesheet" href="/static/katex/katex.min.css?v=0.16.11">
+<script defer src="/static/katex/katex.min.js?v=0.16.11"></script>
+<script defer src="/static/katex/render.js?v=0.16.11"></script>{{end}}
 <style>{{.CSS}}</style>
 </head>
 <body class="is-page">

@@ -36,8 +36,11 @@ var mathBlockRegex = regexp.MustCompile(`(?s)\$\$(.+?)\$\$`)
 // mathInlineRegex matches an inline formula.
 //
 // The rules mirror what Obsidian accepts, which is also what keeps prices out of it:
-//   - the opening "$" must not itself be preceded by "$" or an alphanumeric, so the first "$" of
-//     a "$$" pair and the tail of "US$5" are not openers;
+//   - the opening "$" must not itself be preceded by "$" or an ASCII alphanumeric, so the first
+//     "$" of a "$$" pair and the tail of "US$5" are not openers. CJK characters are deliberately
+//     allowed: "中文$\rightarrow$中文" is how these notes normally write inline math, and the
+//     earlier \p{L} class treated the preceding Chinese character as a word character, leaving
+//     the dollars visible on the page;
 //   - the opening "$" must be followed by a non-space, so "$ 100" is not math;
 //   - the closing "$" must be preceded by a non-space, so "100 $" is not math — and, critically,
 //     this is a mandatory character rather than an optional one, because an optional trailing
@@ -50,13 +53,15 @@ var mathBlockRegex = regexp.MustCompile(`(?s)\$\$(.+?)\$\$`)
 // mathInlineRegex 匹配行内公式。
 //
 // 规则与 Obsidian 接受的一致，这也是把价格排除在外的原因：
-//   - 起始 "$" 之前不得紧邻 "$" 或字母数字，因此 "$$" 对的第一个 "$" 与 "US$5" 的尾部都不算起始；
+//   - 起始 "$" 之前不得紧邻 "$" 或 ASCII 字母数字，因此 "$$" 对的第一个 "$" 与 "US$5" 的尾部
+//     都不算起始。中文刻意允许：这些笔记的正常写法就是「中文$\rightarrow$中文」，而原来的
+//     \p{L} 会把前一个汉字当成单词字符，导致页面把美元符号原样留下；
 //   - 起始 "$" 之后必须是非空白，因此 "$ 100" 不是公式；
 //   - 结束 "$" 之前必须是非空白，因此 "100 $" 不是公式——关键在于这是一个**必需**字符而不是
 //     可选字符，因为可选的尾部字符类会接受空匹配，把 "$5 到 $10" 变成正文为 "5 到 " 的公式；
 //   - 公式体内不得包含 "$" 或换行；
 //   - 公式体有长度上限，避免正文里一个孤立的 "$" 吞掉半个段落。
-var mathInlineRegex = regexp.MustCompile(`(^|[^$\p{L}\p{N}])\$([^\s$](?:[^$\n]{0,496}[^\s$])?)\$`)
+var mathInlineRegex = regexp.MustCompile(`(^|[^$A-Za-z0-9])\$([^\s$](?:[^$\n]{0,496}[^\s$])?)\$`)
 
 // mathPlaceholderPrefix marks a region that must not be re-scanned for inline math (a display
 // formula, or an inline code span).

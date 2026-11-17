@@ -19,6 +19,7 @@ func TestPreprocessMath(t *testing.T) {
 		not  []string
 	}{
 		{"inline", "质能方程 $E=mc^2$ 很重要", []string{`<span class="math-inline"`, "E=mc^2"}, nil},
+		{"inline next to CJK", "牙冠完整 $\\rightarrow$ 排除龋源性", []string{`math-inline" role="math">\rightarrow<`}, nil},
 		{"display", "$$\n\\int_0^1 x^2 dx\n$$", []string{`<div class="math-block"`, `\int_0^1 x^2 dx`}, nil},
 		{"display single line", "$$a^2+b^2=c^2$$", []string{`<div class="math-block"`}, nil},
 		{"multiple inline", "$a$ 与 $b$", []string{`math-inline" role="math">a<`, `math-inline" role="math">b<`}, nil},
@@ -26,6 +27,8 @@ func TestPreprocessMath(t *testing.T) {
 		// False positives: must stay literal.
 		// 误判防护：必须保持字面。
 		{"price is not math", "价格是 $5 到 $10", nil, []string{"math-inline"}},
+		{"CJK price is not math", "价格是$5 到 $10", nil, []string{"math-inline"}},
+		{"US price is not math", "US$5 到 US$10", nil, []string{"math-inline"}},
 		{"trailing space is not math", "符号 $ x $ 不是公式", nil, []string{"math-inline"}},
 		{"shell var inside fence", "```bash\necho $HOME\n```", nil, []string{"math-inline"}},
 		{"code span is protected", "使用 `$PATH` 变量", []string{"`$PATH`"}, []string{"math-inline"}},

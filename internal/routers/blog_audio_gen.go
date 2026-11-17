@@ -28,6 +28,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	stdhtml "html"
 	"io"
 	"net/http"
 	"os"
@@ -36,6 +37,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"golang.org/x/net/html"
@@ -320,8 +322,20 @@ func blogAudioEstimate(text string) int64 {
 // blogAudioExtract mirrors the browser's buildArticleText: h2/h3/h4/p/li blocks, own text
 // (child blocks skipped), math and code-block subtrees excluded, whitespace collapsed.
 //
+// The walk must not stop at a block element. Obsidian renders a list item with a nested
+// paragraph as <li><p>…</p></li>; the browser's querySelectorAll sees both the empty <li> and
+// the <p>, while an early return here saw only the <li> and dropped the text. That made the
+// transcript shorter than the page, changed textHash, and the player then refused to paint any
+// highlight — the "highlight is completely broken" report. Descending after a block keeps the
+// two extractors identical.
+//
 // blogAudioExtract 与浏览器 buildArticleText 一致：h2/h3/h4/p/li 块、取自身文本（跳过子块）、
 // 排除公式与代码块子树、折叠空白。
+//
+// 遍历不能在块元素处停止。Obsidian 会把「列表项里的段落」渲染成 <li><p>…</p></li>；浏览器的
+// querySelectorAll 同时看到空的 <li> 和 <p>，而这里提前 return 只看到 <li>，正文因此丢失。
+// 后果是转写文本比页面短、textHash 不一致，播放器于是拒绝画高亮——正是「高亮完全失效」的
+// 报告。块处理完继续下探，两边才会逐字一致。
 func blogAudioExtract(body string) (string, []string) {
 	nodes, err := html.ParseFragment(strings.NewReader(body), &html.Node{
 		Type:     html.ElementNode,
@@ -339,16 +353,12 @@ func blogAudioExtract(body string) (string, []string) {
 			if blogAudioSkipSubtree(n) {
 				return
 			}
-			tag := strings.ToLower(n.Data)
-			if tag == "h2" || tag == "h3" || tag == "h4" || tag == "p" || tag == "li" {
-				if blogAudioClassSkip(n) {
-					return
-				}
+			switch strings.ToLower(n.Data) {
+			case "h2", "h3", "h4", "p", "li":
 				text := strings.Join(strings.Fields(blogAudioOwnText(n)), " ")
 				if text != "" {
 					blocks = append(blocks, text)
 				}
-				return
 			}
 		}
 		for c := n.FirstChild; c != nil; c = c.NextSibling {
@@ -364,6 +374,14 @@ func blogAudioExtract(body string) (string, []string) {
 	return strings.Join(blocks, "\n"), blogAudioSplitSentences(blocks)
 }
 
+// blogAudioSkipSubtree is the Go counterpart of the browser's el.closest(...) guard. Math is
+// excluded as a whole: reading the LaTeX source aloud ("backslash rightarrow") is never what
+// the note means, and leaving it in the transcript would only make the two sides disagree once
+// KaTeX has replaced the source with its rendering.
+//
+// blogAudioSkipSubtree 是浏览器 el.closest(...) 判断的 Go 版本。公式整棵排除：把 LaTeX 源码
+// 读成「反斜杠 rightarrow」从来不是笔记的意思；KaTeX 用排版结果替换源码后，留在转写里也只会
+// 让两边对不上。
 func blogAudioSkipSubtree(n *html.Node) bool {
 	switch strings.ToLower(n.Data) {
 	case "pre", "code", "table", "figure":
@@ -371,17 +389,18 @@ func blogAudioSkipSubtree(n *html.Node) bool {
 	}
 	for _, cls := range strings.Fields(blogAudioClass(n)) {
 		switch cls {
-		case "quiz", "fns-quiz", "fns-graph", "fns-audio-ignore":
+		case "quiz", "fns-quiz", "fns-graph", "fns-audio-ignore",
+			"math", "math-inline", "math-block", "katex":
 			return true
 		}
 	}
 	return false
 }
 
-func blogAudioClassSkip(n *html.Node) bool {
+func blogAudioInlineSkip(n *html.Node) bool {
 	for _, cls := range strings.Fields(blogAudioClass(n)) {
 		switch cls {
-		case "math", "katex", "fns-audio-ignore":
+		case "math", "math-inline", "math-block", "katex", "fns-audio-ignore":
 			return true
 		}
 	}
@@ -409,7 +428,7 @@ func blogAudioOwnText(n *html.Node) string {
 			case "ul", "ol", "pre", "table", "figure", "blockquote", "p", "h1", "h2", "h3", "h4", "h5", "h6", "div", "hr":
 				continue
 			}
-			if blogAudioClassSkip(c) {
+			if blogAudioInlineSkip(c) {
 				continue
 			}
 			b.WriteString(blogAudioOwnText(c))
@@ -474,104 +493,322 @@ func blogAudioSplitBlock(text string) []string {
 	return out
 }
 
-// blogAudioBuildTimings is the Go counterpart of the Node mapper: place each edge-tts word
-// boundary in the source text, then take each sentence's first/last word. Missing boundaries
-// are interpolated monotonically rather than dropped, so the player never gets a sentence with
-// no time window.
+// blogAudioBuildTimings maps edge-tts word boundaries back onto the source sentences.
 //
-// blogAudioBuildTimings 是 Node 映射器的 Go 版本：把每个 edge-tts 词边界落回源文本，再取每句的
-// 首/末词。缺失的边界按单调时间插值而不是丢弃，播放器因此不会得到没有时间窗的句子。
+// Matching happens on a whitespace-free copy of both sides. Boundary text is not a clean slice
+// of the input: edge-tts reports SSML-escaped fragments (">" arrives as "&gt;" and can be split
+// into "&", "g", …), joins punctuation from both sides of a block break ("）\n缺"), and carries
+// spaces the source may not have. An exact byte search therefore fails on a large part of a
+// long article. Worse, a fragment like "的" would still match somewhere far ahead, moving the
+// cursor past the real position; every remaining boundary then fails and the interpolator
+// stretches the tail beyond the audio.
+//
+// So: unescape, remove whitespace, and only accept a match inside a small window after the
+// previous one. A miss does not move the cursor. Sentences without any matched word are then
+// filled from their neighbours, proportionally to their length, instead of being appended after
+// the previous estimate. Duration is the last real word end — never an extrapolated one.
+//
+// blogAudioBuildTimings 把 edge-tts 词边界映射回源句子。
+//
+// 匹配在「去掉空白」的副本上进行。边界文本并不是输入的干净切片：edge-tts 会报告 SSML 转义后
+// 的碎片（">" 以 "&gt;" 到达，还可能拆成 "&"、"g"……），跨块断行时把两侧标点连在一起
+// （"）\n缺"），并带上原文没有的空格。因此在长文里逐字节搜索会大量失败；更糟的是 "的" 这种
+// 碎片总能在很远的地方命中，游标被推过真实位置，其后所有边界都失败，插值把尾部拉得比音频还长。
+//
+// 因此：先反转义、去空白，并且只接受上一次命中之后一个小窗口内的匹配；未命中不移动游标。
+// 没有任何词命中的句子由相邻已知句按长度比例补全，而不是接在上一句的估算后面。时长取最后一个
+// 真实词边界的结束，绝不使用外推值。
 func blogAudioBuildTimings(full string, sentences []string, bounds []blogAudioBound) ([]blogAudioSentence, int64) {
-	type word struct {
-		start, end int
-		o, d       int64
-	}
-	var words []word
-	cursor := 0
-	for _, b := range bounds {
-		if b.T == "" {
-			continue
-		}
-		needle := b.T
-		idx := strings.Index(full[cursor:], needle)
-		if idx < 0 {
-			stripped := strings.Join(strings.Fields(b.T), "")
-			if stripped != "" {
-				if j := strings.Index(full[cursor:], stripped); j >= 0 {
-					idx = j
-					needle = stripped
-				}
-			}
-		}
-		if idx < 0 {
-			continue
-		}
-		start := cursor + idx
-		words = append(words, word{start: start, end: start + len(needle), o: b.O, d: b.D})
-		cursor = start + len(needle)
-	}
+	nfull := blogAudioNormalizeTiming(full)
 
 	type span struct {
 		start, end int
 		ok         bool
 	}
 	spans := make([]span, len(sentences))
-	cursor = 0
+	cursor := 0
 	for i, s := range sentences {
-		idx := strings.Index(full[cursor:], s)
+		needle := blogAudioNormalizeTiming(s)
+		if len(needle) == 0 {
+			continue
+		}
+		limit := cursor + len(needle) + 32
+		if limit > len(nfull) {
+			limit = len(nfull)
+		}
+		idx := blogAudioIndexRunes(nfull, needle, cursor, limit)
 		if idx < 0 {
-			idx = strings.Index(full, s)
+			// A sentence is a substring of full by construction; the wider search is only a
+			// guard against an unexpected normalization edge.
+			//
+			// 句子按构造就是 full 的子串；放宽搜索只是对意外归一化边界的兜底。
+			idx = blogAudioIndexRunes(nfull, needle, 0, len(nfull))
 		}
 		if idx < 0 {
 			continue
 		}
-		start := cursor + idx
-		spans[i] = span{start: start, end: start + len(s), ok: true}
-		cursor = start + len(s)
+		spans[i] = span{start: idx, end: idx + len(needle), ok: true}
+		cursor = idx + len(needle)
+	}
+
+	type word struct {
+		start, end int
+		o, d       int64
+	}
+	words := make([]word, 0, len(bounds))
+	cursor = 0
+	for _, b := range bounds {
+		if b.T == "" {
+			continue
+		}
+		needle := blogAudioNormalizeTiming(stdhtml.UnescapeString(b.T))
+		if len(needle) == 0 {
+			continue
+		}
+		limit := cursor + len(needle) + 160
+		if limit > len(nfull) {
+			limit = len(nfull)
+		}
+		idx := blogAudioIndexRunes(nfull, needle, cursor, limit)
+		if idx < 0 {
+			// A fragment of an escaped entity or a normalization difference. Skipping it
+			// without moving the cursor lets the next real word land in the right place.
+			//
+			// 转义实体的碎片或归一化差异。跳过且不移动游标，下一个真实词仍能落回正确位置。
+			continue
+		}
+		words = append(words, word{start: idx, end: idx + len(needle), o: b.O, d: b.D})
+		cursor = idx + len(needle)
 	}
 
 	out := make([]blogAudioSentence, len(sentences))
 	for i, s := range sentences {
 		out[i] = blogAudioSentence{T: s}
 	}
-	for i := range sentences {
-		if !spans[i].ok {
+	seen := make([]bool, len(sentences))
+	si := 0
+	for _, w := range words {
+		for si < len(spans) && (!spans[si].ok || w.start >= spans[si].end) {
+			si++
+		}
+		if si >= len(spans) || !spans[si].ok || w.start < spans[si].start {
 			continue
 		}
-		var first, last int64 = -1, -1
-		for _, w := range words {
-			if w.end <= spans[i].start {
-				continue
-			}
-			if w.start >= spans[i].end {
-				break
-			}
-			if first < 0 {
-				first = w.o
-			}
-			last = w.o + w.d
+		if !seen[si] {
+			out[si].S = w.o
+			seen[si] = true
 		}
-		if first >= 0 {
-			out[i].S = first
-			out[i].E = last
+		out[si].E = w.o + w.d
+	}
+
+	var duration int64
+	for _, w := range words {
+		if e := w.o + w.d; e > duration {
+			duration = e
+		}
+	}
+
+	lens := make([]int, len(sentences))
+	var totalLen int64
+	for i, s := range sentences {
+		lens[i] = utf8.RuneCountInString(s)
+		totalLen += int64(lens[i])
+	}
+
+	if len(words) == 0 {
+		// No usable boundary at all: fall back to a length-based estimate. duration stays 0 so
+		// the caller can still publish a document; the player will simply have coarse windows.
+		//
+		// 完全拿不到可用边界时退回按长度估算；duration 保持 0，播放器只会得到较粗的时间窗。
+		var prev int64
+		for i := range out {
+			dur := 1200 + int64(lens[i])*160
+			out[i].S = prev
+			out[i].E = prev + dur
+			prev = out[i].E
+		}
+		return out, prev
+	}
+
+	var known []int
+	for i := range seen {
+		if seen[i] {
+			known = append(known, i)
+		}
+	}
+	if len(known) == 0 {
+		var prev int64
+		for i := range out {
+			dur := 1200 + int64(lens[i])*160
+			out[i].S = prev
+			out[i].E = prev + dur
+			prev = out[i].E
+		}
+		return out, prev
+	}
+
+	// fill distributes [start,end) across sentences [from,to), proportionally to their length.
+	// 按长度比例把 [start,end) 分配给 [from,to) 之间的句子。
+	fill := func(from, to int, start, end int64) {
+		if from >= to {
+			return
+		}
+		if end <= start {
+			end = start + int64(to-from)*300
+		}
+		window := end - start
+		var part int64
+		if total := func() int64 {
+			var n int64
+			for i := from; i < to; i++ {
+				n += int64(lens[i])
+			}
+			return n
+		}(); total > 0 {
+			part = total
+		} else {
+			part = int64(to - from)
+		}
+		cur := start
+		for i := from; i < to; i++ {
+			var share int64
+			if part > 0 {
+				share = window * int64(lens[i]) / part
+			}
+			if share <= 0 {
+				share = window / int64(to-from)
+			}
+			if share <= 0 {
+				share = 1
+			}
+			out[i].S = cur
+			out[i].E = cur + share
+			cur += share
+		}
+		out[to-1].E = end
+	}
+
+	if known[0] > 0 {
+		fill(0, known[0], 0, out[known[0]].S)
+	}
+	for k := 0; k+1 < len(known); k++ {
+		fill(known[k]+1, known[k+1], out[known[k]].E, out[known[k+1]].S)
+	}
+
+	last := known[len(known)-1]
+	if last+1 < len(out) {
+		rate := float64(0)
+		if spanDur := out[last].E - out[last].S; spanDur > 0 && lens[last] > 0 {
+			rate = float64(spanDur) / float64(lens[last])
+		} else if duration > 0 && totalLen > 0 {
+			rate = float64(duration) / float64(totalLen)
+		}
+		if rate <= 0 {
+			rate = 160
+		}
+		cur := out[last].E
+		for i := last + 1; i < len(out); i++ {
+			dur := int64(float64(lens[i]) * rate)
+			if dur < 300 {
+				dur = 300
+			}
+			out[i].S = cur
+			out[i].E = cur + dur
+			cur = out[i].E
+		}
+		// Compress the tail if the estimate runs past the real audio; a window that can never
+		// be reached is worse than a short one.
+		//
+		// 估算越过真实音频时压缩尾部；永远到不了的时间窗比短一点更糟。
+		if duration > 0 && cur > duration {
+			start := out[last].E
+			avail := duration - start
+			if avail <= 0 {
+				for i := last + 1; i < len(out); i++ {
+					out[i].S = duration
+					out[i].E = duration + 1
+				}
+			} else {
+				scale := float64(avail) / float64(cur-start)
+				cur = start
+				for i := last + 1; i < len(out); i++ {
+					dur := int64(float64(out[i].E-out[i].S) * scale)
+					if dur < 1 {
+						dur = 1
+					}
+					out[i].S = cur
+					out[i].E = cur + dur
+					cur = out[i].E
+				}
+			}
 		}
 	}
 
 	var prev int64
 	for i := range out {
-		if out[i].S == 0 && out[i].E == 0 {
-			out[i].S = prev
-			out[i].E = prev + 1200 + int64(utf8.RuneCountInString(out[i].T))*160
-		}
 		if out[i].S < prev {
 			out[i].S = prev
 		}
 		if out[i].E <= out[i].S {
-			out[i].E = out[i].S + 800
+			out[i].E = out[i].S + 300
 		}
 		prev = out[i].E
 	}
-	return out, prev
+	if duration <= 0 {
+		duration = prev
+	}
+	if len(out) > 0 && out[len(out)-1].E < duration {
+		out[len(out)-1].E = duration
+	}
+	return out, duration
+}
+
+// blogAudioNormalizeTiming removes whitespace. Punctuation and case are kept: they are the
+// characters that make one boundary distinguishable from another.
+//
+// blogAudioNormalizeTiming 去掉空白。保留标点与大小写：它们正是区分相邻边界的字符。
+func blogAudioNormalizeTiming(s string) []rune {
+	out := make([]rune, 0, len(s))
+	for _, r := range s {
+		if !unicode.IsSpace(r) {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+// blogAudioIndexRunes finds needle in hay[from:to]. The explicit window is what stops a common
+// short token from matching far ahead of the spoken position.
+//
+// blogAudioIndexRunes 在 hay[from:to] 中查找 needle。显式窗口阻止常见短词在朗读位置之前很远
+// 的地方命中。
+func blogAudioIndexRunes(hay, needle []rune, from, to int) int {
+	if from < 0 {
+		from = 0
+	}
+	if to > len(hay) {
+		to = len(hay)
+	}
+	if from >= to || len(needle) == 0 || len(needle) > to-from {
+		return -1
+	}
+	first := needle[0]
+	for i := from; i <= to-len(needle); i++ {
+		if hay[i] != first {
+			continue
+		}
+		ok := true
+		for j := 1; j < len(needle); j++ {
+			if hay[i+j] != needle[j] {
+				ok = false
+				break
+			}
+		}
+		if ok {
+			return i
+		}
+	}
+	return -1
 }
 
 func blogAudioTextHash(s string) string {

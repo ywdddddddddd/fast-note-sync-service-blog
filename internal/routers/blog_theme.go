@@ -1192,9 +1192,9 @@ svg:not(.graph-svg) .g-node:hover text{opacity:1}
 @media (max-width:860px){.callout-body{padding-left:.7rem;padding-right:.7rem}}
 @media print{.callout{break-inside:avoid}}
 
-/* ── 数学公式（LaTeX 源码 + 可选 MathJax 排版）──────────────────────── */
+/* ── 数学公式（LaTeX 源码 + 自托管 KaTeX 排版）──────────────────────── */
 /* 服务端不排版公式（Go 生态没有生产级 TeX→HTML 渲染器），只保留源码并加标记。
-   文章页仅在出现 .math-* 时加载 MathJax；无 JS 时下面的样式让 LaTeX 源码本身可读。 */
+   文章页仅在出现 .math-* 时加载 KaTeX；无 JS 时下面的样式让 LaTeX 源码本身可读。 */
 .math-block{margin:1.1rem 0;padding:.9rem 1.05rem;border:1px solid var(--border);border-radius:.75rem;
   background:color-mix(in srgb,var(--muted) 30%,transparent);overflow-x:auto;
   font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;
@@ -1203,7 +1203,12 @@ svg:not(.graph-svg) .g-node:hover text{opacity:1}
   background:color-mix(in srgb,var(--muted) 45%,transparent);
   font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;
   font-size:.9375em;color:var(--foreground)}
-/* MathJax 接管后，去掉源码态的底色与等宽字体 */
+/* KaTeX 接管后，去掉源码态的底色与等宽字体。 */
+.katex{color:var(--foreground)}
+.katex-display{margin:.9rem 0;overflow-x:auto;overflow-y:hidden}
+.math-block:has(.katex){padding:0;border:0;background:none;font-family:inherit;text-align:center}
+.math-inline:has(.katex){padding:0;background:none;font-family:inherit}
+/* MathJax 规则保留：旧缓存页仍可能引用它，删除也不会让排版更好。 */
 mjx-container{overflow-x:auto;overflow-y:hidden;max-width:100%}
 mjx-container[display="true"]{margin:.9rem 0}
 .math-block:has(mjx-container){padding:0;border:0;background:none;text-align:center}
