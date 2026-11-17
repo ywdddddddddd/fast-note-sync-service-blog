@@ -640,6 +640,16 @@ const blogAudioScript = `
           showError(st.error || '生成失败');
           return;
         }
+        if (st.status === 'missing') {
+          // The queue's ready state no longer has a matching manifest row/file. Stop pretending
+          // the job is still running; offer a retry instead of polling forever.
+          //
+          // 队列的 ready 状态已经没有匹配的清单行/文件。不要再假装任务仍在进行，给出重试而不是
+          // 永远轮询。
+          closeModal();
+          showError('生成状态已失效，请重试');
+          return;
+        }
         tick();
       }).catch(function () { /* transient network error: keep polling */ });
     }, 2000);

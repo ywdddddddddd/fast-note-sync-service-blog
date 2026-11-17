@@ -94,6 +94,13 @@ type blogAudioJobState struct {
 	Status   string
 	Estimate int64
 	Error    string
+	// TextHash identifies which version of the article this job produced. A "ready" state from
+	// an older hash must not satisfy a prepare for the current text: that is how the player used
+	// to accept the previous, shorter audio and skip the regeneration it had just requested.
+	//
+	// TextHash 标识这个任务产出的是哪一版正文。旧哈希的 ready 状态不能当作当前正文已就绪——
+	// 播放器曾经因此接受上一版更短的音频，把它刚请求的重生成晾在一边。
+	TextHash string
 }
 
 type blogAudioGen struct {
@@ -129,20 +136,39 @@ func (g *blogAudioGen) enqueue(job *blogAudioJob) (string, int64, bool) {
 	defer g.mu.Unlock()
 	if st := g.jobs[job.Slug]; st != nil {
 		switch st.Status {
-		case blogAudioQueued, blogAudioGenerating, blogAudioReadyStatus:
+		case blogAudioQueued, blogAudioGenerating:
+			// A request for the same text is already in flight; report it instead of adding a
+			// duplicate. A different hash while one job runs is rare (the article changed during
+			// generation); the next page load will ask again, so do not complicate the queue.
+			//
+			// 同一正文已在队列/生成中：直接报告状态，不重复入队。生成期间正文变了属于罕见情况，
+			// 下一次打开页面会重新请求，不必为此复杂化队列。
 			return st.Status, st.Estimate, true
+		case blogAudioReadyStatus:
+			// The state says ready, but that is only trustworthy if the manifest entry still
+			// exists, its file is on disk, and it belongs to the same text. A deleted manifest
+			// row or an edited article must fall through to a new job rather than handing the
+			// caller an empty "ready".
+			//
+			// 状态说 ready，但只有清单条目仍在、文件在磁盘上、且属于同一正文时才可信。清单被删
+			// 或正文已改时必须落到新任务，而不是把一个空的 "ready" 交给调用者。
+			if st.TextHash == job.TextHash {
+				if ready := blogAudioReady(g.app, job.Slug); ready != nil && ready.TextHash == job.TextHash {
+					return blogAudioReadyStatus, 0, true
+				}
+			}
 		}
 	}
 	select {
 	case g.queue <- job:
-		g.jobs[job.Slug] = &blogAudioJobState{Status: blogAudioQueued, Estimate: job.Estimate}
+		g.jobs[job.Slug] = &blogAudioJobState{Status: blogAudioQueued, Estimate: job.Estimate, TextHash: job.TextHash}
 		return blogAudioQueued, job.Estimate, true
 	default:
 		return "", 0, false
 	}
 }
 
-func (g *blogAudioGen) setState(slug, status string, estimate int64, errMsg string) {
+func (g *blogAudioGen) setState(slug, textHash, status string, estimate int64, errMsg string) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	st := g.jobs[slug]
@@ -153,16 +179,17 @@ func (g *blogAudioGen) setState(slug, status string, estimate int64, errMsg stri
 	st.Status = status
 	st.Estimate = estimate
 	st.Error = errMsg
+	st.TextHash = textHash
 }
 
 func (g *blogAudioGen) worker() {
 	for job := range g.queue {
-		g.setState(job.Slug, blogAudioGenerating, job.Estimate, "")
+		g.setState(job.Slug, job.TextHash, blogAudioGenerating, job.Estimate, "")
 		if err := g.generate(job); err != nil {
-			g.setState(job.Slug, blogAudioFailed, job.Estimate, err.Error())
+			g.setState(job.Slug, job.TextHash, blogAudioFailed, job.Estimate, err.Error())
 			continue
 		}
-		g.setState(job.Slug, blogAudioReadyStatus, 0, "")
+		g.setState(job.Slug, job.TextHash, blogAudioReadyStatus, 0, "")
 	}
 }
 

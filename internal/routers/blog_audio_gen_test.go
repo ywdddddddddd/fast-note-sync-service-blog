@@ -80,6 +80,52 @@ func TestBlogAudioBuildTimingsEntityFragments(t *testing.T) {
 //
 // TestBlogAudioBuildTimingsInterpolatesGap 确认两句已匹配之间的未匹配句落在真实区间内，而不是
 // 接在上一句估算之后。
+// TestBlogAudioEnqueueReplacesStaleReady is the state-machine half of the 1.203 report: a
+// "ready" state from the previous text must not satisfy a job for the current text, otherwise
+// prepare answers with the old audio and the regeneration never starts.
+//
+// TestBlogAudioEnqueueReplacesStaleReady 是 1.203 报告的状态机部分：上一版正文的 ready 状态不能
+// 满足当前正文的任务，否则 prepare 会拿旧音频作答，重生成永远不会开始。
+func TestBlogAudioEnqueueReplacesStaleReady(t *testing.T) {
+	g := &blogAudioGen{
+		jobs: map[string]*blogAudioJobState{
+			"s": {Status: blogAudioReadyStatus, TextHash: "old"},
+		},
+		queue: make(chan *blogAudioJob, 4),
+	}
+	status, _, ok := g.enqueue(&blogAudioJob{Slug: "s", TextHash: "new", Estimate: 12})
+	if !ok || status != blogAudioQueued {
+		t.Fatalf("enqueue = (%q,%v), want queued,true", status, ok)
+	}
+	st := g.status("s")
+	if st.Status != blogAudioQueued || st.TextHash != "new" {
+		t.Fatalf("state = %+v, want queued/new", st)
+	}
+	if len(g.queue) != 1 {
+		t.Fatalf("queue length = %d, want 1", len(g.queue))
+	}
+}
+
+// TestBlogAudioEnqueueDeduplicatesQueued: polling prepare while the same job waits must not
+// fill the small queue with duplicates.
+//
+// TestBlogAudioEnqueueDeduplicatesQueued：任务等待期间反复 prepare 不能把小队列塞满重复项。
+func TestBlogAudioEnqueueDeduplicatesQueued(t *testing.T) {
+	g := &blogAudioGen{
+		jobs: map[string]*blogAudioJobState{
+			"s": {Status: blogAudioQueued, Estimate: 7, TextHash: "same"},
+		},
+		queue: make(chan *blogAudioJob, 4),
+	}
+	status, est, ok := g.enqueue(&blogAudioJob{Slug: "s", TextHash: "same", Estimate: 99})
+	if !ok || status != blogAudioQueued || est != 7 {
+		t.Fatalf("enqueue = (%q,%d,%v), want queued,7,true", status, est, ok)
+	}
+	if len(g.queue) != 0 {
+		t.Fatalf("queue length = %d, want 0", len(g.queue))
+	}
+}
+
 func TestBlogAudioBuildTimingsInterpolatesGap(t *testing.T) {
 	full := "第一句。\n中间没有边界。\n最后一句。"
 	sentences := []string{"第一句", "中间没有边界", "最后一句"}

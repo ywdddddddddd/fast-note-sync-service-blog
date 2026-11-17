@@ -258,11 +258,12 @@ func registerBlogAudioRoutes(r *gin.RouterGroup, appContainer *app.App, shareSvc
 		}
 		textHash := blogAudioTextHash(fullText)
 
-		if ready := blogAudioReady(appContainer, slug); ready != nil && ready.TextHash == textHash {
-			c.JSON(http.StatusOK, ready)
-			return
-		}
-
+		// A job already in flight wins over the manifest. During a regeneration the old row is
+		// still on disk; reporting it as ready is exactly what made the player accept the
+		// previous, shorter audio and skip the job it had just requested.
+		//
+		// 正在进行的任务优先于清单。重生成期间旧条目仍在磁盘上；把它报告为 ready 正是播放器
+		// 接受上一版更短音频、把它刚请求的任务晾在一边的原因。
 		if st := gen.status(slug); st != nil {
 			switch st.Status {
 			case blogAudioQueued, blogAudioGenerating:
@@ -272,6 +273,11 @@ func registerBlogAudioRoutes(r *gin.RouterGroup, appContainer *app.App, shareSvc
 				})
 				return
 			}
+		}
+
+		if ready := blogAudioReady(appContainer, slug); ready != nil && ready.TextHash == textHash {
+			c.JSON(http.StatusOK, ready)
+			return
 		}
 
 		estimate := blogAudioEstimate(fullText)
@@ -286,6 +292,19 @@ func registerBlogAudioRoutes(r *gin.RouterGroup, appContainer *app.App, shareSvc
 		status, est, ok := gen.enqueue(job)
 		if !ok {
 			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "生成队列已满，请稍后再试"})
+			return
+		}
+		if status == blogAudioReadyStatus {
+			// enqueue only returns ready after checking the manifest and the file. Return the
+			// real URLs instead of a bare status, which the client cannot play.
+			//
+			// enqueue 只有在核对过清单与文件后才返回 ready。这里返回真实 URL，而不是客户端无法
+			// 播放的裸状态。
+			if ready := blogAudioReady(appContainer, slug); ready != nil {
+				c.JSON(http.StatusOK, ready)
+				return
+			}
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "生成状态已失效，请重试"})
 			return
 		}
 		c.JSON(http.StatusOK, blogAudioStatusResponse{Status: status, EstimateSec: est})
@@ -305,16 +324,42 @@ func registerBlogAudioRoutes(r *gin.RouterGroup, appContainer *app.App, shareSvc
 			return
 		}
 		c.Header("Cache-Control", "no-store")
+
+		// Job state first. A stale manifest row exists throughout a regeneration, and reading it
+		// before the queue is how polling used to stop at "ready" with the old audio.
+		//
+		// 先看任务状态。重生成全程旧清单行都在，先读清单再读队列正是轮询拿着旧音频停在
+		// "ready" 的原因。
+		if st := gen.status(slug); st != nil {
+			switch st.Status {
+			case blogAudioQueued, blogAudioGenerating:
+				c.JSON(http.StatusOK, blogAudioStatusResponse{
+					Status:      st.Status,
+					EstimateSec: st.Estimate,
+				})
+				return
+			case blogAudioFailed:
+				c.JSON(http.StatusOK, blogAudioStatusResponse{
+					Status: blogAudioFailed,
+					Error:  st.Error,
+				})
+				return
+			case blogAudioReadyStatus:
+				if ready := blogAudioReady(appContainer, slug); ready != nil && ready.TextHash == st.TextHash {
+					c.JSON(http.StatusOK, ready)
+					return
+				}
+				// The state outlived its files or the manifest was replaced. Let the client
+				// ask for a fresh generation instead of offering a URL that 404s.
+				//
+				// 状态比文件活得久，或清单已被替换。让客户端重新请求生成，而不是给出会 404 的 URL。
+				c.JSON(http.StatusOK, blogAudioStatusResponse{Status: "missing"})
+				return
+			}
+		}
+
 		if ready := blogAudioReady(appContainer, slug); ready != nil {
 			c.JSON(http.StatusOK, ready)
-			return
-		}
-		if st := gen.status(slug); st != nil {
-			c.JSON(http.StatusOK, blogAudioStatusResponse{
-				Status:      st.Status,
-				EstimateSec: st.Estimate,
-				Error:       st.Error,
-			})
 			return
 		}
 		c.JSON(http.StatusOK, blogAudioStatusResponse{Status: "missing"})
