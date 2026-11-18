@@ -19,19 +19,20 @@ func TestBlogAudioExtractNestedBlocks(t *testing.T) {
   <li>列表直属文本</li>
 </ul>
 <blockquote><p>引用里的段落</p></blockquote>
+<table><tr><td><p>表格里的段落</p></td><td>表格数据</td></tr></table>
 <p>公式 <span class="math-inline">\rightarrow</span> 之后</p>
 <pre><code>代码不能朗读</code></pre>`
 
 	full, sentences := blogAudioExtract(body)
-	want := "开头\n列表里的段落\n列表直属文本\n引用里的段落\n公式 之后"
+	want := "开头\n列表里的段落\n列表直属文本\n引用里的段落\n表格里的段落\n公式 之后"
 	if full != want {
 		t.Fatalf("extracted text mismatch:\n got: %q\nwant: %q", full, want)
 	}
-	if len(sentences) < 5 {
-		t.Fatalf("sentences = %d, want at least 5: %#v", len(sentences), sentences)
+	if len(sentences) < 6 {
+		t.Fatalf("sentences = %d, want at least 6: %#v", len(sentences), sentences)
 	}
 	for _, s := range sentences {
-		if strings.Contains(s, "rightarrow") || strings.Contains(s, "代码不能朗读") {
+		if strings.Contains(s, "rightarrow") || strings.Contains(s, "代码不能朗读") || strings.Contains(s, "表格数据") {
 			t.Errorf("excluded content leaked into transcript: %q", s)
 		}
 	}

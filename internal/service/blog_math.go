@@ -46,9 +46,11 @@ var mathBlockRegex = regexp.MustCompile(`(?s)\$\$(.+?)\$\$`)
 //     this is a mandatory character rather than an optional one, because an optional trailing
 //     class accepts an empty match and turns "$5 到 $10" into a formula reading "5 到 ";
 //   - the body may not contain "$" or a newline;
-//   - the body is length-capped, and the optional tail means a single-character body such as
-//     "$a$" still matches (an earlier version required two characters and silently dropped
-//     every one-character formula).
+//   - the body is length-capped at ~1000 characters (Go's regexp repeat limit), and the
+//     optional tail means a single-character body such as "$a$" still matches (an earlier
+//     version required two characters and silently dropped every one-character formula). The
+//     cap used to be 498, which left a real 690-character formula on the server as visible
+//     source.
 //
 // mathInlineRegex 匹配行内公式。
 //
@@ -60,8 +62,9 @@ var mathBlockRegex = regexp.MustCompile(`(?s)\$\$(.+?)\$\$`)
 //   - 结束 "$" 之前必须是非空白，因此 "100 $" 不是公式——关键在于这是一个**必需**字符而不是
 //     可选字符，因为可选的尾部字符类会接受空匹配，把 "$5 到 $10" 变成正文为 "5 到 " 的公式；
 //   - 公式体内不得包含 "$" 或换行；
-//   - 公式体有长度上限，避免正文里一个孤立的 "$" 吞掉半个段落。
-var mathInlineRegex = regexp.MustCompile(`(^|[^$A-Za-z0-9])\$([^\s$](?:[^$\n]{0,496}[^\s$])?)\$`)
+//   - 公式体长度上限约 1000 字（Go regexp 的重复上限），避免正文里一个孤立的 "$" 吞掉半个
+//     段落。原来的上限是 498 字，服务器上一篇真实笔记里 690 字的公式因此一直以源码形态显示。
+var mathInlineRegex = regexp.MustCompile(`(^|[^$A-Za-z0-9])\$([^\s$](?:[^$\n]{0,996}[^\s$])?)\$`)
 
 // mathPlaceholderPrefix marks a region that must not be re-scanned for inline math (a display
 // formula, or an inline code span).

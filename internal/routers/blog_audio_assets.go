@@ -215,7 +215,13 @@ const blogAudioScript = `
     var full = '';
     for (var i = 0; i < els.length; i++) {
       var el = els[i];
-      if (el.closest && el.closest('pre,code,table,figure,.quiz,.fns-quiz,.fns-graph,.math,.math-inline,.math-block,.katex,.fns-audio-ignore')) continue;
+      // Tables are not skipped: several notes use one as a two-column layout and put all their
+      // prose in <td><p>…</p></td>. Only the selected h2/h3/h4/p/li blocks are read, so bare
+      // table data stays out; paragraphs inside cells are part of the article.
+      //
+      // 表格不整棵跳过：几篇笔记用表格做两栏排版，正文全在 <td><p>…</p></td> 里。仍然只读选中的
+      // h2/h3/h4/p/li，因此裸表格数据不会被读，单元格里的段落属于正文。
+      if (el.closest && el.closest('pre,code,figure,.quiz,.fns-quiz,.fns-graph,.math,.math-inline,.math-block,.katex,.fns-audio-ignore')) continue;
       var m = blockMap(el);
       if (!m.text) continue;
       blocks.push({ start: full.length, text: m.text, map: m.map, el: el });

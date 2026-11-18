@@ -20,6 +20,7 @@ func TestPreprocessMath(t *testing.T) {
 	}{
 		{"inline", "质能方程 $E=mc^2$ 很重要", []string{`<span class="math-inline"`, "E=mc^2"}, nil},
 		{"inline next to CJK", "牙冠完整 $\\rightarrow$ 排除龋源性", []string{`math-inline" role="math">\rightarrow<`}, nil},
+		{"long inline formula", "$" + strings.Repeat("x", 700) + "$", []string{`class="math-inline"`}, nil},
 		{"display", "$$\n\\int_0^1 x^2 dx\n$$", []string{`<div class="math-block"`, `\int_0^1 x^2 dx`}, nil},
 		{"display single line", "$$a^2+b^2=c^2$$", []string{`<div class="math-block"`}, nil},
 		{"multiple inline", "$a$ 与 $b$", []string{`math-inline" role="math">a<`, `math-inline" role="math">b<`}, nil},

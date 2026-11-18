@@ -347,7 +347,8 @@ func blogAudioEstimate(text string) int64 {
 }
 
 // blogAudioExtract mirrors the browser's buildArticleText: h2/h3/h4/p/li blocks, own text
-// (child blocks skipped), math and code-block subtrees excluded, whitespace collapsed.
+// (child blocks skipped), math and code-block subtrees excluded, prose inside table cells
+// included, whitespace collapsed.
 //
 // The walk must not stop at a block element. Obsidian renders a list item with a nested
 // paragraph as <li><p>…</p></li>; the browser's querySelectorAll sees both the empty <li> and
@@ -357,7 +358,7 @@ func blogAudioEstimate(text string) int64 {
 // two extractors identical.
 //
 // blogAudioExtract 与浏览器 buildArticleText 一致：h2/h3/h4/p/li 块、取自身文本（跳过子块）、
-// 排除公式与代码块子树、折叠空白。
+// 排除公式与代码块子树、包含表格单元格里的段落、折叠空白。
 //
 // 遍历不能在块元素处停止。Obsidian 会把「列表项里的段落」渲染成 <li><p>…</p></li>；浏览器的
 // querySelectorAll 同时看到空的 <li> 和 <p>，而这里提前 return 只看到 <li>，正文因此丢失。
@@ -406,12 +407,21 @@ func blogAudioExtract(body string) (string, []string) {
 // the note means, and leaving it in the transcript would only make the two sides disagree once
 // KaTeX has replaced the source with its rendering.
 //
+// Tables are not skipped as a whole. Several anatomy notes use a table as a two-column layout,
+// and their entire prose lives in <td><p>…</p></td>; skipping the table made those articles
+// "no speakable text". The walk still only selects h2/h3/h4/p/li, so a data-only cell with
+// bare text is not read — prose paragraphs inside cells are.
+//
 // blogAudioSkipSubtree 是浏览器 el.closest(...) 判断的 Go 版本。公式整棵排除：把 LaTeX 源码
 // 读成「反斜杠 rightarrow」从来不是笔记的意思；KaTeX 用排版结果替换源码后，留在转写里也只会
 // 让两边对不上。
+//
+// 表格不再整棵跳过。几篇解剖笔记用表格做两栏排版，全部正文都在 <td><p>…</p></td> 里；整表跳过
+// 使这些文章变成「no speakable text」。遍历仍只选 h2/h3/h4/p/li，因此只有裸文本的数据单元格
+// 不会被朗读，单元格里的段落会被朗读。
 func blogAudioSkipSubtree(n *html.Node) bool {
 	switch strings.ToLower(n.Data) {
-	case "pre", "code", "table", "figure":
+	case "pre", "code", "figure":
 		return true
 	}
 	for _, cls := range strings.Fields(blogAudioClass(n)) {
