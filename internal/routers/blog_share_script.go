@@ -37,6 +37,10 @@ func blogShareJS() string {
   }
 
   // ── 样式 ───────────────────────────────────────────────────────────────
+  //
+  // 颜色全部走 var(--…)：这一套控件在深色与浅色下都要活着，而写死的 rgba 在深色底上
+  // 会变成一块看不出边界的灰。--graph-accent 在深色下是 #7aa870，与高亮遮罩同一支颜色，
+  // 因此「主按钮」在两种主题里都还是同一个绿。
   var css = document.createElement('style');
   css.textContent = [
     '.fns-share-menu{position:fixed;z-index:9999;min-width:132px;padding:6px;border-radius:12px;',
@@ -46,11 +50,50 @@ func blogShareJS() string {
     '.fns-share-menu button{display:block;width:100%;text-align:left;padding:8px 10px;border:0;',
     '  border-radius:8px;background:none;color:var(--foreground,#34322d);font:inherit;cursor:pointer}',
     '.fns-share-menu button:hover{background:var(--muted,#f3f3f3)}',
-    '.fns-quote-btn{position:fixed;z-index:9999;padding:6px 12px;border-radius:999px;border:1px solid var(--border,#0000001f);',
-    '  background:var(--card,#fff);color:var(--foreground,#34322d);font-size:.75rem;cursor:pointer;',
-    '  box-shadow:0 8px 22px rgba(0,0,0,.16);display:none}',
-    '.fns-quote-btn.on{display:block}',
-    '.fns-quote-btn[disabled]{opacity:.55;cursor:not-allowed}'
+
+    // 划词工具条：像 iOS/微信那样一条深色胶囊，按钮等宽、图标在上文字在下。
+    // 深色底在浅色页面上是「浮起的控件」；在深色页面上它必须再亮一档、并带一圈更明显的边，
+    // 否则 rgba(28,28,26) 压在 #1a1a1a 上几乎看不见边界（实测截图就是这样）。
+    // 两条规则都写，不靠 color-mix：这条 CSS 是运行时拼出来的，老 Safari 上不可用的语法
+    // 会让整条声明失效。
+    '.fns-quote-bar{position:fixed;z-index:9999;display:none;align-items:stretch;gap:2px;',
+    '  padding:6px;border-radius:12px;background:rgba(28,28,26,.94);',
+    '  border:1px solid rgba(255,255,255,.10);box-shadow:0 10px 28px rgba(0,0,0,.34);',
+    '  -webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px);',
+    '  -webkit-user-select:none;user-select:none}',
+    'html.dark .fns-quote-bar{background:rgba(56,56,52,.97);border-color:rgba(255,255,255,.22);',
+    '  box-shadow:0 12px 32px rgba(0,0,0,.62)}',
+    // 没有显式 class 时跟随系统：站点其余深色规则都写成这两条并列，工具条也必须如此，
+    // 否则「跟随系统 + 深色」的读者拿到的仍是浅色页面那一档的胶囊。
+    '@media (prefers-color-scheme:dark){html:not(.light) .fns-quote-bar{background:rgba(56,56,52,.97);',
+    '  border-color:rgba(255,255,255,.22);box-shadow:0 12px 32px rgba(0,0,0,.62)}}',
+    '.fns-quote-bar.on{display:flex}',
+    '.fns-quote-bar button{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;',
+    '  min-width:58px;padding:6px 8px;border:0;border-radius:8px;background:none;color:#f2f1ee;',
+    '  font:inherit;font-size:.6875rem;line-height:1.15;cursor:pointer;-webkit-tap-highlight-color:transparent}',
+    '.fns-quote-bar button svg{width:18px;height:18px}',
+    '.fns-quote-bar button:active{background:rgba(255,255,255,.14)}',
+    '.fns-quote-bar button[disabled]{opacity:.42;cursor:not-allowed}',
+
+    // 预览层：手机上是「全屏看图」，桌面上是一张居中的浮层。
+    '.fns-share-prev{position:fixed;inset:0;z-index:10000;display:flex;flex-direction:column;',
+    '  align-items:center;justify-content:center;gap:14px;padding:max(18px,env(safe-area-inset-top,0px)) 16px',
+    '  max(18px,env(safe-area-inset-bottom,0px));',
+    '  background:rgba(12,12,12,.78);-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);',
+    '  opacity:0;transition:opacity .22s ease;overflow:auto}',
+    '.fns-share-prev.on{opacity:1}',
+    '.fns-share-prev-fig{display:flex;align-items:center;justify-content:center;max-width:100%;max-height:72vh}',
+    '.fns-share-prev-img{max-width:min(100%,560px);max-height:72vh;width:auto;height:auto;',
+    '  border-radius:14px;box-shadow:0 18px 48px rgba(0,0,0,.42);background:#fff;',
+    '  -webkit-user-select:auto;user-select:auto;-webkit-touch-callout:default}',
+    '.fns-share-prev-bar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:center}',
+    '.fns-share-prev-btn{display:inline-flex;align-items:center;gap:6px;padding:9px 16px;border-radius:999px;',
+    '  border:1px solid rgba(255,255,255,.22);background:rgba(255,255,255,.10);color:#f4f3f0;',
+    '  font:inherit;font-size:.8125rem;cursor:pointer;-webkit-tap-highlight-color:transparent}',
+    '.fns-share-prev-btn svg{width:16px;height:16px}',
+    '.fns-share-prev-btn.primary{background:var(--graph-accent,#4b7a43);border-color:transparent;color:#fff;font-weight:600}',
+    '.fns-share-prev-btn:active{transform:translateY(1px)}',
+    '.fns-share-prev-hint{margin:0;color:rgba(255,255,255,.62);font-size:.75rem;text-align:center}'
   ].join('\n');
   document.head.appendChild(css);
 
@@ -204,46 +247,175 @@ func blogShareJS() string {
     return o.c;
   }
 
-  // ── 导出 ───────────────────────────────────────────────────────────────
-  function save(canvas, name){
-    function done(url, revoke){
-      var a=document.createElement('a');
-      a.href=url; a.download=name;
-      document.body.appendChild(a); a.click(); a.remove();
-      if(revoke) setTimeout(function(){ URL.revokeObjectURL(url); }, 4000);
-    }
+  // ── 导出：JPEG → 预览 → 系统分享 ───────────────────────────────────────
+  //
+  // iOS 上这张卡原来是一张 2 MB 的「文件卡」：canvas → <a download> 在 iPhone 上只能存进
+  // 「文件」，从微信发出去显示的是一个文件气泡而不是图片，系统分享面板里也只剩能吃文件的应用
+  //（相册、隔空投送都不出现）。改 JPEG 后体积小一个数量级，再走 navigator.share
+  // 直接进系统分享面板，微信、相册、隔空投送都在里面。
+  //
+  // 为什么先预览而不是直接分享：navigator.share 必须在用户手势里调用，而画卡片要等封面与头像
+  // 加载完，那一刻手势早已过期——这正是「点一下就调起分享」在 iOS 上不可靠的原因。
+  // 预览层里的「分享」是一次新的点击，手势是新鲜的，分享才真的能弹出来。
+  // 预览顺带解决第二个问题：画错了能当场看见，而不是存下来才发现。
+  function toJpeg(canvas, cb){
     if(canvas.toBlob){
-      canvas.toBlob(function(blob){
-        if(!blob){ toast('生成失败，请重试'); return; }
-        done(URL.createObjectURL(blob), true);
-      }, 'image/png');
-    } else {
-      done(canvas.toDataURL('image/png'), false);
+      canvas.toBlob(function(b){ cb(b); }, 'image/jpeg', 0.92);
+      return;
     }
+    // 没有 toBlob 的浏览器：dataURL 转二进制。这条路上的体积优势没了，但预览与分享照旧。
+    try{
+      var d=canvas.toDataURL('image/jpeg', 0.92).split(',')[1];
+      var bin=atob(d), arr=new Uint8Array(bin.length);
+      for(var i=0;i<bin.length;i++) arr[i]=bin.charCodeAt(i);
+      cb(new Blob([arr], {type:'image/jpeg'}));
+    }catch(e){ cb(null); }
+  }
+
+  // safeName strips what a filesystem refuses. A note titled "第1章：绪论" is legal on iOS but
+  // a colon is not legal on Windows, and the reader may well be sharing from a desktop.
+  // safeName 去掉文件系统不接受的字符。标题「第1章：绪论」在 iOS 上合法，冒号在 Windows 上不合法，
+  // 而读者完全可能从桌面端分享。
+  function safeName(s){
+    return (s||'分享').replace(/[\\/:*?"<>|]+/g,'-').replace(/\s+/g,' ').trim().slice(0,48)||'分享';
+  }
+
+  var prev=null, prevBlob=null, prevName='';
+
+  function closePreview(){
+    var node=prev; prev=null;
+    if(!node) return;
+    node.classList.remove('on');
+    setTimeout(function(){ if(node.parentNode) node.parentNode.removeChild(node); }, 220);
+  }
+
+  function downloadBlob(blob, name){
+    var url=URL.createObjectURL(blob);
+    var a=document.createElement('a');
+    a.href=url; a.download=name+'.jpg';
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(function(){ URL.revokeObjectURL(url); }, 8000);
+  }
+
+  function showPreview(blob, name){
+    closePreview();
+    prevBlob=blob; prevName=name;
+
+    var url=URL.createObjectURL(blob);
+    var box=document.createElement('div');
+    box.className='fns-share-prev';
+
+    var fig=document.createElement('div');
+    fig.className='fns-share-prev-fig';
+    var img=document.createElement('img');
+    img.className='fns-share-prev-img';
+    img.alt='分享卡片预览';
+    img.src=url;
+    fig.appendChild(img);
+
+    var bar=document.createElement('div');
+    bar.className='fns-share-prev-bar';
+
+    function mk(cls, label, icon){
+      var b=document.createElement('button');
+      b.type='button'; b.className='fns-share-prev-btn'+(cls?' '+cls:'');
+      b.innerHTML=icon+'<span>'+label+'</span>';
+      bar.appendChild(b);
+      return b;
+    }
+
+    var ICON_COPY='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M15 5H6a2 2 0 0 0-2 2v9"/></svg>';
+    var ICON_SAVE='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="m7 11 5 5 5-5"/><path d="M4 20h16"/></svg>';
+
+    var shareBtn=mk('primary','分享',
+      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v13"/><path d="m8 7 4-4 4 4"/><path d="M5 14v5a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-5"/></svg>');
+    var saveBtn=mk('','保存',ICON_SAVE);
+    var closeBtn=mk('','关闭',
+      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>');
+
+    var hint=document.createElement('p');
+    hint.className='fns-share-prev-hint';
+    hint.textContent='长按图片也可以直接保存或转发';
+
+    box.appendChild(fig);
+    box.appendChild(bar);
+    box.appendChild(hint);
+    document.body.appendChild(box);
+    prev=box;
+    // 下一帧再加 on：过渡要有起始态，否则预览层是「跳」出来的。
+    requestAnimationFrame(function(){ box.classList.add('on'); });
+
+    function doSave(){
+      downloadBlob(blob, name);
+      toast(navigator.share ? '已保存为图片' : '已下载图片');
+    }
+
+    shareBtn.addEventListener('click', function(){
+      var file=null;
+      try{ file=new File([blob], name+'.jpg', {type:'image/jpeg'}); }catch(e){ file=null; }
+      var canFiles=!!(file && navigator.canShare && navigator.share && navigator.canShare({files:[file]}));
+      if(!canFiles){
+        // 桌面浏览器大多不支持文件分享。退回保存，而不是让按钮看起来没反应。
+        doSave();
+        return;
+      }
+      navigator.share({
+        files:[file],
+        title:data.title||'',
+        text:data.title||''
+      }).catch(function(err){
+        if(err && err.name==='AbortError') return;   // 用户自己取消，不是失败
+        doSave();
+      });
+    });
+
+    saveBtn.addEventListener('click', doSave);
+    closeBtn.addEventListener('click', closePreview);
+    box.addEventListener('click', function(e){ if(e.target===box) closePreview(); });
+    img.addEventListener('load', function(){ setTimeout(function(){ URL.revokeObjectURL(url); }, 0); });
+  }
+
+  // present draws nothing itself: it turns the canvas into a JPEG and puts the preview up.
+  // present 不画任何东西：把 canvas 变成 JPEG 并弹出预览。
+  function present(canvas, name){
+    toJpeg(canvas, function(blob){
+      if(!blob){ toast('生成失败，请重试'); return; }
+      showPreview(blob, safeName(name));
+    });
   }
 
   function toast(msg){
     var d=document.createElement('div');
     d.textContent=msg;
-    d.style.cssText='position:fixed;left:50%;bottom:48px;transform:translateX(-50%);z-index:10000;'+
+    d.setAttribute('role','status');
+    d.style.cssText='position:fixed;left:50%;bottom:calc(5.4rem + env(safe-area-inset-bottom,0px));'+
+      'transform:translateX(-50%);z-index:10001;max-width:min(90vw,26rem);text-align:center;'+
       'padding:9px 16px;border-radius:999px;background:rgba(0,0,0,.82);color:#fff;font-size:.8125rem';
     document.body.appendChild(d);
     setTimeout(function(){ d.remove(); }, 2200);
   }
 
+  function copyText(text, ok, fail){
+    function fallback(){
+      var ta=document.createElement('textarea');
+      ta.value=text; ta.setAttribute('readonly','');
+      ta.style.cssText='position:fixed;top:0;left:-9999px;opacity:0';
+      document.body.appendChild(ta); ta.select();
+      ta.setSelectionRange(0, text.length);
+      var done=false;
+      try{ done=document.execCommand('copy'); }catch(e){ done=false; }
+      ta.remove();
+      if(done) ok(); else fail();
+    }
+    if(navigator.clipboard && navigator.clipboard.writeText){
+      navigator.clipboard.writeText(text).then(ok, fallback);
+    } else { fallback(); }
+  }
+
   function copyLink(){
     var url=location.origin+location.pathname;
     var text=(data.title?data.title+'\n':'')+url;
-    if(navigator.clipboard && navigator.clipboard.writeText){
-      navigator.clipboard.writeText(text).then(function(){ toast('链接已复制'); }, fallback);
-    } else { fallback(); }
-    function fallback(){
-      var ta=document.createElement('textarea');
-      ta.value=text; ta.style.cssText='position:fixed;opacity:0';
-      document.body.appendChild(ta); ta.select();
-      try{ document.execCommand('copy'); toast('链接已复制'); }catch(e){ toast('复制失败，请手动复制'); }
-      ta.remove();
-    }
+    copyText(text, function(){ toast('链接已复制'); }, function(){ toast('复制失败，请手动复制'); });
   }
 
   // ── 分享菜单 ───────────────────────────────────────────────────────────
@@ -278,7 +450,7 @@ func blogShareJS() string {
     Promise.all([loadImage(data.cover), loadImage(data.avatar)]).then(function(res){
       try{
         var canvas=drawArticle(res[0], theme());
-        save(canvas, (data.title||'share')+'.png');
+        present(canvas, data.title||'分享');
       }catch(err){ toast('生成失败：'+err.message); }
     });
   });
@@ -288,50 +460,125 @@ func blogShareJS() string {
   });
   window.addEventListener('scroll', hideMenu, {passive:true});
 
-  // ── 划词分享 ───────────────────────────────────────────────────────────
-  var qbtn=document.createElement('button');
-  qbtn.className='fns-quote-btn';
-  qbtn.type='button';
-  document.body.appendChild(qbtn);
+  // ── 划词工具条 ─────────────────────────────────────────────────────────
+  //
+  // 原来只监听 mouseup，而手机上的选词根本不产生 mouseup（长按选词走的是 touch 与
+  // selectionchange），所以这个功能在手机上「完全不可用」而不是偶发失灵。
+  // 现在两个入口都在：selectionchange 覆盖长按与拖选（两端都触发），mouseup 覆盖桌面鼠标，
+  // 并且用一次 250ms 的合流把两个入口的重复触发压成一次。
+  //
+  // 松手之后手机上通常紧跟着一次「点击」（取消选区）。工具条在 pointerdown 时自保：
+  // 它在选区之外，浏览器的默认行为会清掉选区、连带把工具条藏起来，于是按钮还没被点到就消失了。
+  // 在 pointerdown 上 preventDefault 才让那一次点击落在按钮上。
+  var qbar=document.createElement('div');
+  qbar.className='fns-quote-bar';
+  qbar.setAttribute('role','toolbar');
+  qbar.setAttribute('aria-label','划词操作');
+  qbar.innerHTML=
+    '<button type="button" data-q="copy"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M15 5H6a2 2 0 0 0-2 2v9"/></svg><span>复制</span></button>'+
+    '<button type="button" data-q="img"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9.5" r="1.5"/><path d="m4 17 5-5 4 4 3-2 4 4"/></svg><span>分享图片</span></button>';
+  document.body.appendChild(qbar);
 
   var pendingText='';
+  var lastSelRect=null;
+  var rafPending=0;
 
-  function clearQuote(){ qbtn.classList.remove('on'); pendingText=''; }
+  function clearQuote(){ qbar.classList.remove('on'); pendingText=''; }
 
-  document.addEventListener('mouseup', function(e){
-    setTimeout(function(){
-      var sel=window.getSelection();
-      if(!sel || sel.isCollapsed){ clearQuote(); return; }
-      var text=(sel.toString()||'').replace(/\s+/g,' ').trim();
-      if(!text){ clearQuote(); return; }
-      var body=document.querySelector('.post-body');
-      if(!body || !body.contains(sel.anchorNode)){ clearQuote(); return; }
+  function placeBar(rect){
+    lastSelRect=rect;
+    var bw=qbar.offsetWidth||160, bh=qbar.offsetHeight||44;
+    var left=Math.min(Math.max(8, rect.left+rect.width/2-bw/2), window.innerWidth-bw-8);
+    // Above the selection is the phone convention (iOS 的编辑菜单在选区上方)，space allowing.
+    // 选区上方是手机的惯例（iOS 的编辑菜单就在上方），空间够时优先。
+    var top=rect.top-bh-10;
+    if(top<8) top=rect.bottom+10;
+    if(top+bh>window.innerHeight-8) top=Math.max(8, window.innerHeight-bh-8);
+    qbar.style.left=left+'px';
+    qbar.style.top=top+'px';
+  }
 
-      // 超过上限时仍然给出按钮，但写明原因：让读者知道是"选多了"，
-      // 而不是以为这个功能坏了。
-      var tooLong=text.length>MAX_QUOTE;
-      pendingText=tooLong?'':text;
-      qbtn.disabled=tooLong;
-      qbtn.textContent=tooLong?('最多分享 '+MAX_QUOTE+' 字'):'分享这段';
-      qbtn.classList.add('on');
-      var rect=sel.getRangeAt(0).getBoundingClientRect();
-      var left=Math.min(Math.max(8, rect.left+rect.width/2-qbtn.offsetWidth/2), window.innerWidth-qbtn.offsetWidth-8);
-      var top=rect.bottom+10;
-      if(top+qbtn.offsetHeight>window.innerHeight-8) top=rect.top-qbtn.offsetHeight-10;
-      qbtn.style.left=left+'px'; qbtn.style.top=Math.max(8,top)+'px';
-    }, 0);
+  function evaluateSelection(){
+    var sel=window.getSelection();
+    if(!sel || sel.rangeCount===0 || sel.isCollapsed){ clearQuote(); return; }
+    var text=(sel.toString()||'').replace(/\s+/g,' ').trim();
+    if(!text){ clearQuote(); return; }
+    var body=document.querySelector('.post-body');
+    if(!body || !body.contains(sel.anchorNode)){ clearQuote(); return; }
+
+    // 工具条自己的按钮也在 DOM 里；点击它们会改选区，不该被当成一次新的选词。
+    // 工具条自己的按钮也在 DOM 里；点击它们会改选区，不该被当成一次新的选词。
+    if(qbar.contains(sel.anchorNode)){ return; }
+
+    // 超过上限时仍然显示工具条，但把「分享图片」标成不可用并写明原因：
+    // 让读者知道是「选多了」，而不是以为这个功能坏了。
+    var tooLong=text.length>MAX_QUOTE;
+    pendingText=text;
+    var imgBtn=qbar.querySelector('[data-q="img"]');
+    if(imgBtn){
+      imgBtn.disabled=tooLong;
+      imgBtn.title=tooLong?('摘录卡最多 '+MAX_QUOTE+' 字，当前 '+text.length+' 字'):'';
+      imgBtn.querySelector('span').textContent=tooLong?'太长':'分享图片';
+    }
+    var rect=sel.getRangeAt(0).getBoundingClientRect();
+    if(!rect || (!rect.width && !rect.height)){ clearQuote(); return; }
+    qbar.classList.add('on');
+    placeBar(rect);
+  }
+
+  function scheduleEvaluate(){
+    if(rafPending) return;
+    rafPending=setTimeout(function(){ rafPending=0; evaluateSelection(); }, 60);
+  }
+
+  // selectionchange 是主入口：拖选、双击、长按选词在两端都会触发它。
+  // selectionchange 是主入口：拖选、双击、长按选词在两端都会触发它。
+  document.addEventListener('selectionchange', scheduleEvaluate);
+
+  // mouseup 与 touchend 补一次：某些浏览器在一次手势结束时不再发 selectionchange，
+  // 选区却已经变了。两者都走同一段延迟合流，不会让工具条闪两次。
+  document.addEventListener('mouseup', scheduleEvaluate);
+  document.addEventListener('touchend', function(){
+    // 松手后浏览器还要几百毫秒才把选区定下来，尤其是长按选词。
+    // 松手后浏览器还要几百毫秒才把选区定下来，尤其是长按选词。
+    setTimeout(evaluateSelection, 120);
+  }, {passive:true});
+
+  // 点工具条上的按钮不能让选区先被清掉。
+  qbar.addEventListener('pointerdown', function(e){ e.preventDefault(); });
+  qbar.addEventListener('mousedown', function(e){ e.preventDefault(); });
+  qbar.addEventListener('touchstart', function(e){
+    // 只拦工具条自身，不拦里面的按钮——否则按钮收不到 click。
+    // 只拦工具条自身，不拦里面的按钮——否则按钮收不到 click。
+    if(e.target===qbar) e.preventDefault();
+  }, {passive:false});
+
+  // 点别处就收起。用 pointerdown 而不是 click：手机上「点一下取消选区」的第一次触摸
+  // 就应该收掉工具条，等 click 已经太晚。
+  document.addEventListener('pointerdown', function(e){
+    if(qbar.classList.contains('on') && !qbar.contains(e.target)) clearQuote();
   });
+  window.addEventListener('scroll', function(){ if(qbar.classList.contains('on')) clearQuote(); }, {passive:true});
 
-  qbtn.addEventListener('mousedown', function(e){ e.preventDefault(); });
-  qbtn.addEventListener('click', function(){
-    if(!pendingText) return;
+  qbar.addEventListener('click', function(e){
+    var btn=e.target && e.target.closest ? e.target.closest('[data-q]') : null;
+    if(!btn || btn.disabled) return;
+    var kind=btn.getAttribute('data-q');
     var text=pendingText;
+    if(!text) return;
+
+    if(kind==='copy'){
+      copyText(text, function(){ toast('已复制所选内容'); }, function(){ toast('复制失败，请手动复制'); });
+      clearQuote();
+      return;
+    }
+
     clearQuote();
     toast('正在生成…');
     loadImage(data.avatar).then(function(av){
       try{
         var canvas=drawQuote(text, av, theme());
-        save(canvas, '摘录.png');
+        present(canvas, '摘录');
       }catch(err){ toast('生成失败：'+err.message); }
     });
   });

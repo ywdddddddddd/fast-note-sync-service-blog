@@ -550,6 +550,27 @@ type BlogProfileLinkDTO struct {
 	Href  string `json:"href"`
 	Icon  string `json:"icon"` // octicon name the template maps to a path // 模板映射到 path 的图标名
 	Kind  string `json:"kind"` // link | mail | rss | qr // 行为类型
+
+	// Copy is the literal text a `mail` pill puts on the clipboard.
+	//
+	// It exists because the pill deliberately stopped being a mailto: link. A reader reported
+	// that clicking 邮箱 launched Outlook — an app they had not opened in months, still holding
+	// an unverified Gmail account — and the verification flow locked the browser. What a reader
+	// actually wants at that moment is the address itself, so the address is copied and they
+	// choose Gmail, 网易, or a client themselves.
+	//
+	// Copy is kept separate from Href rather than derived by stripping "mailto:" in the template:
+	// the template would then be parsing a URL, and the stripping rule would live in HTML.
+	//
+	// Copy 是 `mail` 药丸复制到剪贴板的字面文本。
+	//
+	// 它存在是因为这枚药丸刻意不再是一个 mailto: 链接。有读者反馈点「邮箱」会拉起 Outlook——
+	// 一个几个月没用、里面还绑着未验证 Gmail 的应用——而验证流程把浏览器卡死了。
+	// 读者那一刻真正想要的是地址本身，所以复制地址，由他自己选 Gmail、网易还是客户端。
+	//
+	// Copy 与 Href 分开存，而不是在模板里剥掉 "mailto:"：那样模板就在解析 URL，
+	// 而剥离规则会住进 HTML 里。
+	Copy string `json:"copy,omitempty"`
 }
 
 // BlogSectionRecDTO is one folder presented as a recommendation or as a sub-section card.

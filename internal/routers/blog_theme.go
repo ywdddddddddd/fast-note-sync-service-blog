@@ -3402,6 +3402,41 @@ a.hero-avatar:focus-visible{outline:2px solid var(--foreground);outline-offset:3
 .pill:hover{color:var(--foreground);background:color-mix(in srgb,var(--muted) 80%,var(--foreground));
   border-color:color-mix(in srgb,var(--border) 40%,var(--foreground))}
 .pill:active{transform:translateY(1px)}
+/* The 邮箱 pill: hover shows the address, click copies it.
+   The wrapper exists only to position the bubble — the pill keeps its own box, or the row would
+   reflow the moment one pill gained a parent element.
+   邮箱药丸：悬停显示地址，点击复制。
+   外壳只为定位气泡——药丸自己的盒子不变，否则某一枚多了父元素就会让整行重排。 */
+.pill-wrap{position:relative;display:inline-flex}
+.pill-tip{
+  position:absolute;left:50%;bottom:calc(100% + 8px);transform:translate(-50%,4px);
+  padding:.35rem .6rem;border-radius:8px;border:1px solid var(--border);
+  background:var(--card);color:var(--foreground);box-shadow:var(--shadow-md);
+  font-size:.75rem;line-height:1.3;font-variant-numeric:tabular-nums;
+  white-space:nowrap;pointer-events:none;opacity:0;
+  transition:opacity .16s ease,transform .16s ease;z-index:12;
+}
+/* The bubble always hangs upward. Hanging downward is only needed when the pill row sits near
+   the top of a short viewport — and that case is a phone, which has no hover to trigger it.
+   气泡固定朝上。需要朝下只在药丸行贴近矮视口顶部时——而那种情况是手机，手机没有悬停可触发。 */
+.pill-wrap:hover .pill-tip,.pill-wrap:focus-within .pill-tip{opacity:1;transform:translate(-50%,0)}
+.pill-wrap:hover .pill,.pill-wrap:focus-within .pill{
+  color:var(--foreground);background:color-mix(in srgb,var(--muted) 80%,var(--foreground));
+  border-color:color-mix(in srgb,var(--border) 40%,var(--foreground));
+}
+.pill.is-copied{border-color:var(--graph-accent,#4b7a43);color:var(--graph-accent,#4b7a43)}
+.pill:focus-visible{outline:2px solid var(--foreground);outline-offset:2px}
+.pill-toast{
+  position:fixed;left:50%;bottom:calc(5.4rem + env(safe-area-inset-bottom,0px));
+  transform:translate(-50%,6px);z-index:70;max-width:min(90vw,26rem);
+  padding:.5rem .85rem;border-radius:10px;border:1px solid var(--border);
+  background:color-mix(in srgb,var(--card) 92%,transparent);
+  -webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px);
+  box-shadow:var(--shadow-md);color:var(--foreground);
+  font-size:.8125rem;line-height:1.4;text-align:center;
+  opacity:0;transition:opacity .2s ease,transform .2s ease;pointer-events:none;
+}
+.pill-toast.is-on{opacity:1;transform:translate(-50%,0)}
 
 .sec-head{display:flex;align-items:baseline;justify-content:space-between;gap:1rem;margin-bottom:.9rem}
 .sec-label{margin:0;font-size:.8125rem;font-weight:600;letter-spacing:.08em;color:var(--muted-foreground);text-transform:uppercase}

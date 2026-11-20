@@ -35,12 +35,68 @@ func TestWarpScriptContract(t *testing.T) {
 		}
 	}
 
-	// ④ 减少动效时退化成普通跳转，且根本不建遮罩。
-	if !strings.Contains(js, "if (STILL) { location.href = url; return; }") {
-		t.Error("减少动效时没有退化成普通跳转")
+	// ④ 减少动效时不建遮罩，导航类链接原地跳转。
+	//
+	// 注意这里守的是「导航」而不是「全部」：正文内链接即使减少动效也仍然新标签打开，
+	// 因为那条规则（不覆盖读者正在读的页面）与动画偏好无关。
+	//
+	// Note the guard is about navigation, not everything: a body link still opens its own tab
+	// even under reduced motion, because that rule — do not replace the page being read — is
+	// separate from a preference about animation.
+	if !strings.Contains(js, "if (!newTab && STILL) { location.href = url; return; }") {
+		t.Error("减少动效时导航没有退化成普通跳转")
 	}
 	if !strings.Contains(js, "if (STILL) { return; }") {
 		t.Error("减少动效时仍然创建遮罩")
+	}
+
+	// ④b 正文内链接在播完后新标签打开，被拦截才退回同标签。
+	//
+	// 失败形态（改之前）：正文里的站内链接走 location.href，读者点一条引用就丢掉了正在读的
+	// 那篇文章，滚动位置与播放进度全部归零。
+	//
+	// The failure this forbids: a body link used to navigate in place, so a reader who followed
+	// one reference lost the article they were reading, along with its scroll position.
+	if !strings.Contains(js, "function isReadLink") {
+		t.Error("缺少正文链接判定：正文里的站内链接仍会覆盖当前页")
+	}
+	if !strings.Contains(js, "a.closest('.post-body')") {
+		t.Error("正文链接判定没有限定在 .post-body 内")
+	}
+	if !strings.Contains(js, "function openTab") {
+		t.Error("缺少新标签出口：播完后无法在新标签打开")
+	}
+	// openTab 只在 window.open 抛错时算失败 —— 返回值不可信。本站实测：内嵌浏览器开了新标签
+	// 却返回 null 且焦点不动，与真实 Chrome「null = 被拦截」无法区分。把 null 当失败会连源页
+	// 一起导航，读者既得一个标签又丢了文章。站主的规则「不要覆盖当前页」从这里推出：
+	// 读不到结果时按已打开处理。
+	//
+	// openTab counts only a thrown error as failure; the return value cannot be trusted. Measured
+	// on this site: an embedded browser opened the tab and returned null with no focus change,
+	// indistinguishable from Chrome's "null = blocked". Treating null as failure navigates the
+	// source page too. The owner's rule — never replace the page — follows from that: an unreadable
+	// result counts as opened.
+	if !strings.Contains(js, "catch (e) { return false; }") {
+		t.Error("openTab 没有把抛错与被拦截区分开：缺少唯一可信的失败信号")
+	}
+	if strings.Contains(js, "return null;") {
+		t.Error("openTab 仍返回 null 让调用方判断：实测无法与成功区分，会把源页一起导航")
+	}
+	if !strings.Contains(js, "function openThen") {
+		t.Error("缺少 openThen：截断的判定散落在三处调用点")
+	}
+	// 且不能把 'noopener' 写进特性串 —— 那样成功也返回 null。
+	//
+	// And 'noopener' must not go into the feature string: then success also returns null.
+	if strings.Contains(js, "'_blank', 'noopener'") {
+		t.Error("noopener 写进了 window.open 特性串：成功时也返回 null，拦截无法判断")
+	}
+	// 新标签路径必须收尾遮罩，否则读者回来时看到的是一张盖住的页面。
+	//
+	// The new-tab path must finish the overlay, or a returning reader finds the page still
+	// covered.
+	if !strings.Contains(js, "departing = false;\n          finish();") {
+		t.Error("新标签路径没有 finish()：遮罩会留在原处，后续点击被吞")
 	}
 
 	// ── 以下四条对应站主三次退回的具体失败 ──────────────────────────────

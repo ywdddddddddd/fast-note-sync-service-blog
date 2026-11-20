@@ -65,6 +65,19 @@ var blogAssetFuncs = template.FuncMap{
 	"inkjs": func() template.JS {
 		return template.JS(blogWarpJS())
 	},
+	// mailjs drives the 邮箱 pill: hover shows the address, click copies it.
+	//
+	// A template function for the same reason as themejs — it is needed by exactly one template
+	// today, but a second page that shows contact pills must not need a new view field to get it.
+	// It is separate from inkjs because it is page-specific: the article page has no pills.
+	//
+	// mailjs 驱动「邮箱」药丸：悬停显示地址，点击复制。
+	//
+	// 做成模板函数的原因与 themejs 相同——今天只有一个模板需要它，但以后第二个展示联系药丸的页面
+	// 不该为了它新增一个 view 字段。它与 inkjs 分开，因为它是页面专属的：文章页没有药丸。
+	"mailjs": func() template.JS {
+		return template.JS(blogMailPillJS())
+	},
 }
 
 // Blog templates. Everything is rendered on the server, so the pages work with JavaScript
@@ -1365,10 +1378,16 @@ var blogPageTmpl = template.Must(template.New("blog-page").Funcs(blogAssetFuncs)
           <div class="warp-flight-title" id="warp-flight-title"></div>
         </div>
         <script>
-        /* 点击友链卡片 → 播放「星际穿越」→ 白闪后同标签页跳转。
+        /* 点击友链卡片 → 播放「星际穿越」→ 飞行结束后在新标签打开对方站点。
            页面只负责遮罩、艺术字与加载器；动画本体在 /blog/assets/warp-flight.js。
            任何一步失败都直接跳转：过渡是锦上添花，不能成为去不了对方站点的原因。
-           reduced-motion 直接跳转，不下载 3.2 MB 的动画包。 */
+           reduced-motion 直接跳转，不下载 3.2 MB 的动画包。
+
+           为什么结束才开新标签：站主要的是「去别人家但别丢掉自己这一页」。窗口拦截器只认
+           用户激活后的几秒，而这段飞行是 5 秒——Chrome 的窗口正好 5 秒，Safari 更短，
+           所以被拦是常态而不是意外。被拦时退回同标签跳转：人是要求去那一页的，
+           停在原地比换标签更糟。onDone 回调让动画脚本把「结束」交回这里，
+           否则它自己去 location.href，这一页就会被覆盖。 */
         (function () {
           var still = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
           var overlay = document.getElementById('warp-flight');
@@ -1379,7 +1398,21 @@ var blogPageTmpl = template.Must(template.New("blog-page").Funcs(blogAssetFuncs)
 
           var loading = false, failed = false, current = null;
 
-          function go(url) { if (url) window.location.href = url; }
+          /* 开新标签：只有 window.open 抛错（被直接拒绝）才在这里导航。
+             返回值 null 不是被拦截的证据——Chrome 拦截时返回 null，内嵌 webview 成功开标签
+             也返回 null 且焦点不动，这一页实测过。站主的规则是「不要覆盖当前页」，
+             所以读不到结果时按已打开处理：文章不能被替换，读者可以再点一次。 */
+          function openTab(url) {
+            var w = null;
+            try { w = window.open(url, '_blank'); } catch (e) { return false; }
+            if (w) { try { w.opener = null; } catch (e) {} }
+            return true;
+          }
+
+          function go(url) {
+            if (!url) return;
+            if (openTab(url) === false) window.location.href = url;
+          }
 
           function lock(on) { document.body.classList.toggle('warp-flight-lock', !!on); }
 
@@ -1414,7 +1447,18 @@ var blogPageTmpl = template.Must(template.New("blog-page").Funcs(blogAssetFuncs)
             ensureFlight(function (ok) {
               if (!ok) { go(url); return; }
               try {
-                window.__WFLIGHT.start({ name: name, url: url, avatar: avatar });
+                /* onDone 交回本页面：动画脚本自己会在没有 onDone 时用 location.href 覆盖当前页，
+                   而这里要的是「这一页留着，对方站点去新标签」。回调里先复位遮罩状态再开窗，
+                   否则遮罩与 body 的锁会留在原地，回来时看到一张盖住的页面。 */
+                window.__WFLIGHT.start({
+                  name: name, url: url, avatar: avatar,
+                  onDone: function () {
+                    overlay.classList.remove('is-on');
+                    overlay.hidden = true;
+                    lock(false);
+                    go(url);
+                  }
+                });
               } catch (e) {
                 go(url);
               }

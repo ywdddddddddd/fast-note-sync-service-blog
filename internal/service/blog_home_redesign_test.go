@@ -210,6 +210,21 @@ avatar:
 	if p.Links[1].Kind != "mail" || !strings.HasPrefix(p.Links[1].Href, "mailto:") {
 		t.Errorf("mail pill = %+v, want kind=mail with mailto: prefix", p.Links[1])
 	}
+	// Copy carries the bare address, because the pill copies it rather than launching a client.
+	//
+	// Failure this forbids: an empty Copy leaves the button copying nothing while the toast still
+	// says 邮箱已复制 — the reader believes they have the address and does not.
+	//
+	// Copy 是裸地址，因为这枚药丸复制它而不是调起客户端。
+	//
+	// 这条挡住的失败：Copy 为空时按钮什么都不复制，提示条却仍说「邮箱已复制」——
+	// 读者以为自己拿到了地址，其实没有。
+	if p.Links[1].Copy != "ywddddddddddd@qq.com" {
+		t.Errorf("mail pill Copy = %q, want the bare address", p.Links[1].Copy)
+	}
+	if strings.Contains(p.Links[1].Copy, "mailto:") {
+		t.Errorf("mail pill Copy = %q, must not carry the mailto: prefix", p.Links[1].Copy)
+	}
 }
 
 // TestBlogProfilePills pins the pill order, which is a design decision rather than data order.

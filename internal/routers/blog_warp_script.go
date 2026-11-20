@@ -631,9 +631,54 @@ const blogWarpScript = `
   // 站主的时序：点击立刻播放 → 加载 → 播放完就进入新界面。
   var departing = false;
 
-  function depart(url) {
+  // openTab opens url in a new tab. true = opened, false = refused outright, null = unknown.
+  //
+  // The return value alone is not enough to decide. Chrome returns null for a blocked popup, but
+  // an embedded webview can open a tab and still return null — this page was measured in one and
+  // it did exactly that, with no focus change either. Treating null as "blocked" navigates the
+  // source page as well, so the reader gets a new tab AND loses the article, which is the very bug
+  // being fixed.
+  //
+  // The owner's rule decides the tie: "不要覆盖当前页". Between losing the article (certain, no
+  // undo) and leaving the page exactly as it was (the reader can click again), the page must not
+  // move. So an unreadable result is treated as opened.
+  //
+  // noopener must not go into the feature string: with it, Chrome and Safari return null even on
+  // success, destroying the one signal we have. It is set on the handle instead.
+  //
+  // openTab 在新标签打开 url。true = 已打开，false = 被直接拒绝，null = 不确定。
+  //
+  // 只看返回值不够。Chrome 拦截时返回 null，但内嵌 webview 开了标签也可能返回 null——
+  // 这一页就在这样的浏览器里实测过，而且焦点也不动。把 null 当成「被拦截」会连源页一起导航，
+  // 读者既得到一个新标签、又丢掉正在读的文章，而那正是要修的 bug。
+  //
+  // 站主的规则决定这个平局：「不要覆盖当前页」。在「丢掉文章（确定、不可撤销）」与
+  //「页面原封不动（读者可以再点一次）」之间，页面不能动。因此读不到结果时按已打开处理。
+  //
+  // noopener 不能写进特性串：带上它，Chrome 与 Safari 成功也返回 null，唯一可用的信号就没了。
+  // 改为设在句柄上。
+  function openTab(url) {
+    var w = null;
+    try { w = window.open(url, '_blank'); } catch (e) { return false; }
+    if (w) {
+      try { w.opener = null; } catch (e) {}
+    }
+    // null is not evidence of a blocked popup — see above.
+    // null 不是被拦截的证据——见上面。
+    return true;
+  }
+
+  // openThen is kept as the single entry point so all three call sites cannot drift apart on the
+  // return value's meaning.
+  //
+  // openThen 保留为唯一入口，使三个调用点不会各自理解错返回值的含义。
+  function openThen(url) {
+    if (openTab(url) === false) { location.href = url; }
+  }
+
+  function depart(url, newTab) {
     if (!url) { return; }
-    if (STILL) { location.href = url; return; }
+    if (!newTab && STILL) { location.href = url; return; }
     if (departing) { return; }
     departing = true;
 
@@ -662,6 +707,29 @@ const blogWarpScript = `
       if (left) { return; }
       left = true;
       setHint('READY');
+      if (newTab) {
+        // The pass has played; now the page goes in a tab of its own, leaving this one where it
+        // was. A blocked open falls back to navigating here — moving is the promise, a new tab
+        // is the preference.
+        //
+        // finish() is mandatory on this path: it is the only thing that lifts the overlay and
+        // clears departing. Without it the reader would be left looking at a finished transition
+        // covering the article they never left, and every later click would be swallowed by the
+        // guard in depart().
+        //
+        // 这一遍已经播完，现在让目标页去自己的标签，这一页留在原处。
+        // 被拦截时退回原地导航——「去那一页」是承诺，「新标签」是偏好。
+        //
+        // 这条路径上必须调用 finish()：它是唯一会撤掉遮罩、清掉 departing 的地方。
+        // 否则读者会盯着一张播完的过渡遮着那篇他根本没离开的文章，而之后的每一次点击
+        // 都会被 depart() 里的守卫吞掉。
+        setTimeout(function () {
+          if (openTab(url) === false) { location.href = url; return; }
+          departing = false;
+          finish();
+        }, 120);
+        return;
+      }
       try { sessionStorage.setItem(KEY_QUIET, '1'); } catch (e) {}
       setTimeout(function () { location.href = url; }, 180);
     }
@@ -675,17 +743,50 @@ const blogWarpScript = `
     requestAnimationFrame(watch);
   }
 
-  window.fnsWarp = function (url) { depart(url); };
+  // The second argument means "leave this page where it is". Only the article body and the
+  // friends page pass it; the dock and the back pill still navigate in place, because those are
+  // moves within the site rather than openings of something read.
+  //
+  // 第二个参数的意思是「把这一页留在原处」。只有正文和友链页会传它；胶囊与返回药丸仍然原地
+  // 导航，因为那是站内移动，而不是打开一份要读的东西。
+  window.fnsWarp = function (url, newTab) { depart(url, newTab === true); };
 
   // ── Click delegation ─────────────────────────────────────────────────────────────────
   var SKIP = /^(?:mailto:|tel:|javascript:|data:|blob:)/i;
+
+  // isReadLink answers whether a link is part of what the reader is reading rather than part of
+  // the site's own navigation.
+  //
+  // The distinction is the owner's rule: a link inside an article opens in a new tab, so the
+  // article stays where it was; the top bar, the back pill and the dock keep navigating in place,
+  // because moving between pages of the site is what those controls are for. Without the split,
+  // "every link opens a tab" turns ordinary browsing into twenty tabs.
+  //
+  // isReadLink 判断一条链接属于「读者正在读的内容」还是「站点自己的导航」。
+  //
+  // 这个区分就是站主的规则：文章里的链接在新标签打开，文章留在原处；顶栏、返回药丸与胶囊
+  // 仍然原地导航，因为在站内换页正是那些控件的用途。不作区分的话，
+  //「所有链接都开新标签」会把普通浏览变成二十个标签页。
+  function isReadLink(a) {
+    return !!(a.closest && a.closest('.post-body'));
+  }
 
   document.addEventListener('click', function (ev) {
     if (ev.defaultPrevented || ev.button !== 0 || ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.altKey) { return; }
     var a = ev.target && ev.target.closest ? ev.target.closest('a[href]') : null;
     if (!a) { return; }
     if (a.hasAttribute('download')) { return; }
-    if (a.target && a.target !== '_self') { return; }
+
+    // A link that already asks for its own tab is the server's decision (every off-site link is
+    // rendered with target="_blank"): let the browser do it, with no overlay in front. The one
+    // exception is a body link that IS the same origin — those are the notes the reader is
+    // jumping between, and the pass is still wanted for them.
+    //
+    // 已经自带 target 的链接是服务端的决定（每个站外链接都渲染了 target="_blank"）：
+    // 交给浏览器处理，前面不放遮罩。唯一的例外是同源正文链接——那是读者在笔记之间跳转，
+    // 它们仍然要那一段动画。
+    var wantsNewTab = !!(a.target && a.target !== '_self');
+    if (wantsNewTab) { return; }
 
     var href = a.getAttribute('href') || '';
     if (!href || href.charAt(0) === '#') { return; }
@@ -701,10 +802,22 @@ const blogWarpScript = `
     var last = target.pathname.split('/').pop() || '';
     if (/\.(?:xml|json|js|css|png|jpe?g|webp|gif|svg|ico|pdf|zip|txt|md|woff2?)$/i.test(last)) { return; }
 
-    if (STILL) { return; }
+    var read = isReadLink(a);
+
+    // Reduced motion: no pass, but a body link still opens a tab of its own. The preference is
+    // about the animation; the owner's rule about not replacing the page is separate from it.
+    //
+    // 减少动效：不播这一遍，但正文链接仍然自己开一个标签。那条偏好针对动画，
+    // 而「不覆盖当前页面」是另一条规则。
+    if (STILL) {
+      ev.preventDefault();
+      if (read) { openThen(target.href); return; }
+      location.href = target.href;
+      return;
+    }
 
     ev.preventDefault();
-    window.fnsWarp(target.href);
+    window.fnsWarp(target.href, read);
   });
 
   // ── Arrival and back/forward ─────────────────────────────────────────────────────────

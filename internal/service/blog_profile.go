@@ -121,14 +121,23 @@ func parseBlogProfile(content string) *dto.BlogProfileDTO {
 			label := stripProfileMarkup(strings.TrimSpace(line[1]))
 			href := strings.TrimSpace(line[2])
 			kind := blogProfileLinkKind(label, href)
-			if kind == "mail" && !strings.HasPrefix(href, "mailto:") {
-				href = "mailto:" + href
+			// A contact line typed as a bare address gets the mailto: prefix it needs to be a
+			// well-formed link, and the bare form kept alongside for the copy button.
+			//
+			// 写成裸地址的联系人行补上成为合法链接所需的 mailto: 前缀，同时留一份裸形式给复制按钮。
+			copyText := ""
+			if kind == "mail" {
+				copyText = strings.TrimPrefix(href, "mailto:")
+				if !strings.HasPrefix(href, "mailto:") {
+					href = "mailto:" + href
+				}
 			}
 			p.Links = append(p.Links, dto.BlogProfileLinkDTO{
 				Label: label,
 				Href:  href,
 				Icon:  blogProfileLinkIcon(label, href),
 				Kind:  kind,
+				Copy:  copyText,
 			})
 		}
 		// The QR image is recorded but not resolved to a URL here: turning a wiki embed into the

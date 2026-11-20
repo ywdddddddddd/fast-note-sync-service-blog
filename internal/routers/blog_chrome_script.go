@@ -354,3 +354,91 @@ func blogTintJS() string {
   }
 })();`
 }
+
+// blogMailPillJS drives the 邮箱 pill on the card page.
+//
+// Why the pill is not a mailto: link any more. A reader wrote in: clicking 邮箱 launched Outlook,
+// an app they had not used in months and whose linked Gmail still needed re-verification. They
+// tried to finish the verification, the 继续 button in the browser would not respond, the browser
+// froze, and they closed the site and Outlook and left. The address itself was what they wanted —
+// they would have written the mail in Gmail in a tab they already had open.
+//
+// So the pill now does two things, neither of which launches anything: hover reveals the address,
+// click copies it. A reader who does want a mail client has the address on screen and can hand it
+// to whatever they prefer; a reader who lives in a browser tab is done in one click.
+//
+// The hover half is desktop-only by nature (a phone has no hover), which is why the click half is
+// the primary action and not a secondary one: on touch, the tap is the whole interaction.
+//
+// blogMailPillJS 驱动名片页的「邮箱」药丸。
+//
+// 为什么这枚药丸不再是一个 mailto: 链接。有读者写信反馈：点「邮箱」拉起的是 Outlook——
+// 一个几个月没用、里面绑定的 Gmail 仍需重新验证的应用。他试着完成验证，浏览器里的「继续」
+// 按钮没有反应，浏览器卡死，于是他关掉网站和 Outlook 走了。他真正想要的是地址本身——
+// 他会用已经开着的 Gmail 标签页写那封信。
+//
+// 因此这枚药丸现在做两件事，都不启动任何程序：悬停显示地址，点击复制。想用邮件客户端的读者
+// 地址就在屏幕上，交给任何客户端都可以；在浏览器里写邮件的读者一次点击就结束了。
+//
+// 悬停这一半天然只属于桌面（手机没有悬停），所以点击才是主操作而不是补充：在触摸设备上，
+// 那一次点按就是全部交互。
+func blogMailPillJS() string {
+	return `(function () {
+  var pills = document.querySelectorAll('[data-copy-pill]');
+  if (!pills.length) { return; }
+
+  var toastEl = null, toastTimer = 0;
+  function toast(msg) {
+    if (!toastEl) {
+      toastEl = document.createElement('div');
+      toastEl.className = 'pill-toast';
+      toastEl.setAttribute('role', 'status');
+      document.body.appendChild(toastEl);
+    }
+    toastEl.textContent = msg;
+    toastEl.classList.add('is-on');
+    if (toastTimer) { clearTimeout(toastTimer); }
+    toastTimer = setTimeout(function () { toastEl.classList.remove('is-on'); }, 1900);
+  }
+
+  // copyText never throws: the async clipboard API is unavailable outside a secure context and
+  // refuses without a user gesture, so the textarea route is not a legacy fallback — it is the
+  // path that works on the plain-http case other people's servers still run.
+  //
+  // copyText 从不抛错：异步剪贴板 API 在非安全上下文里不存在、在没有用户手势时会拒绝，
+  // 所以 textarea 那条路不是历史包袱——在别人的服务器仍然跑着的纯 http 上，它能用。
+  function copyText(text, done) {
+    function fallback() {
+      var ta = document.createElement('textarea');
+      ta.value = text;
+      ta.setAttribute('readonly', '');
+      ta.style.cssText = 'position:fixed;top:0;left:-9999px;opacity:0';
+      document.body.appendChild(ta);
+      ta.select();
+      ta.setSelectionRange(0, text.length);
+      var ok = false;
+      try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+      ta.remove();
+      done(ok);
+    }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(function () { done(true); }, fallback);
+      return;
+    }
+    fallback();
+  }
+
+  Array.prototype.forEach.call(pills, function (wrap) {
+    var btn = wrap.querySelector('[data-copy]');
+    if (!btn) { return; }
+    var addr = btn.getAttribute('data-copy') || '';
+    if (!addr) { return; }
+    btn.addEventListener('click', function () {
+      copyText(addr, function (ok) {
+        toast(ok ? ('邮箱已复制　' + addr) : ('复制失败，请手动选择：' + addr));
+        if (ok) { btn.classList.add('is-copied'); setTimeout(function () { btn.classList.remove('is-copied'); }, 1200); }
+      });
+    });
+  });
+})();`
+}
