@@ -493,7 +493,15 @@ func blogShareJS() string {
     // 选区上方是手机的惯例（iOS 的编辑菜单就在上方），空间够时优先。
     var top=rect.top-bh-10;
     if(top<8) top=rect.bottom+10;
-    if(top+bh>window.innerHeight-8) top=Math.max(8, window.innerHeight-bh-8);
+    // Both candidates can be off-screen when the selection itself is outside the viewport — a
+    // selection made before a viewport change, or one kept alive while the page scrolled. Without
+    // this clamp the bar lands at a negative top (measured: -1282px on a phone-sized viewport) and
+    // is simply invisible, which looks exactly like the feature being broken again.
+    //
+    // 当选区本身在视口外时，两个候选位置都会落到屏幕外——例如视口改变之前做的选区，
+    // 或者页面滚动后仍然保留的选区。没有这个钳制，工具条会落在负的 top（实测手机尺寸下
+    // −1282px），完全看不见，看起来就是「功能又坏了」。
+    top=Math.min(Math.max(8, top), Math.max(8, window.innerHeight-bh-8));
     qbar.style.left=left+'px';
     qbar.style.top=top+'px';
   }
