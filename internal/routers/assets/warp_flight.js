@@ -4793,10 +4793,34 @@ function tick(now){
 }
 
 function start(o){
-  if(RUNNING)return;
+  // Every call starts a fresh flight. The module's state is a singleton, and it used to be
+  // reset only as a side effect of the document being replaced: finish() navigated away with
+  // location.href, so a second flight could never happen in the same document. Once the friends
+  // page began opening the target in a new tab, the source document survived — and the second
+  // click found RUNNING=1, returned at the guard, and left a black overlay with the destination
+  // title on it and no frames ever drawn. That was the reported bug.
+  //
+  // 每次调用都是一趟新的飞行。模块状态是单例，而它过去只靠「文档被替换」来复位：
+  // finish() 用 location.href 离开，同一文档里根本不可能有第二趟。友链改成在新标签打开后，
+  // 源文档留下来了——第二次点击看到 RUNNING=1，在守卫处直接返回，于是留下一张黑色遮罩、
+  // 写着目的地标题，却一帧都没画。这就是站主报的黑屏。
   RUNNING=1;
   OPTS=o||{};
-  if(SKIPPED){finish();return}
+  SKIPPED=0;
+  DONE=0;
+  if(DONE_TIMER){window.clearTimeout(DONE_TIMER);DONE_TIMER=0}
+  T0=0;
+  LAST=0;
+  FRAME=0;
+  // The avatar mix is a per-flight animation, not accumulated state: keeping the previous value
+  // would make the second flight start with the old avatar already fully faded in, or with a
+  // stale texture from the site the reader visited last.
+  //
+  // 头像混合是每趟飞行自己的动画，不是累积状态：保留上一趟的值会让第二趟一开始就已经把
+  // 旧头像完全显出来，或者带着上一次那个站点的过期贴图。
+  AVATAR_MIX=0;
+  AVATAR_TARGET=0;
+  AVATAR_TEX=null;
   // The page may leave a scaling transform on .shell; a fixed descendant would anchor to it
   // instead of the viewport. Move the overlay to body before measuring anything.
   // 页面可能把缩放 transform 留在 .shell 上；fixed 后代因此会锚到它而不是视口。
@@ -4806,6 +4830,24 @@ function start(o){
   var w=world();
   if(!w){finish();return}
   loadAvatar(OPTS.avatar);
+  // init() builds the whole scene and the post chain, and it appends to this.scene — running it
+  // twice in one document would stack a second planet, a second star field and a second post
+  // pass on top of the first. Since the source page now survives a flight, "second flight" is a
+  // real case, so the build happens exactly once and later flights reuse it.
+  //
+  // init() 会建整个场景与后处理链，并且是往 this.scene 里追加——同一文档里跑两次会叠出
+  // 第二个星球、第二片星场和第二条后处理。源页现在会在飞行之后留下来，所以「第二趟」
+  // 是真会发生的情况：构建只做一次，之后复用。
+  if(w.inited){
+    try{
+      resize();
+      applyAvatar();
+      T0=0;
+      LAST=0;
+      window.requestAnimationFrame(tick);
+    }catch(e){finish()}
+    return;
+  }
   w.init().then(function(){
     try{
       resize();

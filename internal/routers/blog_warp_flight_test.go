@@ -92,6 +92,68 @@ func TestWarpFlightAssetShape(t *testing.T) {
 	}
 }
 
+// TestWarpFlightReplayable guards the "second flight is a black screen" bug.
+//
+// The bundle keeps one module-level flight state (RUNNING/DONE/SKIPPED/T0/LAST/...). It used to be
+// reset only by leaving the document, because finish() navigated away with location.href — so a
+// second flight in the same document was impossible by construction. When the friends page began
+// opening its target in a new tab, the source document survived, and a second click hit
+// "if (RUNNING) return" with the overlay already shown: black screen, destination title, no frames.
+//
+// Two things have to hold for a replay to work, and this test pins both: start() resets the
+// per-flight state instead of returning early, and the scene is built only once (a second init()
+// would stack another planet, star field and post pass into the same scene).
+//
+// TestWarpFlightReplayable 守住「第二趟飞行黑屏」这个缺陷。
+//
+// 包体里只有一份模块级飞行状态（RUNNING/DONE/SKIPPED/T0/LAST/…）。它过去只靠离开文档来复位，
+// 因为 finish() 用 location.href 导航走——所以在同一文档里根本不可能有第二趟。友链改在新标签
+// 打开后，源文档留了下来，第二次点击撞上 "if (RUNNING) return"，而遮罩已经显示：
+// 黑屏、目的地标题、一帧都没有。
+//
+// 要能重播必须成立两件事，这条测试把它们都钉住：start() 复位每趟状态而不是直接返回；
+// 场景只构建一次（第二次 init() 会往同一场景里再叠一个星球、星场与后处理）。
+func TestWarpFlightReplayable(t *testing.T) {
+	s := string(blogWarpFlightJS)
+
+	// ① 守卫必须消失：不能因为上一趟还在 RUNNING 就静默返回。
+	if strings.Contains(s, "if(RUNNING)return") {
+		t.Error("start() 仍在 RUNNING 上直接返回：第二趟会留下一张画不出帧的黑色遮罩")
+	}
+
+	// ② 每趟状态必须被显式复位。
+	startAt := strings.Index(s, "function start(o){")
+	if startAt < 0 {
+		t.Fatal("找不到 start()")
+	}
+	rest := s[startAt:]
+	endAt := strings.Index(rest, "window.__WFLIGHT=")
+	if endAt < 0 {
+		t.Fatal("找不到 start() 的结尾")
+	}
+	body := rest[:endAt]
+	for _, reset := range []string{
+		"RUNNING=1;",
+		"SKIPPED=0;",
+		"DONE=0;",
+		"T0=0;",
+		"LAST=0;",
+		"FRAME=0;",
+		"AVATAR_MIX=0;",
+		"AVATAR_TARGET=0;",
+		"AVATAR_TEX=null;",
+	} {
+		if !strings.Contains(body, reset) {
+			t.Errorf("start() 没有复位 %q：第二趟会带着上一趟的状态开始", reset)
+		}
+	}
+
+	// ③ 场景只构建一次。
+	if !strings.Contains(body, "if(w.inited){") {
+		t.Error("start() 没有复用已构建的场景：第二趟会往同一 scene 里叠一份星球与后处理")
+	}
+}
+
 // Unlike ask/react there is no local baseline script, so the bucket applies to every address —
 // which is also what lets the operator reproduce the 429 with three curls.
 //

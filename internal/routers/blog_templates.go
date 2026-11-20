@@ -1396,7 +1396,7 @@ var blogPageTmpl = template.Must(template.New("blog-page").Funcs(blogAssetFuncs)
           var cards = document.querySelectorAll('.friend-card');
           if (!overlay || !stage || !title || !cards.length) return;
 
-          var loading = false, failed = false, current = null;
+          var loading = false, failed = false, current = null, flying = false;
 
           /* 开新标签：只有 window.open 抛错（被直接拒绝）才在这里导航。
              返回值 null 不是被拦截的证据——Chrome 拦截时返回 null，内嵌 webview 成功开标签
@@ -1432,10 +1432,18 @@ var blogPageTmpl = template.Must(template.New("blog-page").Funcs(blogAssetFuncs)
           function fly(card) {
             var url = card.getAttribute('href') || '';
             if (!url) return;
+            // A flight already in progress: the overlay covers the page, so a second click can
+            // only be a stray tap on the animation. Ignoring it is what the reader expects —
+            // and it is also what keeps two flights from sharing one canvas.
+            //
+            // 已经在飞行中：遮罩盖着页面，第二次点击只可能是误触。忽略它正是读者的预期，
+            // 也是防止两趟飞行共用一块画布的那道门。
+            if (flying) return;
             var name = card.getAttribute('data-name') || '';
             var avatar = card.getAttribute('data-avatar') || '';
             if (still) { go(url); return; }
             current = url;
+            flying = true;
             /* .shell 上可能残留「穿越抵达」的缩放 transform。带 transform 的祖先会让
                position:fixed 锚到祖先而不是视口，遮罩会缩成文章列宽、艺术字被裁掉。
                先挂到 body，再取消 hidden / 开始测量，遮罩才是整屏。 */
@@ -1445,21 +1453,26 @@ var blogPageTmpl = template.Must(template.New("blog-page").Funcs(blogAssetFuncs)
             overlay.classList.add('is-on');
             lock(true);
             ensureFlight(function (ok) {
-              if (!ok) { go(url); return; }
+              if (!ok) { flying = false; go(url); return; }
               try {
                 /* onDone 交回本页面：动画脚本自己会在没有 onDone 时用 location.href 覆盖当前页，
                    而这里要的是「这一页留着，对方站点去新标签」。回调里先复位遮罩状态再开窗，
-                   否则遮罩与 body 的锁会留在原地，回来时看到一张盖住的页面。 */
+                   否则遮罩与 body 的锁会留在原地，回来时看到一张盖住的页面。
+
+                   flying 也必须在这里复位：源页现在会留下来，不复位的话第二次点击会被
+                   上面那道守卫永久吞掉——那会把「能播一次」变成「只能播一次」。 */
                 window.__WFLIGHT.start({
                   name: name, url: url, avatar: avatar,
                   onDone: function () {
                     overlay.classList.remove('is-on');
                     overlay.hidden = true;
                     lock(false);
+                    flying = false;
                     go(url);
                   }
                 });
               } catch (e) {
+                flying = false;
                 go(url);
               }
             });
